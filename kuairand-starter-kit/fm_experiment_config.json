@@ -1,0 +1,11 @@
+{
+  "experiment_name": "fm_validation_baseline",
+  "seed": 0,
+  "embedding_dim": 16,
+  "learning_rate": 0.001,
+  "l2": 0.000001,
+  "batch_size": 8192,
+  "max_epochs": 40,
+  "early_stopping_patience": 4,
+  "min_delta": 0.00001
+}

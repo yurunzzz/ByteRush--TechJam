@@ -61,10 +61,16 @@ def edit_bfts_config_file(config_path: str, idea_dir: str, idea_path: str) -> st
     config["desc_file"] = idea_path
     config["workspace_dir"] = idea_dir
 
-    # make an empty data directory
-    data_dir = osp.join(idea_dir, "data")
-    os.makedirs(data_dir, exist_ok=True)
-    config["data_dir"] = data_dir
+    # Preserve an explicitly configured task directory. The original code
+    # always replaced it with an empty directory, which prevents repository-
+    # backed tasks such as KuaiRand from reaching their trusted harness.
+    configured_data_dir = config.get("data_dir")
+    if configured_data_dir:
+        config["data_dir"] = osp.abspath(configured_data_dir)
+    else:
+        data_dir = osp.join(idea_dir, "data")
+        os.makedirs(data_dir, exist_ok=True)
+        config["data_dir"] = data_dir
 
     # make an empty log directory
     log_dir = osp.join(idea_dir, "logs")

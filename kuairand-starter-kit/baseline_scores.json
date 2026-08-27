@@ -1,0 +1,98 @@
+{
+  "dataset": "KuaiRand-Pure",
+  "label": "long_view",
+  "task": "within-user ranking over logged impressions",
+  "split": {
+    "train": "20220408-20220421",
+    "valid": "20220422-20220428",
+    "test": "20220429-20220508"
+  },
+  "metrics": [
+    "GAUC",
+    "nDCG@5"
+  ],
+  "primary": "mean(GAUC, nDCG@5)",
+  "convergence_rule": {
+    "epsilon": 0.002,
+    "N": 3
+  },
+  "scores": {
+    "random": {
+      "valid": {
+        "GAUC": 0.4993,
+        "nDCG@5": 0.4675,
+        "primary": 0.4834
+      },
+      "test": {
+        "GAUC": 0.4996,
+        "nDCG@5": 0.4511,
+        "primary": 0.4753
+      },
+      "note": "mean over seeds 0-4; sanity check only"
+    },
+    "item_popularity": {
+      "valid": {
+        "GAUC": 0.6387,
+        "nDCG@5": 0.5227,
+        "primary": 0.5807
+      },
+      "test": {
+        "GAUC": 0.6308,
+        "nDCG@5": 0.5121,
+        "primary": 0.5715
+      }
+    },
+    "fm_official": {
+      "valid": {
+        "GAUC": 0.6674,
+        "nDCG@5": 0.5357,
+        "primary": 0.6016
+      },
+      "test": {
+        "GAUC": 0.661,
+        "nDCG@5": 0.5282,
+        "primary": 0.5946
+      },
+      "std_over_5_seeds": {
+        "test_GAUC": 0.0008,
+        "test_nDCG@5": 0.0008,
+        "test_primary": 0.0008
+      },
+      "config": {
+        "model": "FM",
+        "k": 16,
+        "lr": 0.001,
+        "batch": 8192,
+        "max_epochs": 40,
+        "patience": 4,
+        "fields": [
+          "user_id",
+          "video_id",
+          "author_id",
+          "tab",
+          "dur_bucket"
+        ]
+      }
+    },
+    "oracle_ceiling": {
+      "valid": {
+        "GAUC": 1.0,
+        "nDCG@5": 0.6968,
+        "primary": 0.8484
+      },
+      "test": {
+        "GAUC": 1.0,
+        "nDCG@5": 0.7289,
+        "primary": 0.8645
+      },
+      "note": "用真实标签当预测分得到的理论上限。nDCG 上限 < 1.0，因为 27.1% 的 test 用户全负(nDCG 恒=0，任何模型都救不了)。评估进展请以此为分母。"
+    }
+  },
+  "test_set_composition": {
+    "users": 23875,
+    "all_negative_pct": 27.1,
+    "all_positive_pct": 9.2,
+    "discriminative_pct": 63.7,
+    "note": "全负与全正用户(合计 36.3%)的 nDCG 与模型无关；GAUC 只统计有区分度的 63.7%。"
+  }
+}

@@ -32,6 +32,9 @@ AVAILABLE_LLMS = [
     "o3-mini-2025-01-31",
     # DeepSeek Models
     "deepseek-coder-v2-0724",
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "deepseek-v4-flash-vision-exp",
     "deepcoder-14b",
     # Llama 3 models
     "llama3.1-405b",
@@ -71,6 +74,16 @@ AVAILABLE_LLMS = [
     "ollama/deepseek-r1:70b",
     "ollama/deepseek-r1:671b",
 ]
+
+
+def _is_deepseek_model(model: str) -> bool:
+    return model.startswith("deepseek-")
+
+
+def _api_model_name(model: str) -> str:
+    if model == "deepseek-coder-v2-0724":
+        return os.getenv("DEEPSEEK_LEGACY_MODEL", "deepseek-v4-pro")
+    return model
 
 
 # Get N responses from a single message, used for ensembling.
@@ -115,37 +128,23 @@ def get_batch_responses_from_llm(
         new_msg_history = [
             new_msg_history + [{"role": "assistant", "content": c}] for c in content
         ]
-    elif "gpt" in model:
+    elif "gpt" in model or _is_deepseek_model(model):
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_message},
-                *new_msg_history,
-            ],
-            temperature=temperature,
-            max_tokens=MAX_NUM_TOKENS,
-            n=n_responses,
-            stop=None,
-            seed=0,
-        )
-        content = [r.message.content for r in response.choices]
-        new_msg_history = [
-            new_msg_history + [{"role": "assistant", "content": c}] for c in content
-        ]
-    elif model == "deepseek-coder-v2-0724":
-        new_msg_history = msg_history + [{"role": "user", "content": msg}]
-        response = client.chat.completions.create(
-            model="deepseek-coder",
-            messages=[
-                {"role": "system", "content": system_message},
-                *new_msg_history,
-            ],
-            temperature=temperature,
-            max_tokens=MAX_NUM_TOKENS,
-            n=n_responses,
-            stop=None,
-        )
+        request_kwargs = {
+            "model": _api_model_name(model),
+            "messages": [{"role": "system", "content": system_message}, *new_msg_history],
+            "temperature": temperature,
+            "max_tokens": MAX_NUM_TOKENS,
+            "n": n_responses,
+            "stop": None,
+        }
+        if not _is_deepseek_model(model):
+            request_kwargs["seed"] = 0
+        else:
+            request_kwargs["extra_body"] = {
+                "thinking": {"type": os.getenv("DEEPSEEK_THINKING", "disabled")}
+            }
+        response = client.chat.completions.create(**request_kwargs)
         content = [r.message.content for r in response.choices]
         new_msg_history = [
             new_msg_history + [{"role": "assistant", "content": c}] for c in content
@@ -226,19 +225,22 @@ def make_llm_call(client, model, temperature, system_message, prompt):
             n=1,
             stop=None,
         )
-    elif "gpt" in model:
-        return client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_message},
-                *prompt,
-            ],
-            temperature=temperature,
-            max_tokens=MAX_NUM_TOKENS,
-            n=1,
-            stop=None,
-            seed=0,
-        )
+    elif "gpt" in model or _is_deepseek_model(model):
+        request_kwargs = {
+            "model": _api_model_name(model),
+            "messages": [{"role": "system", "content": system_message}, *prompt],
+            "temperature": temperature,
+            "max_tokens": MAX_NUM_TOKENS,
+            "n": 1,
+            "stop": None,
+        }
+        if not _is_deepseek_model(model):
+            request_kwargs["seed"] = 0
+        else:
+            request_kwargs["extra_body"] = {
+                "thinking": {"type": os.getenv("DEEPSEEK_THINKING", "disabled")}
+            }
+        return client.chat.completions.create(**request_kwargs)
     elif "o1" in model or "o3" in model:
         return client.chat.completions.create(
             model=model,
@@ -324,7 +326,7 @@ def get_response_from_llm(
         )
         content = response.choices[0].message.content
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
-    elif "gpt" in model:
+    elif "gpt" in model or _is_deepseek_model(model):
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
         response = make_llm_call(
             client,
@@ -343,21 +345,6 @@ def get_response_from_llm(
             temperature,
             system_message=system_message,
             prompt=new_msg_history,
-        )
-        content = response.choices[0].message.content
-        new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
-    elif model == "deepseek-coder-v2-0724":
-        new_msg_history = msg_history + [{"role": "user", "content": msg}]
-        response = client.chat.completions.create(
-            model="deepseek-coder",
-            messages=[
-                {"role": "system", "content": system_message},
-                *new_msg_history,
-            ],
-            temperature=temperature,
-            max_tokens=MAX_NUM_TOKENS,
-            n=1,
-            stop=None,
         )
         content = response.choices[0].message.content
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
@@ -497,18 +484,26 @@ def create_client(model) -> tuple[Any, str]:
         ), model
     elif "gpt" in model:
         print(f"Using OpenAI API with model {model}.")
-        return openai.OpenAI(), model
+        kwargs = {"api_key": os.environ["OPENAI_API_KEY"]}
+        if os.getenv("OPENAI_BASE_URL"):
+            kwargs["base_url"] = os.environ["OPENAI_BASE_URL"]
+        return openai.OpenAI(**kwargs), model
     elif "o1" in model or "o3" in model:
         print(f"Using OpenAI API with model {model}.")
-        return openai.OpenAI(), model
-    elif model == "deepseek-coder-v2-0724":
-        print(f"Using OpenAI API with {model}.")
+        kwargs = {"api_key": os.environ["OPENAI_API_KEY"]}
+        if os.getenv("OPENAI_BASE_URL"):
+            kwargs["base_url"] = os.environ["OPENAI_BASE_URL"]
+        return openai.OpenAI(**kwargs), model
+    elif _is_deepseek_model(model):
+        print(f"Using DeepSeek API with model {_api_model_name(model)}.")
+        if "DEEPSEEK_API_KEY" not in os.environ:
+            raise ValueError("DEEPSEEK_API_KEY environment variable not set")
         return (
             openai.OpenAI(
                 api_key=os.environ["DEEPSEEK_API_KEY"],
-                base_url="https://api.deepseek.com",
+                base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
             ),
-            model,
+            _api_model_name(model),
         )
     elif model == "deepcoder-14b":
         print(f"Using HuggingFace API with {model}.")

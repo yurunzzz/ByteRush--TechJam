@@ -296,6 +296,24 @@ class MinimalAgent:
 
     @property
     def _prompt_impl_guideline(self):
+        task_text = str(self.task_desc)
+        if "KuaiRand" in task_text and "nDCG@5" in task_text:
+            return {
+                "Implementation guideline": [
+                    "Use only the fixed KuaiRand-Pure data exposed under ./input.",
+                    "Do not download, join, synthesize, or train on any external dataset.",
+                    "The target is long_view. Optimize validation primary=(GAUC+nDCG@5)/2; higher is better.",
+                    "Never evaluate test labels or print/store test metrics during research.",
+                    "Do not modify input/data.py, input/evaluate.py, the chronological split, row order, or submission schema.",
+                    "Start from input/run_fm_experiment.py and its JSON configuration contract.",
+                    "Stage 2 may tune only allowed FM hyperparameters; Stage 3 may make controlled model changes while preserving this evaluation contract.",
+                    "Every runnable solution must print an AI_SCIENTIST_RESULT JSON object and save validation-only experiment_data.npy under ./working.",
+                    "The experiment_data.npy metric used for node selection must be validation primary and must mark higher values as better.",
+                    "Reject predictions with wrong length, NaN, or infinity, and save the validation-best checkpoint.",
+                    "Write a single self-contained Python program that executes immediately and completes within the configured timeout.",
+                    "Your response must contain a concise plan followed by exactly one complete Python code block.",
+                ]
+            }
         impl_guideline = [
             "CRITICAL GPU REQUIREMENTS - Your code MUST include ALL of these:",
             "  - At the start of your code, add these lines to handle GPU/CPU:",
@@ -1193,6 +1211,14 @@ class ParallelAgent:
 
     def _define_global_metrics(self) -> str:
         """Define eval metric to be used across all experiments"""
+        task_text = str(self.task_desc)
+        if "KuaiRand" in task_text and "nDCG@5" in task_text:
+            metric = (
+                "name: validation primary; maximize: true; description: the "
+                "organizer metric (validation GAUC + validation nDCG@5) / 2"
+            )
+            print(f"[green]Using fixed competition metric:[/green] {metric}")
+            return metric
         prompt = {
             "Introduction": (
                 "You are an AI researcher setting up experiments. "
@@ -1331,6 +1357,12 @@ class ParallelAgent:
 
     def _run_plot_aggregation(self, node: Node, seed_nodes: List[Node]) -> Node:
         """Generate an aggregation node for seed evaluation results"""
+        if len(seed_nodes) < 2:
+            print(
+                "[yellow]Skipping seed plot aggregation: at least two successful "
+                "seed runs are required.[/yellow]"
+            )
+            return None
         if seed_nodes:
             try:
                 from .interpreter import Interpreter

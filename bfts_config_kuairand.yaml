@@ -1,0 +1,63 @@
+data_dir: kuairand-starter-kit
+desc_file: null
+preprocess_data: false
+goal: null
+eval: null
+log_dir: logs
+workspace_dir: workspaces
+copy_data: false
+exp_name: kuairand
+
+exec:
+  timeout: 600
+  agent_file_name: runfile.py
+  format_tb_ipython: false
+
+generate_report: false
+report:
+  model: ${oc.env:AI_SCIENTIST_REPORT_MODEL,deepseek-v4-flash}
+  temp: 0.2
+
+experiment:
+  num_syn_datasets: 1
+
+debug:
+  stage4: false
+
+agent:
+  type: parallel
+  num_workers: 1
+  max_stage: 1
+  stages:
+    stage1_max_iters: 1
+    stage2_max_iters: 6
+    stage3_max_iters: 12
+    stage4_max_iters: 8
+  steps: 1
+  k_fold_validation: 1
+  multi_seed_eval:
+    num_seeds: 1
+  expose_prediction: false
+  data_preview: false
+  code:
+    model: ${oc.env:AI_SCIENTIST_CODE_MODEL,deepseek-v4-pro}
+    temp: 0.2
+    max_tokens: 12000
+  feedback:
+    model: ${oc.env:AI_SCIENTIST_FEEDBACK_MODEL,deepseek-v4-flash}
+    temp: 0.1
+    max_tokens: 8192
+  summary:
+    model: ${oc.env:AI_SCIENTIST_SUMMARY_MODEL,deepseek-v4-flash}
+    temp: 0.2
+  select_node:
+    model: ${oc.env:AI_SCIENTIST_SELECT_MODEL,deepseek-v4-flash}
+    temp: 0.1
+  vlm_feedback:
+    model: ${oc.env:AI_SCIENTIST_VLM_MODEL,deepseek-v4-flash-vision-exp}
+    temp: 0.1
+    max_tokens: 8192
+  search:
+    max_debug_depth: 2
+    debug_prob: 0.5
+    num_drafts: 1

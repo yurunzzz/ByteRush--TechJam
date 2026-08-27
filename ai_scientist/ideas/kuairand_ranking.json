@@ -1,0 +1,15 @@
+[
+  {
+    "Name": "kuairand_fm_validation_baseline",
+    "Title": "Autonomous Improvement of Long-View Ranking on KuaiRand-Pure",
+    "Short Hypothesis": "A validation-only autonomous experiment loop can reliably reproduce the organizer FM baseline before attempting controlled ranking improvements.",
+    "Related Work": "Factorization Machines provide the organizer baseline. AI Scientist-v2 provides staged experiment management and tree search. The initial deployment focuses on a trustworthy connection between them.",
+    "Abstract": "Build an autonomous research workflow around the organizer-provided KuaiRand-Pure Starter Kit. The first stage must reproduce the fixed Factorization Machine baseline using long_view as the relevance label and validation primary=(GAUC+nDCG@5)/2 as the only node-selection score. The workflow must preserve the official chronological split and evaluator, use no external training dataset, and expose no test feedback during research. Later stages may tune the fixed FM and explore controlled ranking improvements after the baseline connection is verified.",
+    "Experiments": [
+      "Run the trusted FM validation-only harness with the organizer baseline configuration.",
+      "Verify finite predictions, the official validation GAUC and nDCG@5, primary computation, early stopping, checkpoint creation, and protected-file hashes.",
+      "Accept Stage 1 only if primary reproduces the published baseline within expected seed variation."
+    ],
+    "Risk Factors and Limitations": "The research loop must not use validation labels as features, test labels or metrics as feedback, external training datasets, altered evaluator logic, or noncausal temporal features. A full autonomous run also requires a configured supported LLM provider or a compatible local Ollama model."
+  }
+]

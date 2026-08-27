@@ -17,14 +17,6 @@ from ai_scientist.treesearch.bfts_utils import (
     idea_to_markdown,
     edit_bfts_config_file,
 )
-from ai_scientist.perform_plotting import aggregate_plots
-from ai_scientist.perform_writeup import perform_writeup
-from ai_scientist.perform_icbinb_writeup import (
-    perform_writeup as perform_icbinb_writeup,
-    gather_citations,
-)
-from ai_scientist.perform_llm_review import perform_review, load_paper
-from ai_scientist.perform_vlm_review import perform_imgs_cap_ref_review
 from ai_scientist.utils.token_tracker import token_tracker
 
 
@@ -41,6 +33,12 @@ def save_token_tracker(idea_dir):
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Run AI scientist experiments")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="bfts_config.yaml",
+        help="Path to the BFTS configuration file",
+    )
     parser.add_argument(
         "--writeup-type",
         type=str,
@@ -127,6 +125,11 @@ def parse_arguments():
         "--skip_review",
         action="store_true",
         help="If set, skip the review process",
+    )
+    parser.add_argument(
+        "--skip_plots",
+        action="store_true",
+        help="If set, skip final cross-stage plot aggregation",
     )
     return parser.parse_args()
 
@@ -246,7 +249,7 @@ if __name__ == "__main__":
     with open(idea_path_json, "w") as f:
         json.dump(ideas[args.idea_idx], f, indent=4)
 
-    config_path = "bfts_config.yaml"
+    config_path = args.config
     idea_config_path = edit_bfts_config_file(
         config_path,
         idea_dir,
@@ -262,13 +265,23 @@ if __name__ == "__main__":
             dirs_exist_ok=True,
         )
 
-    aggregate_plots(base_folder=idea_dir, model=args.model_agg_plots)
+    if not args.skip_plots:
+        from ai_scientist.perform_plotting import aggregate_plots
 
-    shutil.rmtree(osp.join(idea_dir, "experiment_results"))
+        aggregate_plots(base_folder=idea_dir, model=args.model_agg_plots)
+
+    if os.path.exists(osp.join(idea_dir, "experiment_results")):
+        shutil.rmtree(osp.join(idea_dir, "experiment_results"))
 
     save_token_tracker(idea_dir)
 
     if not args.skip_writeup:
+        from ai_scientist.perform_writeup import perform_writeup
+        from ai_scientist.perform_icbinb_writeup import (
+            perform_writeup as perform_icbinb_writeup,
+            gather_citations,
+        )
+
         writeup_success = False
         citations_text = gather_citations(
             idea_dir,
@@ -302,6 +315,9 @@ if __name__ == "__main__":
     save_token_tracker(idea_dir)
 
     if not args.skip_review and not args.skip_writeup:
+        from ai_scientist.perform_llm_review import perform_review, load_paper
+        from ai_scientist.perform_vlm_review import perform_imgs_cap_ref_review
+
         # Perform paper review if the paper exists
         pdf_path = find_pdf_path_for_review(idea_dir)
         if os.path.exists(pdf_path):

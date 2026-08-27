@@ -1,210 +1,322 @@
-<div align="center">
-  <a href="https://github.com/SakanaAI/AI-Scientist_v2/blob/main/docs/logo_v1.jpg">
-    <img src="docs/logo_v1.png" width="215" alt="AI Scientist v2 Logo" />
-  </a>
-  <h1>
-    <b>The AI Scientist-v2: Workshop-Level Automated</b><br>
-    <b>Scientific Discovery via Agentic Tree Search</b>
-  </h1>
-</div>
+# ByteRush：面向 KuaiRand 推荐系统的自动机器学习研究 Agent
 
-<p align="center">
-  📚 <a href="https://pub.sakana.ai/ai-scientist-v2/paper">[Paper]</a> |
-  📝 <a href="https://sakana.ai/ai-scientist-first-publication/"> [Blog Post]</a> |
-  📂 <a href="https://github.com/SakanaAI/AI-Scientist-ICLR2025-Workshop-Experiment"> [ICLR2025 Workshop Experiment]</a>
-</p>
+本仓库是 TikTok TechJam 题目 **Autonomous Machine Learning Research Agent for Recommender Systems** 的团队实现。项目将 [AI Scientist-v2](https://github.com/SakanaAI/AI-Scientist-v2) 的 AgentManager 与组委会提供的 KuaiRand-Pure Factorization Machine（FM）baseline 连接起来，使大语言模型能够自动完成：
 
-Fully autonomous scientific research systems are becoming increasingly capable, with AI playing a pivotal role in transforming how scientific discoveries are made.
-We are excited to introduce The AI Scientist-v2, a generalized end-to-end agentic system that has generated the first workshop paper written entirely by AI and accepted through peer review.
-
-This system autonomously generates hypotheses, runs experiments, analyzes data, and writes scientific manuscripts. Unlike [its predecessor (AI Scientist-v1)](https://github.com/SakanaAI/AI-Scientist), the AI Scientist-v2 removes reliance on human-authored templates, generalizes across Machine Learning (ML) domains, and employs a progressive agentic tree search, guided by an experiment manager agent.
-
-> **Note:**
-> The AI Scientist-v2 doesn’t necessarily produce better papers than v1, especially when a strong starting template is available. v1 follows well-defined templates, leading to high success rates, while v2 takes a broader, more exploratory approach with lower success rates. v1 works best for tasks with clear objectives and a solid foundation, whereas v2 is designed for open-ended scientific exploration.
-
-> **Caution!**
-> This codebase will execute Large Language Model (LLM)-written code. There are various risks and challenges associated with this autonomy, including the potential use of dangerous packages, uncontrolled web access, and the possibility of spawning unintended processes. Ensure that you run this within a controlled sandbox environment (e.g., a Docker container). Use at your own discretion.
-
-## Table of Contents
-
-1.  [Requirements](#requirements)
-    *   [Installation](#installation)
-    *   [Supported Models and API Keys](#supported-models-and-api-keys)
-2.  [Generate Research Ideas](#generate-research-ideas)
-3.  [Run AI Scientist-v2 Paper Generation Experiments](#run-ai-scientist-v2-paper-generation-experiments)
-4.  [Citing The AI Scientist-v2](#citing-the-ai-scientist-v2)
-5.  [Frequently Asked Questions](#frequently-asked-questions)
-6.  [Acknowledgement](#acknowledgement)
-
-## Requirements
-
-This code is designed to run on Linux with NVIDIA GPUs using CUDA and PyTorch.
-
-### Installation
-
-```bash
-# Create a new conda environment
-conda create -n ai_scientist python=3.11
-conda activate ai_scientist
-
-# Install PyTorch with CUDA support (adjust pytorch-cuda version for your setup)
-conda install pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia
-
-# Install PDF and LaTeX tools
-conda install anaconda::poppler
-conda install conda-forge::chktex
-
-# Install Python package requirements
-pip install -r requirements.txt
+```text
+提出实验方案并生成代码
+→ 在隔离工作区执行代码
+→ 调用受控的 FM validation 实验接口
+→ 解析 GAUC、nDCG@5 和 primary
+→ 将结果写入搜索树节点
+→ 复现实验并比较节点
+→ 自动选择最佳实现并保存 checkpoint
 ```
 
-Installation usually takes no more than one hour.
+当前版本已经在 SeeTacloud 云服务器上完整跑通 Stage 1 AgentManager baseline。代码不会把 test 标签或 test 指标暴露给 Agent。
 
-### Supported Models and API Keys
+## 1. 当前状态
 
-#### OpenAI Models
+已经完成并验证：
 
-By default, the system uses the `OPENAI_API_KEY` environment variable for OpenAI models.
+- AI Scientist-v2 与 KuaiRand starter kit 的目录和执行接口连接；
+- validation-only FM 实验边界；
+- DeepSeek V4、OpenAI 和 Ollama 的模型路由；
+- DeepSeek 结构化工具调用与指标解析；
+- LLM 自动生成代码、V2 自动执行、自动分析结果；
+- journal 节点创建、单 seed 复验和最佳节点选择；
+- 搜索树 HTML、实验数据和 checkpoint 保存；
+- `data.py`、`evaluate.py` 运行前后 SHA-256 完整性检查；
+- smoke test 和完整 AgentManager Stage 1 流程。
 
-#### Gemini Models
+最后一次成功验证的 validation 指标为：
 
-By default, the system uses the `GEMINI_API_KEY` environment variable for Gemini models through OpenAI API.
+| 指标 | 数值 |
+|---|---:|
+| GAUC | 0.667133391 |
+| nDCG@5 | 0.535805702 |
+| primary | 0.601469547 |
+| best epoch | 7 |
 
-#### Claude Models via AWS Bedrock
+`primary = (GAUC + nDCG@5) / 2`。这些数字用于确认 pipeline 可复现，不是最终比赛成绩。
 
-To use Claude models provided by Amazon Bedrock, install the necessary additional packages:
-```bash
-pip install anthropic[bedrock]
+## 2. 比赛任务口径
+
+| 项目 | 约定 |
+|---|---|
+| 任务 | 用户内排序：对每位用户已经曝光的视频重新排序 |
+| 相关性标签 | `long_view`（0/1） |
+| 指标 | GAUC、nDCG@5 |
+| 主指标 | `(GAUC + nDCG@5) / 2`，越高越好 |
+| 数据划分 | 官方 chronological train / valid / test |
+| Agent 可见反馈 | 仅 validation |
+| 禁止事项 | test 反馈、修改官方 evaluator、把 validation/test 标签作为特征、改变行顺序 |
+
+`evaluate.py` 是唯一评分口径。当前研究循环必须根据 validation primary 选择节点；test 只能在最终模型冻结后用于生成提交文件，不能返回给 Agent。
+
+## 3. 仓库结构
+
+```text
+ByteRush/
+├── ai_scientist/                         # AI Scientist-v2 核心代码
+│   ├── ideas/
+│   │   ├── kuairand_ranking.json         # Stage 1 预生成研究任务
+│   │   └── kuairand_ranking.py           # V2 可执行 FM baseline 起始代码
+│   ├── llm.py                            # LLM 客户端与模型路由
+│   └── treesearch/                       # AgentManager、Interpreter、搜索树
+├── kuairand-starter-kit/
+│   ├── data.py                           # 官方数据读取和划分；受保护
+│   ├── evaluate.py                       # 官方指标实现；受保护
+│   ├── baseline.py                       # random / popularity / FM baseline
+│   ├── run_fm_experiment.py              # validation-only 可信实验接口
+│   ├── fm_experiment_config.json         # FM 实验配置
+│   ├── submit.py                         # 提交文件生成与检查
+│   ├── AGENT_FM_INTERFACE.md             # Agent 与 FM 接口契约（运行必需）
+│   └── kuairand_ranking.md               # Agent 研究题目输入（运行必需）
+├── bfts_config_kuairand.yaml              # KuaiRand Stage 1 Agent 配置
+├── run_v2_fm_smoke.py                    # 不调用 LLM 的端到端 smoke test
+├── requirements_kuairand.txt              # 精简且已验证的依赖
+└── launch_scientist_bfts.py               # AgentManager 启动入口
 ```
-Next, configure valid [AWS Credentials](https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-envvars.html) and the target [AWS Region](https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-regions.html) by setting the following environment variables: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION_NAME`.
 
-#### Semantic Scholar API (Literature Search)
+以下内容不会上传 GitHub：KuaiRand 原始数据和压缩包、API Key、`.env`、`experiments/`、`deployment_runs/`、缓存和模型 checkpoint。
 
-Our code can optionally use a Semantic Scholar API Key (`S2_API_KEY`) for higher throughput during literature search [if you have one](https://www.semanticscholar.org/product/api). This is used during both the ideation and paper writing stages. The system should work without it, though you might encounter rate limits or reduced novelty checking during ideation. If you experience issues with Semantic Scholar, you can skip the citation phase during paper generation.
+## 4. 环境与数据准备
 
-#### Setting API Keys
+推荐 Linux、Python 3.11/3.12 和 CUDA PyTorch。FM 本身也可以在 CPU 上运行。
 
-Ensure you provide the necessary API keys as environment variables for the models you intend to use. For example:
 ```bash
-export OPENAI_API_KEY="YOUR_OPENAI_KEY_HERE"
-export S2_API_KEY="YOUR_S2_KEY_HERE"
-# Set AWS credentials if using Bedrock
-# export AWS_ACCESS_KEY_ID="YOUR_AWS_ACCESS_KEY_ID"
-# export AWS_SECRET_ACCESS_KEY="YOUR_AWS_SECRET_KEY"
-# export AWS_REGION_NAME="your-aws-region"
+cd /path/to/ByteRush
+python -m pip install -r requirements_kuairand.txt
+python -m pip check
 ```
 
-## Generate Research Ideas
+云服务器的 CUDA PyTorch 通常由镜像提供，不建议在未确认 CUDA 版本时覆盖安装。
 
-Before running the full AI Scientist-v2 experiment pipeline, you first use the `ai_scientist/perform_ideation_temp_free.py` script to generate potential research ideas. This script uses an LLM to brainstorm and refine ideas based on a high-level topic description you provide, interacting with tools like Semantic Scholar to check for novelty.
+数据不进入 Git，应放在：
 
-1.  **Prepare a Topic Description:** Create a Markdown file (e.g., `my_research_topic.md`) describing the research area or theme you want the AI to explore. This file should contain sections like `Title`, `Keywords`, `TL;DR`, and `Abstract` to define the scope of the research. Refer to the example file `ai_scientist/ideas/i_cant_believe_its_not_better.md` for the expected structure and content format. Place your file in a location accessible by the script (e.g., the `ai_scientist/ideas/` directory).
+```text
+kuairand-starter-kit/KuaiRand-Pure/data/
+```
 
-2.  **Run the Ideation Script:** Execute the script from the main project directory, pointing it to your topic description file and specifying the desired LLM.
+如需下载：
 
-    ```bash
-    python ai_scientist/perform_ideation_temp_free.py \
-     --workshop-file "ai_scientist/ideas/my_research_topic.md" \
-     --model gpt-4o-2024-05-13 \
-     --max-num-generations 20 \
-     --num-reflections 5
-    ```
-    *   `--workshop-file`: Path to your topic description Markdown file.
-    *   `--model`: The LLM to use for generating ideas (ensure you have the corresponding API key set).
-    *   `--max-num-generations`: How many distinct research ideas to attempt generating.
-    *   `--num-reflections`: How many refinement steps the LLM should perform for each idea.
+```bash
+cd kuairand-starter-kit
+wget https://zenodo.org/records/10439422/files/KuaiRand-Pure.tar.gz
+tar xzf KuaiRand-Pure.tar.gz
+cd ..
+test -d kuairand-starter-kit/KuaiRand-Pure/data && echo "data ready"
+```
 
-3.  **Output:** The script will generate a JSON file named after your input Markdown file (e.g., `ai_scientist/ideas/my_research_topic.json`). This file will contain a list of structured research ideas, including hypotheses, proposed experiments, and related work analysis.
+## 5. 配置 LLM API
 
-4.  **Proceed to Experiments:** Once you have the generated JSON file containing research ideas, you can proceed to the next section to run the experiments.
+仓库不保存 API Key。凭据必须在启动 Agent 的同一个 shell 或 tmux 会话中加载。
 
-This ideation step guides the AI Scientist towards specific areas of interest and produces concrete research directions to be tested in the main experimental pipeline.
+### DeepSeek（当前默认）
 
-## Run AI Scientist-v2 Paper Generation Experiments
+```bash
+export DEEPSEEK_API_KEY="your-key"
+export DEEPSEEK_BASE_URL="https://api.deepseek.com"
+export DEEPSEEK_THINKING="disabled"
+```
 
-Using the JSON file generated in the previous ideation step, you can now launch the main AI Scientist-v2 pipeline. This involves running experiments via agentic tree search, analyzing results, and generating a paper draft.
+保持 `DEEPSEEK_THINKING=disabled`：V2 使用强制工具调用解析结构化指标，DeepSeek V4 thinking 模式与该工具选择不兼容。
 
-Specify the models used for the write-up and review phases via command-line arguments.
-The configuration for the best-first tree search (BFTS) is located in `bfts_config.yaml`. Adjust parameters in this file as needed.
+| Agent 角色 | 默认模型 |
+|---|---|
+| 代码生成/研究 | `deepseek-v4-pro` |
+| 反馈/报告/总结/节点选择 | `deepseek-v4-flash` |
+| 视觉反馈 | `deepseek-v4-flash-vision-exp` |
 
-Key tree search configuration parameters in `bfts_config.yaml`:
+安全检查（不会打印 Key）：
 
--   `agent` config:
-    -   Set `num_workers` (number of parallel exploration paths) and `steps` (maximum number of nodes to explore). For example, if `num_workers=3` and `steps=21`, the tree search will explore up to 21 nodes, expanding 3 nodes concurrently at each step.
-    -   `num_seeds`: Should generally be the same as `num_workers` if `num_workers` is less than 3. Otherwise, set `num_seeds` to 3.
-    -   Note: Other agent parameters like `k_fold_validation`, `expose_prediction`, and `data_preview` are not used in the current version.
--   `search` config:
-    -   `max_debug_depth`: The maximum number of times the agent will attempt to debug a failing node before abandoning that search path.
-    -   `debug_prob`: The probability of attempting to debug a failing node.
-    -   `num_drafts`: The number of initial root nodes (i.e., the number of independent trees to grow) during Stage 1.
+```bash
+python -c "import os; print('DeepSeek key loaded:', bool(os.getenv('DEEPSEEK_API_KEY')))"
+```
 
-Example command to run AI-Scientist-v2 using a generated idea file (e.g., `my_research_topic.json`). Please review `bfts_config.yaml` for detailed tree search parameters (the default config includes `claude-3-5-sonnet` for experiments). Do not set `load_code` if you do not want to initialize experimentation with a code snippet.
+### 切换到 OpenAI
+
+不需要修改 Python 或 YAML：
+
+```bash
+export OPENAI_API_KEY="your-key"
+export AI_SCIENTIST_CODE_MODEL="gpt-4.1-mini"
+export AI_SCIENTIST_FEEDBACK_MODEL="gpt-4.1-mini"
+export AI_SCIENTIST_REPORT_MODEL="gpt-4.1-mini"
+export AI_SCIENTIST_VLM_MODEL="gpt-4.1-mini"
+export AI_SCIENTIST_SUMMARY_MODEL="gpt-4.1-mini"
+export AI_SCIENTIST_SELECT_MODEL="gpt-4.1-mini"
+```
+
+兼容 OpenAI API 的网关还可设置 `OPENAI_BASE_URL`。取消六个 `AI_SCIENTIST_*_MODEL` 环境变量即可恢复 DeepSeek 默认值。
+
+## 6. 推荐使用 tmux
+
+```bash
+tmux new-session -A -s byterush
+```
+
+在 tmux 中加载 API Key 后再运行 Agent。安全离开会话时按 `Ctrl+B`，松开后按 `D`。不要在唯一窗口中输入 `exit` 或按 `Ctrl+D`，否则会话及临时环境变量会消失。tmux 消失不会删除磁盘文件，但需要重新加载 Key。
+
+## 7. 运行 smoke test
+
+smoke test 不调用 LLM，用于验证 V2 Interpreter、FM validation-only 接口、指标结构、primary 计算、受保护文件哈希和 `experiment_data.npy`。
+
+```bash
+cd /path/to/ByteRush
+python run_v2_fm_smoke.py
+```
+
+成功时最后出现：
+
+```text
+V2_FM_SMOKE_RESULT {"status": "success", ...}
+```
+
+默认产物位于 `deployment_runs/v2_fm_baseline/`。
+
+## 8. 运行完整 AgentManager Baseline
+
+先确认至少一个 Key 已加载：
+
+```bash
+python -c "import os; print(bool(os.getenv('DEEPSEEK_API_KEY') or os.getenv('OPENAI_API_KEY')))"
+```
+
+然后从仓库根目录运行：
 
 ```bash
 python launch_scientist_bfts.py \
- --load_ideas "ai_scientist/ideas/my_research_topic.json" \
- --load_code \
- --add_dataset_ref \
- --model_writeup o1-preview-2024-09-12 \
- --model_citation gpt-4o-2024-11-20 \
- --model_review gpt-4o-2024-11-20 \
- --model_agg_plots o3-mini-2025-01-31 \
- --num_cite_rounds 20
+  --config bfts_config_kuairand.yaml \
+  --load_ideas ai_scientist/ideas/kuairand_ranking.json \
+  --load_code \
+  --idea_idx 0 \
+  --skip_plots \
+  --skip_writeup \
+  --skip_review \
+  2>&1 | tee /tmp/kuairand_agent_baseline.log
 ```
 
-Once the initial experimental stage is complete, you will find a timestamped log folder inside the `experiments/` directory. Navigate to `experiments/"timestamp_ideaname"/logs/0-run/` within that folder to find the tree visualization file `unified_tree_viz.html`.
-After all experiment stages are complete, the writeup stage begins. The writeup stage typically takes about 20 to 30 minutes in total. Once it finishes, you should see `timestamp_ideaname.pdf` in the `timestamp_ideaname` folder.
-For this example run, all stages typically finish within several hours.
+不要传入 `--add_dataset_ref`。当前配置是最小自主闭环：单 worker、单初始节点、一个 seed 复验，不生成论文或 review。它验证 Agent pipeline 的可靠性，不负责直接提升比赛指标；后续应保留它作为回归测试。
 
-## Citing The AI Scientist-v2
+## 9. 成功判据和产物
 
-If you use **The AI Scientist-v2** in your research, please cite our work as follows:
+日志应依次出现：
 
-```bibtex
-@article{aiscientist_v2,
-  title={The AI Scientist-v2: Workshop-Level Automated Scientific Discovery via Agentic Tree Search},
-  author={Yamada, Yutaro and Lange, Robert Tjarko and Lu, Cong and Hu, Shengran and Lu, Chris and Foerster, Jakob and Clune, Jeff and Ha, David},
-  journal={arXiv preprint arXiv:2504.08066},
-  year={2025}
-}
+```text
+MinimalAgent: Getting plan and code
+MinimalAgent: Draft complete
+Running code
+Parsing execution results
+Added result node to journal
+Stage ... completed: found working implementation
+Starting multi-seed eval...
+Selected node ...
+Stage ... multi-seed eval done.
+Saving checkpoint to ...
 ```
 
-## Frequently Asked Questions
+单 seed 时出现以下内容是正常的：
 
-**Why wasn't a PDF or a review generated for my experiment?**
+```text
+Skipping seed plot aggregation: at least two successful seed runs are required.
+```
 
-The AI Scientist-v2 completes experiments with a success rate that depends on the chosen foundation model, and the complexity of the idea. Higher success rates are generally observed when using powerful models like Claude 3.5 Sonnet for the experimentation phase.
+运行目录：
 
-**What is the estimated cost per experiment?**
+```text
+experiments/<timestamp>_kuairand_fm_validation_baseline_attempt_0/
+```
 
-The ideation step cost depends on the LLM used and the number of generations/reflections, but is generally low (a few dollars). For the main experiment pipeline, using Claude 3.5 Sonnet for the experimentation phase typically costs around $15–$20 per run. The subsequent writing phase adds approximately $5 when using the default models specified in the example command. Using GPT-4o for `model_citation` is recommended as it can help reduce writing costs.
+| 产物 | 用途 |
+|---|---|
+| `0-kuairand/process_*/runfile.py` | LLM 生成并执行的代码 |
+| `logs/0-kuairand/experiment_results/*/experiment_data.npy` | Agent 可见的 validation 结果 |
+| `logs/0-kuairand/manager.pkl` | AgentManager 状态 |
+| `logs/0-kuairand/unified_tree_viz.html` | 搜索树可视化 |
+| `logs/0-kuairand/stage_*/checkpoint.pkl` | 阶段 checkpoint |
+| `token_tracker*.json` | LLM 调用与 token 记录 |
 
-**How do I run The AI Scientist-v2 for different subject fields?**
+## 10. Validation-only FM 接口
 
-First, perform the [Generate Research Ideas](#generate-research-ideas) step. Create a new Markdown file describing your desired subject field or topic, following the structure of the example `ai_scientist/ideas/i_cant_believe_its_not_better.md`. Run the `perform_ideation_temp_free.py` script with this file to generate a corresponding JSON idea file. Then, proceed to the [Run AI Scientist-v2 Paper Generation Experiments](#run-ai-scientist-v2-paper-generation-experiments) step, using this JSON file with the `launch_scientist_bfts.py` script via the `--load_ideas` argument.
+独立运行一个受控实验：
 
-**What should I do if I have problems accessing the Semantic Scholar API?**
+```bash
+cd kuairand-starter-kit
+python run_fm_experiment.py \
+  --config fm_experiment_config.json \
+  --data-dir KuaiRand-Pure/data \
+  --output-dir experiments/fm_validation_baseline
+```
 
-The Semantic Scholar API is used to assess the novelty of generated ideas and to gather citations during the paper write-up phase. If you don't have an API key, encounter rate limits, you may be able to skip these phases.
+stdout 的机器可读记录以 `AI_SCIENTIST_RESULT ` 开头。成功结果只包含 validation 指标、checkpoint、运行时间、seed、行数和受保护文件哈希。
 
-**I encountered a "CUDA Out of Memory" error. What can I do?**
+允许配置的实验参数只有 `seed`、`embedding_dim`、`learning_rate`、`l2`、`batch_size`、`max_epochs`、`early_stopping_patience`、`min_delta` 和安全的 `experiment_name`。未知字段以及替换 label、split、evaluator 或 data loader 的尝试会被拒绝。详细契约见 `kuairand-starter-kit/AGENT_FM_INTERFACE.md`。
 
-This error typically occurs when the AI Scientist-v2 attempts to load or run a model that requires more GPU memory than available on your system. To resolve this, you can try updating your ideation prompt file (`ai_scientist/ideas/my_research_topic.md`) to suggest using smaller models for the experiments.
+## 11. 常见问题
 
-## Acknowledgement
+### tmux 显示 `no sessions`
 
-The tree search component implemented within the `ai_scientist` directory is built on top of the [AIDE](https://github.com/WecoAI/aideml) project. We thank the AIDE developers for their valuable contributions and for making their work publicly available.
+```bash
+tmux new-session -A -s byterush
+```
 
+然后重新加载 API Key。代码和实验文件仍保存在磁盘上。
 
-## Star History
+### `OPENAI_API_KEY environment variable is not set`
 
-[![Star History Chart](https://api.star-history.com/svg?repos=SakanaAI/AI-Scientist-v2&type=Date)](https://star-history.com/#SakanaAI/AI-Scientist-v2&Date)
+说明某个 Agent 角色仍配置为 GPT，或当前 shell 没加载 Key。检查实际模型：
 
-## ⚖️ License & Responsible Use
+```bash
+python - <<'PY'
+from omegaconf import OmegaConf
+c = OmegaConf.load("bfts_config_kuairand.yaml")
+print("code:", c.agent.code.model)
+print("feedback:", c.agent.feedback.model)
+print("summary:", c.agent.summary.model)
+print("select:", c.agent.select_node.model)
+PY
+```
 
-This project is licensed under **The AI Scientist Source Code License** (a derivative of the Responsible AI License). 
+### 找不到 `input` 或 `experiment_data.npy`
 
-**Mandatory Disclosure:** By using this code, you are legally bound to clearly and prominently disclose the use of AI in any resulting scientific manuscripts or papers. 
+必须从仓库根目录使用本文命令启动，不要直接在 `experiments/.../process_*` 中运行生成代码。
 
-We recommend the following attribution in your paper's Abstract or Methods section:
-> "This manuscript was autonomously generated using [The AI Scientist](https://github.com/SakanaAI/AI-Scientist)."
+### 查看实时日志
+
+```bash
+tail -f /tmp/kuairand_agent_baseline.log
+```
+
+## 12. 后续研究方向
+
+1. Stage 2：自动搜索 FM 超参数；
+2. Stage 3：pairwise/listwise 损失、历史序列、多任务、观看时长建模；
+3. 增加多个候选节点和多 seed 稳健比较；
+4. 为 Stage 3 建立受控 model-plugin 接口；
+5. 最终模型冻结后再生成 test submission，且不向 Agent 返回 test 反馈。
+
+## 13. 上传 GitHub 前检查
+
+```bash
+git status --short --untracked-files=all
+git diff --check
+python -m py_compile \
+  ai_scientist/llm.py \
+  ai_scientist/treesearch/agent_manager.py \
+  ai_scientist/treesearch/backend/backend_openai.py \
+  ai_scientist/treesearch/interpreter.py \
+  ai_scientist/treesearch/parallel_agent.py \
+  ai_scientist/ideas/kuairand_ranking.py \
+  kuairand-starter-kit/run_fm_experiment.py
+```
+
+确认 Git 状态中没有 API Key、`.env`、KuaiRand 数据、实验目录、checkpoint、日志、提交 CSV、SSH 密码或个人绝对路径配置。
+
+## 14. 上游项目与许可证
+
+本项目基于 SakanaAI 的 AI Scientist-v2，并保留其许可证与负责任使用要求。系统会执行 LLM 生成的代码，只应在隔离且受控的环境中运行。任何论文或报告应按上游许可证要求披露 AI Scientist 的使用。
+
+- 上游仓库：<https://github.com/SakanaAI/AI-Scientist-v2>
+- 论文：<https://arxiv.org/abs/2504.08066>
+- KuaiRand：<https://kuairand.com/>

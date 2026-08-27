@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import time
 
 from .utils import FunctionSpec, OutputType, opt_messages_to_list, backoff_create
@@ -17,14 +18,41 @@ OPENAI_TIMEOUT_EXCEPTIONS = (
     openai.InternalServerError,
 )
 
+def _is_deepseek_model(model: str) -> bool:
+    return model.startswith("deepseek-")
+
+
+def _api_model_name(model: str) -> str:
+    # Keep old experiment configs usable after the legacy coder endpoint retired.
+    if model == "deepseek-coder-v2-0724":
+        return os.getenv("DEEPSEEK_LEGACY_MODEL", "deepseek-v4-pro")
+    return model
+
+
 def get_ai_client(model: str, max_retries=2) -> openai.OpenAI:
     if model.startswith("ollama/"):
         client = openai.OpenAI(
-            base_url="http://localhost:11434/v1", 
+            api_key=os.getenv("OLLAMA_API_KEY", "ollama"),
+            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
             max_retries=max_retries
         )
+    elif _is_deepseek_model(model):
+        api_key = os.getenv("DEEPSEEK_API_KEY")
+        if not api_key:
+            raise ValueError("DEEPSEEK_API_KEY environment variable is not set")
+        client = openai.OpenAI(
+            api_key=api_key,
+            base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+            max_retries=max_retries,
+        )
     else:
-        client = openai.OpenAI(max_retries=max_retries)
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY environment variable is not set")
+        kwargs = {"api_key": api_key, "max_retries": max_retries}
+        if os.getenv("OPENAI_BASE_URL"):
+            kwargs["base_url"] = os.environ["OPENAI_BASE_URL"]
+        client = openai.OpenAI(**kwargs)
     return client
 
 
@@ -36,6 +64,13 @@ def query(
 ) -> tuple[OutputType, float, int, int, dict]:
     client = get_ai_client(model_kwargs.get("model"), max_retries=0)
     filtered_kwargs: dict = select_values(notnone, model_kwargs)  # type: ignore
+    if _is_deepseek_model(filtered_kwargs.get("model", "")):
+        # DeepSeek V4 thinking mode cannot be combined with forced tool_choice,
+        # which this backend uses to parse structured experiment results.
+        filtered_kwargs.setdefault(
+            "extra_body",
+            {"thinking": {"type": os.getenv("DEEPSEEK_THINKING", "disabled")}},
+        )
 
     messages = opt_messages_to_list(system_message, user_message)
 
@@ -46,6 +81,8 @@ def query(
 
     if filtered_kwargs.get("model", "").startswith("ollama/"):
        filtered_kwargs["model"] = filtered_kwargs["model"].replace("ollama/", "")
+    else:
+        filtered_kwargs["model"] = _api_model_name(filtered_kwargs["model"])
 
     t0 = time.time()
     completion = backoff_create(
@@ -80,7 +117,7 @@ def query(
     out_tokens = completion.usage.completion_tokens
 
     info = {
-        "system_fingerprint": completion.system_fingerprint,
+        "system_fingerprint": getattr(completion, "system_fingerprint", None),
         "model": completion.model,
         "created": completion.created,
     }

@@ -187,6 +187,14 @@ experiments/
 aisci_outputs/
 slurm_logs/
 .out
+deployment_runs/
+
+# KuaiRand deployment: keep code and documentation, never commit benchmark
+# archives, extracted data, caches, or local experiment artifacts.
+kuairand-starter-kit/KuaiRand-Pure/
+kuairand-starter-kit/KuaiRand-Pure.tar.gz
+kuairand-starter-kit/experiments/
+kuairand-starter-kit/__pycache__/
 
 # final papers
 final_papers/

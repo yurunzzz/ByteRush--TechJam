@@ -148,22 +148,29 @@ class AgentManager:
         }
         self.main_stage_goals: Dict[int, str] = {
             1: """
-                - Focus on getting basic working implementation
-                - Use a simple dataset
-                - Aim for basic functional correctness
-                - If you are given \"Code To Use\", you can directly use it as a starting point.""",
+                - Use the organizer-provided KuaiRand-Pure Starter Kit and FM implementation; do not rebuild the task from scratch
+                - Reproduce the official Random, Popularity, and FM validation baselines
+                - Treat long_view as the only relevance label and primary=(GAUC+nDCG@5)/2 as the selection metric
+                - Use only validation feedback; never expose test labels or test metrics to the research loop
+                - Preserve data.py, evaluate.py, the chronological split, row order, and submission schema
+                - If you are given \"Code To Use\", use it as the required starting point.""",
             2: """
-                - Change hyperparameters such as learning rate, number of epochs, batch size, etc. to improve the performance
+                - Tune only the fixed FM baseline on the fixed KuaiRand-Pure train/validation split
+                - Change controlled hyperparameters such as learning rate, L2, epochs, batch size, patience, initialization, optimizer, and seed
                 - DO NOT change the model architecture from the previous stage
-                - Introduce TWO more new datasets from HuggingFace test the model. Try very hard to think what Huggingface datasets can be used here for testing.""",
+                - Use no external training dataset, Hugging Face dataset, or test-derived signal
+                - Select configurations only by validation primary and record GAUC and nDCG@5 separately.""",
             3: """
-                - Explore novel improvements
-                - Come up with experiments to reveal new insights
-                - Be creative and think outside the box
-                - MAKE SURE you use THREE HuggingFace dataset in total to test your models""",
+                - Explore controlled improvements on KuaiRand-Pure only: ranking losses, negative sampling, causal user history, multi-task learning, temporal modeling, architecture, and fusion
+                - Make one interpretable change per branch and compare it with the best valid parent under comparable compute
+                - Compute every history and aggregate causally from earlier permitted events only
+                - Use no external training dataset and never use validation labels as features or test feedback for decisions
+                - Select nodes by validation primary and replicate promising gains across seeds""",
             4: """
                 - Conduct systematic component analysis that reveals the contribution of each part
-                - Use the same datasets you used from the previous stage""",
+                - Use only the same fixed KuaiRand-Pure train/validation split
+                - Replicate the best legal configuration across seeds and report mean and standard deviation
+                - Keep the validation-best checkpoint rather than the last trained checkpoint""",
         }
         # Create initial stage
         self._create_initial_stage()
@@ -410,6 +417,16 @@ Your research idea:\n\n
     def _check_stage_completion(self, stage: Stage) -> bool:
         """Check if current stage is complete based on criteria"""
         journal = self.journals[stage.name]
+        # A successful initial implementation takes precedence over the
+        # iteration limit. With a one-iteration baseline run, checking the
+        # limit first incorrectly reported failure even when the node was good.
+        if stage.stage_number == 1 and len(journal.good_nodes) > 0:
+            logger.info(f"Stage {stage.name} completed: found working implementation")
+            print(
+                f"[green]Stage {stage.name} completed: found working implementation[/green]"
+            )
+            return True, "Found working implementation"
+
         # Terminate if max iterations reached
         if len(journal.nodes) >= stage.max_iterations:
             logger.info(f"Stage {stage.name} completed: reached max iterations")
@@ -430,17 +447,6 @@ Your research idea:\n\n
             else:
                 return True, "Reached max iterations"
 
-        # For initial stage, complete when we have at least one working implementation
-        if stage.stage_number == 1:
-            if len(journal.good_nodes) > 0:
-                logger.info(
-                    f"Stage {stage.name} completed: found working implementation"
-                )
-                print(
-                    f"[green]Stage {stage.name} completed: found working implementation[/green]"
-                )
-                return True, "Found working implementation"
-
         if stage.stage_number == 2:
             best_node = journal.get_best_node(cfg=self.cfg)
             if not best_node:
@@ -459,11 +465,11 @@ Your research idea:\n\n
             1. Figure Analysis:
             {vlm_feedback}
 
-            2. Datasets Tested: {best_node.datasets_successfully_tested}
+            2. Fixed benchmark: KuaiRand-Pure train/validation split
 
             Requirements for completion:
             1. Training curves should show stable convergence
-            2. Results should be tested on at least two datasets
+            2. Results should be reproducible on the fixed KuaiRand-Pure validation split
             3. No major instabilities or issues in the plots
 
             Provide a detailed evaluation of completion status.
@@ -511,23 +517,9 @@ Your research idea:\n\n
             # Check if the experiment execution time is too short
             exec_time_minutes = best_node.exec_time / 60
             print(f"[cyan]exec_time_minutes: {exec_time_minutes}[/cyan]")
-            if len(self.journals[stage.name].nodes) > (
-                self.cfg.agent.stages.stage3_max_iters / 2
-            ):
-                if exec_time_minutes < self.cfg.exec.timeout / 60 / 2:
-                    exec_time_feedback = (
-                        f"Implementation works but runs too quickly ({exec_time_minutes:.2f} minutes)."
-                        "We have up to 60 minutes available for each experiment."
-                        "Make sure to scale up the experiment "
-                        "by increasing the number of epochs, using a larger model, or working with bigger datasets."
-                        "Given that the current execution time is {exec_time_minutes:.2f} minutes, think about how changing the number of epochs to run, or using a larger model, or working with bigger datasets to run"
-                        "will affect the execution time, and make sure to scale up the experiment accordingly."
-                    )
-                    print(f"[cyan]exec_time_feedback: {exec_time_feedback}[/cyan]")
-                    self.journals[stage.name].nodes[
-                        -1
-                    ].exec_time_feedback = exec_time_feedback
-                    return False, exec_time_feedback
+            # Fast, valid experiments are desirable for this competition. Do not
+            # force larger models, more epochs, or additional datasets merely to
+            # consume the available timeout.
         if stage.stage_number == 4:
             # Just let the agent run until max iterations is reached
             pass
@@ -803,6 +795,12 @@ Your research idea:\n\n
                                 current_substage = None
                             break
             self._save_checkpoint()
+            if self.current_stage and self.current_stage.stage_number >= self.cfg.agent.max_stage:
+                logger.info(
+                    f"Reached configured max_stage={self.cfg.agent.max_stage}; stopping."
+                )
+                self.current_stage = None
+                break
             # Main stage complete - create next main stage
             if self.current_stage:
                 next_main_stage = self._create_next_main_stage(

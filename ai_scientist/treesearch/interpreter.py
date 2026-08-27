@@ -132,7 +132,14 @@ class Interpreter:
     ) -> None:
         self.child_proc_setup(result_outq)
 
-        global_scope: dict = {}
+        # Match normal ``python runfile.py`` semantics. LLMs frequently emit a
+        # conventional main guard even when prompted otherwise; an empty exec
+        # namespace gives it a non-main module name and silently skips the
+        # experiment without raising an exception.
+        global_scope: dict = {
+            "__name__": "__main__",
+            "__file__": str(self.working_dir / self.agent_file_name),
+        }
         while True:
             code = code_inq.get()
             os.chdir(str(self.working_dir))

@@ -1,0 +1,27 @@
+# LLM clients pinned to interfaces used by this AI Scientist-v2 revision.
+anthropic==0.49.0
+openai==1.75.0
+backoff==2.2.1
+
+# Experiment-agent runtime.
+numpy==2.1.3
+matplotlib==3.9.2
+seaborn==0.13.2
+tiktoken==0.14.0
+tqdm==4.66.2
+rich==15.0.0
+humanize==4.16.0
+dataclasses-json==0.6.7
+funcy==2.0
+black==26.5.1
+genson==1.4.0
+shutup==0.3.0
+python-igraph==1.0.0
+coolname==5.0.0
+jsonschema==4.23.0
+omegaconf==2.3.1
+botocore==1.43.80
+boto3==1.43.80
+
+# PyTorch is provided by the SeeTacloud image (verified: 2.5.1+cu124).
+# Install a CUDA-compatible PyTorch separately on another host if absent.

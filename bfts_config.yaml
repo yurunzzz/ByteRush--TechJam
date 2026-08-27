@@ -36,6 +36,7 @@ debug:
 agent:
   type: parallel
   num_workers: 4
+  max_stage: 4
   stages:
     stage1_max_iters: 20
     stage2_max_iters: 12
