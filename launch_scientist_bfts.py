@@ -49,7 +49,7 @@ def parse_arguments():
     parser.add_argument(
         "--load_ideas",
         type=str,
-        default="ideas/i_cant_believe_its_not_better.json",
+        default="ideas/kuairand_ranking.json",
         help="Path to a JSON file containing pregenerated ideas",
     )
     parser.add_argument(
@@ -275,64 +275,10 @@ if __name__ == "__main__":
 
     save_token_tracker(idea_dir)
 
-    if not args.skip_writeup:
-        from ai_scientist.perform_writeup import perform_writeup
-        from ai_scientist.perform_icbinb_writeup import (
-            perform_writeup as perform_icbinb_writeup,
-            gather_citations,
-        )
-
-        writeup_success = False
-        citations_text = gather_citations(
-            idea_dir,
-            num_cite_rounds=args.num_cite_rounds,
-            small_model=args.model_citation,
-        )
-        for attempt in range(args.writeup_retries):
-            print(f"Writeup attempt {attempt+1} of {args.writeup_retries}")
-            if args.writeup_type == "normal":
-                writeup_success = perform_writeup(
-                    base_folder=idea_dir,
-                    small_model=args.model_writeup_small,
-                    big_model=args.model_writeup,
-                    page_limit=8,
-                    citations_text=citations_text,
-                )
-            else:
-                writeup_success = perform_icbinb_writeup(
-                    base_folder=idea_dir,
-                    small_model=args.model_writeup_small,
-                    big_model=args.model_writeup,
-                    page_limit=4,
-                    citations_text=citations_text,
-                )
-            if writeup_success:
-                break
-
-        if not writeup_success:
-            print("Writeup process did not complete successfully after all retries.")
-
-    save_token_tracker(idea_dir)
-
-    if not args.skip_review and not args.skip_writeup:
-        from ai_scientist.perform_llm_review import perform_review, load_paper
-        from ai_scientist.perform_vlm_review import perform_imgs_cap_ref_review
-
-        # Perform paper review if the paper exists
-        pdf_path = find_pdf_path_for_review(idea_dir)
-        if os.path.exists(pdf_path):
-            print("Paper found at: ", pdf_path)
-            paper_content = load_paper(pdf_path)
-            client, client_model = create_client(args.model_review)
-            review_text = perform_review(paper_content, client_model, client)
-            review_img_cap_ref = perform_imgs_cap_ref_review(
-                client, client_model, pdf_path
-            )
-            with open(osp.join(idea_dir, "review_text.txt"), "w") as f:
-                f.write(json.dumps(review_text, indent=4))
-            with open(osp.join(idea_dir, "review_img_cap_ref.json"), "w") as f:
-                json.dump(review_img_cap_ref, f, indent=4)
-            print("Paper review completed.")
+    # NOTE: The academic paper-writeup and LLM/VLM paper-review stages were
+    # removed for the TechJam recommender-agent task (no paper deliverable).
+    # The --skip_writeup / --skip_review / --writeup* / --*review* flags are
+    # kept for backward compatibility but are now no-ops.
 
     print("Start cleaning up processes")
     # Kill all mp and torch processes associated with this experiment
