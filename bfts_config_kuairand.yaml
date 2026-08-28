@@ -3,13 +3,13 @@ desc_file: null
 preprocess_data: false
 goal: null
 eval: null
-log_dir: logs
-workspace_dir: workspaces
+log_dir: logs_stage3
+workspace_dir: workspaces_stage3
 copy_data: false
-exp_name: kuairand
+exp_name: kuairand_stage3
 
 exec:
-  timeout: 600
+  timeout: 420
   agent_file_name: runfile.py
   format_tb_ipython: false
 
@@ -27,16 +27,24 @@ debug:
 agent:
   type: parallel
   num_workers: 1
-  max_stage: 1
+  max_stage: 3
   stages:
-    stage1_max_iters: 1
-    stage2_max_iters: 6
-    stage3_max_iters: 12
+    stage1_max_iters: 2
+    stage2_max_iters: 1
+    stage3_max_iters: 4
     stage4_max_iters: 8
   steps: 1
   k_fold_validation: 1
   multi_seed_eval:
     num_seeds: 1
+  # Stage 4 is implemented but deliberately gated and disabled by max_stage: 3.
+  # When max_stage is later raised to 4, entry requires both a promotable Stage
+  # 3 gain and a literal ABLATION_COMPONENTS manifest in the winning code.
+  ablation:
+    mode: registered_component_leave_one_out
+    min_primary_gain: 0.002
+    num_seeds: 3
+    max_components: 6
   expose_prediction: false
   data_preview: false
   code:
@@ -59,5 +67,5 @@ agent:
     max_tokens: 8192
   search:
     max_debug_depth: 2
-    debug_prob: 0.5
-    num_drafts: 1
+    debug_prob: 1.0
+    num_drafts: 2

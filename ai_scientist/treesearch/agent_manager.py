@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
 import logging
-from .parallel_agent import ParallelAgent
+import math
+from .parallel_agent import ParallelAgent, _extract_enabled_ablation_components
 from .journal import Journal, Node
 import copy
 import re
@@ -163,6 +164,10 @@ class AgentManager:
             3: """
                 - Explore controlled improvements on KuaiRand-Pure only: ranking losses, negative sampling, causal user history, multi-task learning, temporal modeling, architecture, and fusion
                 - Make one interpretable change per branch and compare it with the best valid parent under comparable compute
+                - Respect the encoded input contract: train_x and valid_x are dense integer feature-ID arrays with shape (rows, 5), not one-hot or scipy sparse matrices; use embedding lookup such as V[X], never X @ V
+                - Preserve CandidateModel's constructor plus step, predict, state_dict, and load_state_dict interfaces so the trusted validation loop can train and checkpoint the candidate
+                - Vectorize score and gradient computation over each batch; do not write Python loops over samples or feature rows
+                - Use at most 12 epochs for a new Stage 3 prototype until it proves runnable; only promising legal candidates may receive a larger budget
                 - Compute every history and aggregate causally from earlier permitted events only
                 - Use no external training dataset and never use validation labels as features or test feedback for decisions
                 - Select nodes by validation primary and replicate promising gains across seeds""",
@@ -427,6 +432,30 @@ Your research idea:\n\n
             )
             return True, "Found working implementation"
 
+        if stage.name.startswith("4_") and journal.nodes:
+            ablation_cfg = self.cfg.agent.get("ablation", {})
+            max_components = int(ablation_cfg.get("max_components", 8))
+            components = _extract_enabled_ablation_components(
+                journal.nodes[0].code
+            )[:max_components]
+            attempted = {
+                node.ablation_name
+                for node in journal.nodes
+                if node.ablation_name is not None and not node.is_seed_node
+            }
+            if not components:
+                return True, "No registered Stage 3 components to ablate"
+            if set(components).issubset(attempted):
+                logger.info(
+                    f"Stage {stage.name} completed all controlled ablations: "
+                    f"{components}"
+                )
+                print(
+                    f"[green]Stage {stage.name} completed all controlled "
+                    f"ablations: {components}[/green]"
+                )
+                return True, "Completed all registered leave-one-component-out ablations"
+
         # Terminate if max iterations reached
         if len(journal.nodes) >= stage.max_iterations:
             logger.info(f"Stage {stage.name} completed: reached max iterations")
@@ -664,6 +693,14 @@ Your research idea:\n\n
         ) = self.parse_stage_names(current_substage.name)
         if main_stage_num == 4:
             return None
+        if main_stage_num == 3:
+            should_run, reason = self._should_enter_stage4(current_substage.name)
+            if not should_run:
+                logger.info(f"Stage 4 gate closed: {reason}")
+                print(f"[yellow]Stage 4 gate closed: {reason}[/yellow]")
+                return None
+            logger.info(f"Stage 4 gate passed: {reason}")
+            print(f"[green]Stage 4 gate passed: {reason}[/green]")
         next_main_stage_name = self.main_stage_dict[main_stage_num + 1]
         sub_stage_num = 1
         sub_stage_name = "first_attempt"
@@ -679,6 +716,51 @@ Your research idea:\n\n
             max_iterations=self._get_max_iterations(main_stage_num + 1),
             num_drafts=num_drafts,
             stage_number=stage_number,
+        )
+
+    def _should_enter_stage4(self, stage3_name: str) -> Tuple[bool, str]:
+        """Require a real Stage-3 gain and an explicit component manifest."""
+        stage3_node = self._get_best_implementation(stage3_name)
+        if stage3_node is None or stage3_node.metric is None:
+            return False, "Stage 3 has no valid best model"
+
+        stage2_node = None
+        for stage in reversed(self.stages):
+            if stage.name.startswith("2_"):
+                stage2_node = self._get_best_implementation(stage.name)
+                if stage2_node is not None:
+                    break
+        if stage2_node is None or stage2_node.metric is None:
+            return False, "Stage 2 has no valid reference model"
+
+        stage3_primary = stage3_node.metric.get_mean_value()
+        stage2_primary = stage2_node.metric.get_mean_value()
+        if not math.isfinite(stage3_primary) or not math.isfinite(stage2_primary):
+            return False, "Stage 2/3 primary metric is not finite"
+
+        ablation_cfg = self.cfg.agent.get("ablation", {})
+        min_gain = float(ablation_cfg.get("min_primary_gain", 0.002))
+        gain = stage3_primary - stage2_primary
+        if gain < min_gain:
+            return (
+                False,
+                f"best Stage 3 gain {gain:+.6f} is below the promotion threshold "
+                f"{min_gain:.6f}",
+            )
+
+        components = _extract_enabled_ablation_components(stage3_node.code)
+        max_components = int(ablation_cfg.get("max_components", 8))
+        components = components[:max_components]
+        if not components:
+            return (
+                False,
+                "promoted Stage 3 code has no enabled literal entries in "
+                "ABLATION_COMPONENTS",
+            )
+        return (
+            True,
+            f"Stage 3 gain is {gain:+.6f}; controlled components: "
+            f"{', '.join(components)}",
         )
 
     def run(self, exec_callback, step_callback=None):
@@ -700,7 +782,11 @@ Your research idea:\n\n
                         print(f"[cyan]self.stage_history: {self.stage_history}[/cyan]")
                         prev_best = self._get_best_implementation(prev_stage)
                         if prev_best:
-                            self.journals[self.current_stage.name].append(prev_best)
+                            # During dynamically generated substages,
+                            # ``self.current_stage`` still points at the main
+                            # stage's first substage. Carry the winner into the
+                            # journal of the substage that is actually running.
+                            self.journals[current_substage.name].append(prev_best)
                         else:
                             print(
                                 f"[red]No previous best implementation found for {self.current_stage.name}. Something went wrong so finishing the experiment...[/red]"
@@ -728,26 +814,81 @@ Your research idea:\n\n
                         if main_stage_complete:
                             # After main stage completion, run multi-seed eval on the best node
                             if current_substage.stage_number in [1, 2, 3, 4]:
-                                best_node = self._get_best_implementation(
-                                    current_substage.name
-                                )
-                                if best_node:
-                                    seed_nodes = agent._run_multi_seed_evaluation(
-                                        best_node
+                                evaluation_nodes = []
+                                if current_substage.name.startswith("4_"):
+                                    # A scientific ablation compares the full promoted
+                                    # model and every successful leave-one-out variant
+                                    # under the same multi-seed protocol.
+                                    source_nodes = list(
+                                        self.journals[current_substage.name].nodes
                                     )
-                                    if step_callback:
-                                        step_callback(
-                                            current_substage,
-                                            self.journals[current_substage.name],
+                                    full_nodes = [
+                                        node
+                                        for node in source_nodes
+                                        if node.ablation_name is None
+                                        and not node.is_seed_node
+                                        and not node.is_buggy
+                                    ]
+                                    if full_nodes:
+                                        evaluation_nodes.append(full_nodes[0])
+                                    by_component = {}
+                                    for node in source_nodes:
+                                        if (
+                                            node.ablation_name is not None
+                                            and not node.is_seed_node
+                                            and not node.is_buggy
+                                        ):
+                                            by_component[node.ablation_name] = node
+                                    evaluation_nodes.extend(
+                                        by_component[name]
+                                        for name in sorted(by_component)
+                                    )
+                                else:
+                                    best_node = self._get_best_implementation(
+                                        current_substage.name
+                                    )
+                                    if best_node is not None:
+                                        evaluation_nodes = [best_node]
+
+                                if not evaluation_nodes:
+                                    # A research stage may legitimately finish with all
+                                    # candidates invalid or worse than its inherited parent.
+                                    # Fall back to the latest earlier stage's valid best
+                                    # implementation instead of aborting the whole run.
+                                    for previous_stage in reversed(self.stages):
+                                        if previous_stage.name == current_substage.name:
+                                            continue
+                                        best_node = self._get_best_implementation(
+                                            previous_stage.name
                                         )
-                                    agent._run_plot_aggregation(best_node, seed_nodes)
-                                    if step_callback:
-                                        step_callback(
-                                            current_substage,
-                                            self.journals[current_substage.name],
+                                        if best_node is not None:
+                                            evaluation_nodes = [best_node]
+                                            logger.warning(
+                                                f"No valid node in {current_substage.name}; "
+                                                f"falling back to {previous_stage.name} best node"
+                                            )
+                                            break
+                                if evaluation_nodes:
+                                    for evaluation_node in evaluation_nodes:
+                                        seed_nodes = agent._run_multi_seed_evaluation(
+                                            evaluation_node
                                         )
+                                        if step_callback:
+                                            step_callback(
+                                                current_substage,
+                                                self.journals[current_substage.name],
+                                            )
+                                        agent._run_plot_aggregation(
+                                            evaluation_node, seed_nodes
+                                        )
+                                        if step_callback:
+                                            step_callback(
+                                                current_substage,
+                                                self.journals[current_substage.name],
+                                            )
                                     print(
-                                        f"Stage {current_substage.name} multi-seed eval done."
+                                        f"Stage {current_substage.name} multi-seed eval "
+                                        f"done for {len(evaluation_nodes)} configuration(s)."
                                     )
                                 else:
                                     logger.error(

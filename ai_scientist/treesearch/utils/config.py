@@ -1,6 +1,6 @@
 """configuration and setup utils"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Hashable, cast, Literal, Optional
 
@@ -54,6 +54,14 @@ class DebugConfig:
 
 
 @dataclass
+class AblationConfig:
+    mode: str = "registered_component_leave_one_out"
+    min_primary_gain: float = 0.002
+    num_seeds: int = 3
+    max_components: int = 8
+
+
+@dataclass
 class AgentConfig:
     steps: int
     stages: dict[str, int]
@@ -73,6 +81,7 @@ class AgentConfig:
 
     summary: Optional[StageConfig] = None
     select_node: Optional[StageConfig] = None
+    ablation: AblationConfig = field(default_factory=AblationConfig)
 
 @dataclass
 class ExecConfig:

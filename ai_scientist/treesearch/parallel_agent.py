@@ -1,5 +1,7 @@
 from concurrent.futures import ProcessPoolExecutor
 from typing import List, Optional, Set, Any, Callable, cast, Dict, Tuple
+import ast
+import json
 import random
 import subprocess
 import os
@@ -22,10 +24,167 @@ from rich import print
 from pathlib import Path
 import base64
 import sys
+import numpy as np
 
 logger = logging.getLogger("ai-scientist")
 
 ExecCallbackType = Callable[[str, bool], ExecutionResult]
+
+
+def _is_kuairand_task(task_desc: Any) -> bool:
+    """Return whether the fixed KuaiRand validation contract applies."""
+    task_text = str(task_desc)
+    return "KuaiRand" in task_text and "nDCG@5" in task_text
+
+
+def _extract_required_starting_code(task_desc: Any) -> Optional[str]:
+    """Extract the organizer-aligned code embedded by ``--load_code``.
+
+    AgentManager appends stage context after the code.  Stage 1 must execute
+    the supplied implementation before asking the LLM to draft anything;
+    otherwise a known-good baseline is replaced by a stochastic rewrite.
+    """
+    if not isinstance(task_desc, str):
+        return None
+    marker = "Code To Use:\n"
+    if marker not in task_desc:
+        return None
+    code = task_desc.split(marker, 1)[1]
+    code = code.split("\n\nCurrent Main Stage:", 1)[0]
+    return code.strip() or None
+
+
+def _extract_enabled_ablation_components(code: str) -> List[str]:
+    """Read the literal Stage-3 component manifest without executing code."""
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, TypeError):
+        return []
+
+    manifest = None
+    for statement in tree.body:
+        value = None
+        if isinstance(statement, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "ABLATION_COMPONENTS"
+            for target in statement.targets
+        ):
+            value = statement.value
+        elif (
+            isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+            and statement.target.id == "ABLATION_COMPONENTS"
+        ):
+            value = statement.value
+        if value is not None:
+            try:
+                manifest = ast.literal_eval(value)
+            except (ValueError, TypeError, SyntaxError):
+                return []
+            break
+
+    if not isinstance(manifest, dict):
+        return []
+    return sorted(
+        name
+        for name, enabled in manifest.items()
+        if isinstance(name, str) and enabled is True
+    )
+
+
+def _inject_ablation_target(code: str, component: str) -> str:
+    """Clone code while disabling exactly one registered component via env."""
+    assignment = (
+        "\n# Controlled Stage 4 leave-one-component-out ablation.\n"
+        "import os\n"
+        f"os.environ['AI_SCIENTIST_ABLATION_TARGET'] = {component!r}\n"
+    )
+    future_line = "from __future__ import annotations\n"
+    if future_line in code:
+        insert_at = code.index(future_line) + len(future_line)
+        return code[:insert_at] + assignment + code[insert_at:]
+    return assignment.lstrip("\n") + code
+
+
+def _load_kuairand_validation_metric(
+    working_dir: str, term_out: str = ""
+) -> Tuple[float, float, float]:
+    """Parse only the three organizer validation metrics from the fixed artifact."""
+    data_path = Path(working_dir) / "experiment_data.npy"
+    experiment_data = np.load(data_path, allow_pickle=True).item()
+    required = {
+        "validation GAUC",
+        "validation nDCG@5",
+        "validation primary",
+    }
+    metric_mappings = []
+
+    def collect(value: Any) -> None:
+        if not isinstance(value, dict):
+            return
+        if required.issubset(value.keys()):
+            metric_mappings.append(value)
+        for child in value.values():
+            collect(child)
+
+    collect(experiment_data)
+
+    def series(metrics: dict, name: str) -> List[float]:
+        value = metrics[name]
+        values = (
+            list(np.asarray(value).reshape(-1))
+            if isinstance(value, (list, tuple, np.ndarray))
+            else [value]
+        )
+        results = [float(item) for item in values]
+        if not results or not np.isfinite(results).all():
+            raise ValueError(f"{name} is empty or contains a non-finite value")
+        return results
+
+    def validate(gauc: float, ndcg5: float, primary: float):
+        values = np.asarray([gauc, ndcg5, primary], dtype=float)
+        if not np.isfinite(values).all():
+            raise ValueError("KuaiRand validation metrics contain a non-finite value")
+        expected = (gauc + ndcg5) / 2.0
+        if not np.isclose(primary, expected, rtol=0.0, atol=1e-8):
+            raise ValueError(
+                f"validation primary {primary} does not match "
+                f"(GAUC+nDCG@5)/2={expected}"
+            )
+        return gauc, ndcg5, primary
+
+    candidates = []
+    for metrics in metric_mappings:
+        gaucs = series(metrics, "validation GAUC")
+        ndcg5s = series(metrics, "validation nDCG@5")
+        primaries = series(metrics, "validation primary")
+        if not (len(gaucs) == len(ndcg5s) == len(primaries)):
+            raise ValueError("validation metric series have inconsistent lengths")
+        for gauc, ndcg5, primary in zip(gaucs, ndcg5s, primaries):
+            candidates.append(validate(gauc, ndcg5, primary))
+    if candidates:
+        return max(candidates, key=lambda values: values[2])
+
+    # Stage 2/3 candidates sometimes keep a task-specific experiment_data
+    # layout. The runnable contract also requires one machine-readable result
+    # line, so use it as a strict validation-only fallback.
+    prefix = "AI_SCIENTIST_RESULT="
+    for line in reversed(term_out.splitlines()):
+        if not line.startswith(prefix):
+            continue
+        payload = json.loads(line[len(prefix) :])
+        if payload.get("split") not in {"valid", "validation"}:
+            raise ValueError("AI_SCIENTIST_RESULT is not a validation result")
+        if payload.get("target") != "long_view":
+            raise ValueError("AI_SCIENTIST_RESULT target must be long_view")
+        return validate(
+            float(payload["GAUC"]),
+            float(payload["nDCG@5"]),
+            float(payload["primary"]),
+        )
+    raise KeyError(
+        "no trusted KuaiRand validation metric mapping or "
+        "AI_SCIENTIST_RESULT line was found"
+    )
 
 
 def _safe_pickle_test(obj, name="object"):
@@ -307,6 +466,8 @@ class MinimalAgent:
                     "Do not modify input/data.py, input/evaluate.py, the chronological split, row order, or submission schema.",
                     "Start from input/run_fm_experiment.py and its JSON configuration contract.",
                     "Stage 2 may tune only allowed FM hyperparameters; Stage 3 may make controlled model changes while preserving this evaluation contract.",
+                    "Every new Stage 3 model component must be registered as a literal True entry in ABLATION_COMPONENTS and guarded with component_enabled(name), so Stage 4 can disable exactly that component without changing anything else.",
+                    "Keep ABLATION_COMPONENTS, ABLATION_TARGET, component_enabled, and the ablation metadata in the runnable program.",
                     "Every runnable solution must print an AI_SCIENTIST_RESULT JSON object and save validation-only experiment_data.npy under ./working.",
                     "The experiment_data.npy metric used for node selection must be validation primary and must mark higher values as better.",
                     "Reject predictions with wrong length, NaN, or infinity, and save the validation-best checkpoint.",
@@ -570,6 +731,8 @@ class MinimalAgent:
             code=parent_node.code,
             parent=parent_node,
             is_seed_node=True,
+            ablation_name=parent_node.ablation_name,
+            hyperparam_name=parent_node.hyperparam_name,
         )
 
     def _generate_hyperparam_tuning_node(
@@ -621,6 +784,24 @@ class MinimalAgent:
         )
 
     def _generate_ablation_node(self, parent_node: Node, ablation_idea: AblationIdea):
+        if _is_kuairand_task(self.task_desc):
+            enabled_components = _extract_enabled_ablation_components(parent_node.code)
+            if ablation_idea.name not in enabled_components:
+                raise ValueError(
+                    f"Stage 4 component {ablation_idea.name!r} is not registered in "
+                    "ABLATION_COMPONENTS"
+                )
+            return Node(
+                plan=(
+                    "Controlled leave-one-component-out ablation. Disable exactly "
+                    f"{ablation_idea.name!r}; preserve data, hyperparameters, seed, "
+                    "training budget, evaluation, and every other model component."
+                ),
+                code=_inject_ablation_target(parent_node.code, ablation_idea.name),
+                parent=parent_node,
+                ablation_name=ablation_idea.name,
+            )
+
         prompt: Any = {
             "Introduction": (
                 "You are an experienced AI researcher. You are provided with a previously developed "
@@ -1295,7 +1476,11 @@ class ParallelAgent:
         # Submit parallel jobs for different seeds
         seed_nodes = []
         futures = []
-        for seed in range(self.cfg.agent.multi_seed_eval.num_seeds):
+        num_seeds = int(self.cfg.agent.multi_seed_eval.num_seeds)
+        if self.stage_name and self.stage_name.startswith("4_"):
+            ablation_cfg = self.cfg.agent.get("ablation", {})
+            num_seeds = int(ablation_cfg.get("num_seeds", num_seeds))
+        for seed in range(num_seeds):
             gpu_id = None
             if self.gpu_manager is not None:
                 try:
@@ -1307,11 +1492,28 @@ class ParallelAgent:
                         f"Could not acquire GPU for seed {seed}: {e}. Running on CPU"
                     )
 
-            # Add seed to node code
-            node_data["code"] = (
-                f"# Set random seed\nimport random\nimport numpy as np\nimport torch\n\nseed = {seed}\nrandom.seed(seed)\nnp.random.seed(seed)\ntorch.manual_seed(seed)\nif torch.cuda.is_available():\n    torch.cuda.manual_seed(seed)\n\n"
-                + node_code
+            # Add seed after any future import. Prepending executable statements
+            # makes valid files containing ``from __future__`` fail with a
+            # SyntaxError. The environment variable also lets experiment
+            # templates that use explicit constructor seeds consume this value.
+            seed_code = (
+                f"\n# Set random seed\nimport os\nimport random\nimport numpy as np\n"
+                f"seed = {seed}\nos.environ['AI_SCIENTIST_SEED'] = str(seed)\n"
+                "random.seed(seed)\nnp.random.seed(seed)\n"
+                "try:\n"
+                "    import torch\n"
+                "    torch.manual_seed(seed)\n"
+                "    if torch.cuda.is_available():\n"
+                "        torch.cuda.manual_seed_all(seed)\n"
+                "except ImportError:\n"
+                "    pass\n\n"
             )
+            future_line = "from __future__ import annotations\n"
+            if future_line in node_code:
+                insert_at = node_code.index(future_line) + len(future_line)
+                node_data["code"] = node_code[:insert_at] + seed_code + node_code[insert_at:]
+            else:
+                node_data["code"] = seed_code + node_code
 
             new_ablation_idea = None
             new_hyperparam_idea = None
@@ -1517,8 +1719,23 @@ class ParallelAgent:
                 child_node.plot_code = parent_node.plot_code
             else:
                 if parent_node is None:
-                    print("Drafting new node")
-                    child_node = worker_agent._draft()
+                    starting_code = (
+                        _extract_required_starting_code(task_desc)
+                        if stage_name and stage_name.startswith("1_")
+                        else None
+                    )
+                    if starting_code:
+                        print("Executing required starting code before any LLM rewrite")
+                        child_node = Node(
+                            plan=(
+                                "Execute the organizer-aligned starting implementation "
+                                "unchanged. Ask the LLM to debug only if this execution fails."
+                            ),
+                            code=starting_code,
+                        )
+                    else:
+                        print("Drafting new node")
+                        child_node = worker_agent._draft()
                 elif parent_node.is_buggy:
                     print("Debugging node with id: ", parent_node.id)
                     child_node = worker_agent._debug(parent_node)
@@ -1559,9 +1776,20 @@ class ParallelAgent:
             process_interpreter.cleanup_session()
 
             print("Parsing execution results")
-            worker_agent.parse_exec_result(
-                node=child_node, exec_result=exec_result, workspace=working_dir
-            )
+            if _is_kuairand_task(task_desc):
+                # The competition runner has a deterministic validation artifact,
+                # so execution success must not depend on an LLM review verdict.
+                child_node.absorb_exec_result(exec_result)
+                child_node.is_buggy = exec_result.exc_type is not None
+                child_node.analysis = (
+                    "Trusted KuaiRand execution completed successfully."
+                    if not child_node.is_buggy
+                    else f"KuaiRand execution failed: {exec_result.exc_info}"
+                )
+            else:
+                worker_agent.parse_exec_result(
+                    node=child_node, exec_result=exec_result, workspace=working_dir
+                )
 
             # Add check for saved data files
             data_files = [f for f in os.listdir(working_dir) if f.endswith(".npy")]
@@ -1569,6 +1797,43 @@ class ParallelAgent:
                 logger.warning(
                     "No .npy files found in working directory. Data may not have been saved properly."
                 )
+                child_node.metric = WorstMetricValue()
+                child_node.is_buggy = True
+            elif _is_kuairand_task(task_desc):
+                # Do not expose arbitrary output (especially test-like fields) to
+                # an LLM. Parse only the fixed validation metrics in trusted code.
+                child_node.parse_metrics_plan = (
+                    "Trusted parser: read validation GAUC, validation nDCG@5, and "
+                    "validation primary from working/experiment_data.npy."
+                )
+                child_node.parse_metrics_code = "# Metrics parsed by trusted host code."
+                try:
+                    gauc, ndcg5, primary = _load_kuairand_validation_metric(
+                        working_dir, child_node.term_out
+                    )
+                    child_node.parse_term_out = [
+                        "Dataset: KuaiRand-Pure\n",
+                        f"validation GAUC: {gauc:.9f}\n",
+                        f"validation nDCG@5: {ndcg5:.9f}\n",
+                        f"validation primary: {primary:.9f}\n",
+                    ]
+                    child_node.metric = MetricValue(
+                        value=primary,
+                        maximize=True,
+                        name="validation primary",
+                        description="(validation GAUC + validation nDCG@5) / 2",
+                    )
+                    child_node.is_buggy = child_node.exc_type is not None
+                except Exception as e:
+                    logger.error(
+                        f"Trusted KuaiRand metric parsing failed for node "
+                        f"{child_node.id}: {e}"
+                    )
+                    child_node.metric = WorstMetricValue()
+                    child_node.is_buggy = True
+                    child_node.parse_exc_type = type(e).__name__
+                    child_node.parse_exc_info = {"message": str(e)}
+                    child_node.parse_term_out = [f"Trusted metric parser error: {e}\n"]
             else:
                 if seed_eval:
                     # Use the parent node's parse code to parse the same data files again
@@ -1895,6 +2160,26 @@ class ParallelAgent:
         # Prepare context of what's been tried
         completed = list(self._ablation_state["completed_ablations"])
 
+        if _is_kuairand_task(self.task_desc):
+            if self.best_stage3_node is None:
+                return None
+            components = _extract_enabled_ablation_components(
+                self.best_stage3_node.code
+            )
+            ablation_cfg = self.cfg.agent.get("ablation", {})
+            max_components = int(ablation_cfg.get("max_components", 8))
+            for component in components[:max_components]:
+                if component not in completed:
+                    return AblationIdea(
+                        name=component,
+                        description=(
+                            "Disable this registered Stage 3 component only. Keep "
+                            "the full model's data split, random seeds, hyperparameters, "
+                            "training budget, early stopping, and evaluator unchanged."
+                        ),
+                    )
+            return None
+
         ablation_prompt = {
             "Introduction": (
                 "You are an AI researcher conducting ablation studies. "
@@ -1993,7 +2278,13 @@ class ParallelAgent:
             ]
 
             # Debugging phase (with some probability)
-            if random.random() < search_cfg.debug_prob:
+            # Stage 4 is a controlled scientific comparison: a failed
+            # leave-one-out run is recorded as failed and must never be turned
+            # into an unconstrained LLM rewrite by the generic debug branch.
+            is_controlled_ablation = bool(
+                self.stage_name and self.stage_name.startswith("4_")
+            )
+            if not is_controlled_ablation and random.random() < search_cfg.debug_prob:
                 print("Checking debuggable nodes")
                 # print(f"Buggy nodes: {self.journal.buggy_nodes}")
                 try:
@@ -2141,7 +2432,12 @@ class ParallelAgent:
                 and node_data["is_buggy"] is False
             ):
                 new_ablation_idea = self._generate_ablation_idea()
-                self._ablation_state["completed_ablations"].add(new_ablation_idea.name)
+                if new_ablation_idea is None:
+                    logger.info("All registered Stage 4 components have been attempted")
+                    continue
+                self._ablation_state["completed_ablations"].add(
+                    new_ablation_idea.name
+                )
                 new_hyperparam_idea = None
             else:
                 new_ablation_idea = None
@@ -2175,6 +2471,10 @@ class ParallelAgent:
                     seed_eval,
                 )
             )
+
+        if not futures:
+            print("[green]No remaining controlled Stage 4 ablations.[/green]")
+            return
 
         # Add results to journal
         print("Waiting for results")
