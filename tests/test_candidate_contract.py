@@ -84,6 +84,17 @@ class CandidateContractTests(unittest.TestCase):
         self.assertIn("outputs (history_author_match)", summary)
         self.assertNotIn("[user_id", summary)
 
+    def test_role_prompt_spells_out_machine_checkable_literals(self):
+        role = DEFAULT_CANDIDATE_ROLES[0]
+        prompt = role.prompt(1, len(DEFAULT_CANDIDATE_ROLES))
+
+        self.assertIn(f"'role': {role.name!r}", prompt)
+        self.assertIn(f"'group': {role.group!r}", prompt)
+        self.assertIn(f"'category': {role.category!r}", prompt)
+        self.assertIn("supports must be a literal non-empty list", prompt)
+        self.assertIn("inside the build_features function body", prompt)
+        self.assertIn("features['history_author_ids']", prompt)
+
     def test_config_only_candidate_is_rejected(self):
         role = DEFAULT_CANDIDATE_ROLES[0]
         code = history_candidate().replace("return ('din', feature_dimension)", "return ('fm', feature_dimension)")
