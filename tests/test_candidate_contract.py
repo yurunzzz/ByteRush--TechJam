@@ -3,6 +3,7 @@ import unittest
 from ai_scientist.treesearch.candidate_contract import (
     DEFAULT_CANDIDATE_ROLES,
     candidate_semantic_signature,
+    config_assignment,
     format_factor_change,
     select_candidate_roles,
     validate_candidate_contract,
@@ -107,6 +108,40 @@ class CandidateContractTests(unittest.TestCase):
         self.assertTrue(validate_tuning_contract(BASE, tuned).valid)
         invalid = tuned.replace("return ('fm', feature_dimension)", "return ('deepfm', feature_dimension)")
         self.assertFalse(validate_tuning_contract(BASE, invalid).valid)
+
+    def test_tuning_preserves_dynamic_seed_expression(self):
+        base = BASE.replace(
+            "CONFIG = {'learning_rate': 0.001, 'epochs': 6}",
+            "CONFIG = {'seed': int(os.environ.get('AI_SCIENTIST_SEED', '0')), "
+            "'learning_rate': 0.001, 'epochs': 6}",
+        )
+        tuned = base.replace("'learning_rate': 0.001", "'learning_rate': 0.0005")
+
+        result = validate_tuning_contract(base, tuned)
+
+        self.assertTrue(result.valid, result.reasons)
+        self.assertIn("__ast_expression__", result.config["seed"])
+        self.assertEqual(config_assignment(tuned)["learning_rate"], 0.0005)
+
+    def test_tuning_cannot_replace_dynamic_seed_or_config_keys(self):
+        base = BASE.replace(
+            "CONFIG = {'learning_rate': 0.001, 'epochs': 6}",
+            "CONFIG = {'seed': int(os.environ.get('AI_SCIENTIST_SEED', '0')), "
+            "'learning_rate': 0.001, 'epochs': 6}",
+        )
+        changed_seed = base.replace(
+            "int(os.environ.get('AI_SCIENTIST_SEED', '0'))",
+            "123",
+        )
+        missing_key = base.replace(", 'epochs': 6", "")
+
+        seed_result = validate_tuning_contract(base, changed_seed)
+        key_result = validate_tuning_contract(base, missing_key)
+
+        self.assertFalse(seed_result.valid)
+        self.assertTrue(any("dynamic CONFIG" in reason for reason in seed_result.reasons))
+        self.assertFalse(key_result.valid)
+        self.assertTrue(any("CONFIG keys" in reason for reason in key_result.reasons))
 
     def test_dynamic_portfolio_keeps_all_groups_and_eight_slots(self):
         summary = {

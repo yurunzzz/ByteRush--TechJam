@@ -10,7 +10,11 @@ from queue import Queue
 import logging
 import humanize
 from .backend import FunctionSpec, compile_prompt_to_md, query
-from .candidate_contract import literal_assignment, validate_tuning_contract
+from .candidate_contract import (
+    config_assignment,
+    literal_assignment,
+    validate_tuning_contract,
+)
 from .interpreter import ExecutionResult
 from .journal import Journal, Node
 from .utils import data_preview
@@ -2719,7 +2723,7 @@ class ParallelAgent:
 
         if not result_node.is_buggy:
             self._hyperparam_tuning_state["tried_hyperparams"].add(hyperparam_name)
-            config = literal_assignment(result_node.code, "CONFIG")
+            config = config_assignment(result_node.code)
             score = None
             try:
                 score = result_node.metric.get_mean_value()

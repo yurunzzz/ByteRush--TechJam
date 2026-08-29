@@ -258,6 +258,59 @@ def literal_assignment(code: str, name: str) -> Any:
     return None
 
 
+def config_assignment(code: str) -> Mapping[str, Any] | None:
+    """Parse CONFIG while preserving trusted dynamic expressions as AST text."""
+    tree = _tree(code)
+    if tree is None:
+        return None
+    for statement in tree.body:
+        value = None
+        if isinstance(statement, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "CONFIG"
+            for target in statement.targets
+        ):
+            value = statement.value
+        elif (
+            isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+            and statement.target.id == "CONFIG"
+        ):
+            value = statement.value
+        if value is None:
+            continue
+        if not isinstance(value, ast.Dict):
+            return None
+        parsed: dict[str, Any] = {}
+        for key_node, value_node in zip(value.keys, value.values):
+            if key_node is None:
+                return None
+            try:
+                key = ast.literal_eval(key_node)
+            except (ValueError, TypeError, SyntaxError):
+                return None
+            if not isinstance(key, str) or key in parsed:
+                return None
+            try:
+                parsed[key] = ast.literal_eval(value_node)
+            except (ValueError, TypeError, SyntaxError):
+                parsed[key] = {
+                    "__ast_expression__": ast.dump(
+                        value_node,
+                        include_attributes=False,
+                    )
+                }
+        return parsed
+    return None
+
+
+def _is_config_expression(value: Any) -> bool:
+    return (
+        isinstance(value, Mapping)
+        and set(value) == {"__ast_expression__"}
+        and isinstance(value.get("__ast_expression__"), str)
+    )
+
+
 def component_guard_calls(code: str) -> set[str]:
     tree = _tree(code)
     if tree is None:
@@ -339,15 +392,30 @@ def validate_tuning_contract(
 ) -> TuningContractResult:
     """Require tuning nodes to change one literal CONFIG and no algorithm code."""
     reasons: list[str] = []
-    base_config = literal_assignment(base_code, "CONFIG")
-    candidate_config = literal_assignment(candidate_code, "CONFIG")
+    base_config = config_assignment(base_code)
+    candidate_config = config_assignment(candidate_code)
     if not isinstance(candidate_config, Mapping):
         candidate_config = {}
-        reasons.append("missing literal CONFIG mapping")
+        reasons.append("missing explicit CONFIG mapping")
     if not isinstance(base_config, Mapping):
-        reasons.append("base code has no literal CONFIG mapping")
-    elif dict(candidate_config) == dict(base_config):
-        reasons.append("CONFIG is unchanged")
+        reasons.append("base code has no explicit CONFIG mapping")
+    else:
+        if set(candidate_config) != set(base_config):
+            reasons.append("CONFIG keys changed")
+        changed_literals = []
+        for key, base_value in base_config.items():
+            if key not in candidate_config:
+                continue
+            candidate_value = candidate_config[key]
+            if _is_config_expression(base_value):
+                if candidate_value != base_value:
+                    reasons.append(f"dynamic CONFIG expression changed: {key}")
+            elif _is_config_expression(candidate_value):
+                reasons.append(f"literal CONFIG value became executable: {key}")
+            elif candidate_value != base_value:
+                changed_literals.append(key)
+        if not changed_literals:
+            reasons.append("no literal CONFIG value changed")
     if not is_config_only_change(base_code, candidate_code):
         reasons.append("tuning changed code outside CONFIG or metadata")
     if any(dict(candidate_config) == dict(previous) for previous in tried_configs):
