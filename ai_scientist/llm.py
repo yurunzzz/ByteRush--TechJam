@@ -2,7 +2,7 @@ import json
 import os
 import re
 from typing import Any
-from ai_scientist.utils.token_tracker import track_token_usage
+from ai_scientist.utils.token_tracker import track_token_usage, track_response_usage
 
 import anthropic
 import backoff
@@ -197,6 +197,9 @@ def get_batch_responses_from_llm(
             )
             content.append(c)
             new_msg_history.append(hist)
+
+    if "response" in locals():
+        track_response_usage(response, system_message, prompt)
 
     if print_debug:
         # Just print the first one.

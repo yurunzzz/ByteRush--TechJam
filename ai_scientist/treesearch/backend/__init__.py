@@ -1,5 +1,6 @@
 from . import backend_anthropic, backend_openai
 from .utils import FunctionSpec, OutputType, PromptType, compile_prompt_to_md
+from ai_scientist.utils.resource_tracker import record_llm_call
 
 def get_ai_client(model: str, **model_kwargs):
     """
@@ -72,6 +73,14 @@ def query(
         user_message=compile_prompt_to_md(user_message) if user_message else None,
         func_spec=func_spec,
         **model_kwargs,
+    )
+
+    record_llm_call(
+        model=str(info.get("model") or model),
+        prompt_tokens=in_tok_count,
+        completion_tokens=out_tok_count,
+        request_seconds=req_time,
+        backend="anthropic" if "claude-" in model else "openai-compatible",
     )
 
     return output

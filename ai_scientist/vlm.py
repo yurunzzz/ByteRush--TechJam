@@ -6,7 +6,7 @@ import backoff
 import openai
 import os
 from PIL import Image
-from ai_scientist.utils.token_tracker import track_token_usage
+from ai_scientist.utils.token_tracker import track_token_usage, track_response_usage
 
 MAX_NUM_TOKENS = 4096
 
@@ -326,6 +326,8 @@ def get_batch_responses_from_vlm(
                 n=n_responses,
                 seed=0,
             )
+
+        track_response_usage(response, system_message, new_msg_history)
 
         # Extract content from all responses
         contents = [r.message.content for r in response.choices]

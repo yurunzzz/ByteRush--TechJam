@@ -5,6 +5,7 @@ import json
 import random
 import subprocess
 import os
+import multiprocessing
 from queue import Queue
 import logging
 import humanize
@@ -19,6 +20,7 @@ import copy
 import pickle
 from dataclasses import asdict
 from omegaconf import OmegaConf
+from ai_scientist.utils.resource_tracker import reserve_iteration
 
 from rich import print
 from pathlib import Path
@@ -471,6 +473,13 @@ class MinimalAgent:
                     "Every runnable solution must print an AI_SCIENTIST_RESULT JSON object and save validation-only experiment_data.npy under ./working.",
                     "The experiment_data.npy metric used for node selection must be validation primary and must mark higher values as better.",
                     "Reject predictions with wrong length, NaN, or infinity, and save the validation-best checkpoint.",
+                    "For Stage 3 neural models, use PyTorch rather than NumPy-only neural-network implementations.",
+                    "Select device with torch.device('cuda' if torch.cuda.is_available() else 'cpu') and print the selected device.",
+                    "Move the complete nn.Module and every training/inference tensor to that device; construct the optimizer only after model.to(device).",
+                    "Use torch.long categorical IDs with nn.Embedding. Convert predictions back to CPU NumPy only when calling trusted evaluate.py.",
+                    "The runnable result metadata must report python executable, torch version, selected device, cuda availability, and peak CUDA memory.",
+                    "If CUDA is visible but a Stage 3 neural model remains on CPU, treat this as an implementation error rather than silently continuing.",
+                    "The supplied Stage 1 template demonstrates the required PyTorch/CUDA-compatible step/predict/state interface.",
                     "Write a single self-contained Python program that executes immediately and completes within the configured timeout.",
                     "Your response must contain a concise plan followed by exactly one complete Python code block.",
                 ]
@@ -1379,7 +1388,10 @@ class ParallelAgent:
             logger.info(f"Limiting workers to {self.num_workers} to match GPU count")
 
         self.timeout = self.cfg.exec.timeout
-        self.executor = ProcessPoolExecutor(max_workers=self.num_workers)
+        self.executor = ProcessPoolExecutor(
+            max_workers=self.num_workers,
+            mp_context=multiprocessing.get_context("spawn"),
+        )
         self._is_shutdown = False
         # Define the metric once at initialization
         self.evaluation_metrics = self._define_global_metrics()
@@ -1772,6 +1784,12 @@ class ParallelAgent:
 
             # Execute and parse results
             print("Running code")
+            iteration = reserve_iteration(
+                stage=stage_name,
+                node_id=getattr(child_node, "id", None),
+                seed_evaluation=seed_eval,
+            )
+            print(f"Competition iteration: {iteration if iteration else 'seed-eval'}")
             exec_result = process_interpreter.run(child_node.code, True)
             process_interpreter.cleanup_session()
 

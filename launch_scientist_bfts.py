@@ -4,9 +4,10 @@ import argparse
 import shutil
 import torch
 import os
+import time
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from ai_scientist.llm import create_client
 
 from contextlib import contextmanager
@@ -18,6 +19,7 @@ from ai_scientist.treesearch.bfts_utils import (
     edit_bfts_config_file,
 )
 from ai_scientist.utils.token_tracker import token_tracker
+from ai_scientist.utils.resource_tracker import CompetitionResourceTracker
 
 
 def print_time():
@@ -183,6 +185,8 @@ def redirect_stdout_stderr_to_file(log_file_path):
 
 
 if __name__ == "__main__":
+    run_started_monotonic = time.monotonic()
+    run_started_at_utc = datetime.now(timezone.utc).isoformat()
     args = parse_arguments()
     os.environ["AI_SCIENTIST_ROOT"] = os.path.dirname(os.path.abspath(__file__))
     print(f"Set AI_SCIENTIST_ROOT to {os.environ['AI_SCIENTIST_ROOT']}")
@@ -201,6 +205,14 @@ if __name__ == "__main__":
     idea_dir = f"experiments/{date}_{idea['Name']}_attempt_{args.attempt_id}"
     print(f"Results will be saved in {idea_dir}")
     os.makedirs(idea_dir, exist_ok=True)
+    resource_tracker = CompetitionResourceTracker(
+        idea_dir,
+        iteration_limit=50,
+        started_at_utc=run_started_at_utc,
+        started_monotonic=run_started_monotonic,
+    )
+    resource_tracker.start()
+    print(f"Resource accounting: {resource_tracker.summary_path}")
 
     # Convert idea json to markdown file
     idea_path_md = osp.join(idea_dir, "idea.md")
@@ -274,6 +286,9 @@ if __name__ == "__main__":
         shutil.rmtree(osp.join(idea_dir, "experiment_results"))
 
     save_token_tracker(idea_dir)
+    resource_summary = resource_tracker.finalize()
+    print("Competition resource summary:")
+    print(json.dumps(resource_summary, indent=2))
 
     # NOTE: The academic paper-writeup and LLM/VLM paper-review stages were
     # removed for the TechJam recommender-agent task (no paper deliverable).

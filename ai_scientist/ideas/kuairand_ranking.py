@@ -14,6 +14,11 @@ import time
 from pathlib import Path
 
 import numpy as np
+import torch
+from torch import nn
+
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {DEVICE}", flush=True)
 
 execution_dir = Path.cwd()
 input_candidates = (execution_dir / "input", execution_dir.parent / "input")
@@ -57,20 +62,72 @@ def component_enabled(name: str) -> bool:
 
 
 # Stage 3 extension point. X is a dense integer ID array of shape (batch, 5),
-# one categorical feature ID per field. It is NOT a one-hot/scipy matrix:
-# use embedding lookup V[X], never X @ V. Replace this class with a compatible
-# candidate while keeping __init__, step, predict, state_dict and
-# load_state_dict. Vectorize over the whole batch: Python loops over samples are
-# forbidden. New Stage 3 prototypes should use at most 12 epochs. Never load
-# test data.
-class CandidateModel(baseline_module.FM):
+# one categorical feature ID per field. The baseline is deliberately implemented
+# in PyTorch so neural candidates inherit a real CUDA execution path.
+class CandidateModel(nn.Module):
+    def __init__(self, feature_dimension, k=16, lr=0.001, l2=1e-6, seed=0):
+        super().__init__()
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+        self.V = nn.Embedding(feature_dimension, k)
+        self.W = nn.Embedding(feature_dimension, 1)
+        self.b = nn.Parameter(torch.zeros((), dtype=torch.float32))
+        nn.init.normal_(self.V.weight, mean=0.0, std=0.01)
+        nn.init.normal_(self.W.weight, mean=0.0, std=0.01)
+        self.to(DEVICE)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=lr, weight_decay=l2)
+        self.loss_fn = nn.BCEWithLogitsLoss()
+
+    @property
+    def device(self):
+        return self.b.device
+
+    def forward(self, x):
+        embeddings = self.V(x)
+        linear = self.W(x).sum(dim=1).squeeze(-1) + self.b
+        summed = embeddings.sum(dim=1)
+        interaction = 0.5 * (
+            summed.square() - embeddings.square().sum(dim=1)
+        ).sum(dim=1)
+        return linear + interaction
+
+    def step(self, x, y):
+        self.train()
+        x_tensor = torch.as_tensor(x, dtype=torch.long, device=self.device)
+        y_tensor = torch.as_tensor(y, dtype=torch.float32, device=self.device)
+        self.optimizer.zero_grad(set_to_none=True)
+        logits = self.forward(x_tensor)
+        loss = self.loss_fn(logits, y_tensor)
+        loss.backward()
+        self.optimizer.step()
+        return float(loss.detach().cpu())
+
+    def predict(self, x, batch_size=65536):
+        self.eval()
+        predictions = []
+        with torch.inference_mode():
+            for start in range(0, len(x), batch_size):
+                x_tensor = torch.as_tensor(
+                    x[start : start + batch_size],
+                    dtype=torch.long,
+                    device=self.device,
+                )
+                predictions.append(self.forward(x_tensor).cpu().numpy())
+        return np.concatenate(predictions)
+
     def state_dict(self):
-        return {"V": self.V.copy(), "W": self.W.copy(), "b": np.asarray(self.b).copy()}
+        return {
+            name: tensor.detach().cpu().numpy().copy()
+            for name, tensor in super().state_dict().items()
+        }
 
     def load_state_dict(self, state):
-        self.V = state["V"].copy()
-        self.W = state["W"].copy()
-        self.b = np.float32(state["b"])
+        tensor_state = {
+            name: torch.as_tensor(value, device=self.device)
+            for name, value in state.items()
+        }
+        return super().load_state_dict(tensor_state)
 
 
 def file_hash(path: Path) -> str:
@@ -170,6 +227,20 @@ experiment_data = {
             "seed": CONFIG["seed"],
             "runtime_seconds": time.monotonic() - started,
             "candidate_class": type(model).__name__,
+            "python_executable": sys.executable,
+            "torch_version": torch.__version__,
+            "cuda_available": torch.cuda.is_available(),
+            "device": str(model.device),
+            "gpu_name": (
+                torch.cuda.get_device_name(model.device)
+                if model.device.type == "cuda"
+                else None
+            ),
+            "cuda_peak_memory_mib": (
+                torch.cuda.max_memory_allocated(model.device) / (1024 ** 2)
+                if model.device.type == "cuda"
+                else 0.0
+            ),
             "ablation_target": ABLATION_TARGET,
             "registered_ablation_components": ABLATION_COMPONENTS,
             "active_ablation_components": {
