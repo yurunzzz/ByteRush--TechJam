@@ -4,10 +4,11 @@
     python eda.py --data-dir KuaiRand-Pure/data
 report 直接打到 stdout；加 --raw-log-scan 会再扫一遍原始日志列出所有可用反馈列。
 """
-import argparse, csv, os, collections
+import argparse, csv, os, sys, collections
 from pathlib import Path
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # 让上级的 data.py 可导入
 import data as data_module  # 复用官方 loader / split，绝不改口径
 
 
@@ -118,7 +119,8 @@ def raw_log_scan(data_dir):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data-dir", type=Path, default=Path("KuaiRand-Pure/data"))
+    ap.add_argument("--data-dir", type=Path,
+                    default=Path(__file__).resolve().parent.parent / "KuaiRand-Pure" / "data")
     ap.add_argument("--raw-log-scan", action="store_true",
                     help="额外扫原始日志, 列出全部可用反馈列")
     args = ap.parse_args()

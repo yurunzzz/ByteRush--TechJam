@@ -7,13 +7,14 @@
     python eda_plots.py --data-dir KuaiRand-Pure/data --out-dir eda_figs
 依赖: numpy, matplotlib
 """
-import argparse, collections
+import argparse, sys, collections
 from pathlib import Path
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")  # 无显示环境也能存图
 import matplotlib.pyplot as plt
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # 让上级的 data.py 可导入
 import data as data_module
 
 SPLIT_COLOR = {"train": "#4C72B0", "valid": "#DD8452", "test": "#55A868"}
@@ -192,7 +193,8 @@ def save(fig, path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data-dir", type=Path, default=Path("KuaiRand-Pure/data"))
+    ap.add_argument("--data-dir", type=Path,
+                    default=Path(__file__).resolve().parent.parent / "KuaiRand-Pure" / "data")
     ap.add_argument("--out-dir", type=Path, default=Path("eda_figs"))
     args = ap.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
