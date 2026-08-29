@@ -63,6 +63,22 @@ class AblationConfig:
 
 
 @dataclass
+class ResearchLoopSettings:
+    enabled: bool = False
+    max_research_rounds: int = 3
+    patience: int = 3
+    stage1_validation_iterations: int = 2
+    baseline_tuning_iterations: int = 20
+    candidate_branches: int = 3
+    stage3_generation_attempts: int = 12
+    candidate_tuning_iterations: int = 12
+    finalist_top_k: int = 3
+    finalist_num_seeds: int = 3
+    min_primary_gain: float = 0.002
+    required_seed_wins: int = 2
+
+
+@dataclass
 class AgentConfig:
     steps: int
     stages: dict[str, int]
@@ -84,6 +100,8 @@ class AgentConfig:
     summary: Optional[StageConfig] = None
     select_node: Optional[StageConfig] = None
     ablation: AblationConfig = field(default_factory=AblationConfig)
+    research_loop: ResearchLoopSettings = field(default_factory=ResearchLoopSettings)
+
 
 @dataclass
 class ExecConfig:

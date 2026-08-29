@@ -39,6 +39,15 @@ def _is_kuairand_task(task_desc: Any) -> bool:
     return "KuaiRand" in task_text and "nDCG@5" in task_text
 
 
+def _is_hyperparam_tuning_stage(
+    stage_name: Optional[str], tuning_base_node: Optional[Node]
+) -> bool:
+    """Treat Stage 2 and explicit candidate-tuning agents identically."""
+    return bool(
+        (stage_name and stage_name.startswith("2_")) or tuning_base_node is not None
+    )
+
+
 def _extract_required_starting_code(task_desc: Any) -> Optional[str]:
     """Extract the organizer-aligned code embedded by ``--load_code``.
 
@@ -468,6 +477,11 @@ class MinimalAgent:
                     "Do not modify input/data.py, input/evaluate.py, the chronological split, row order, or submission schema.",
                     "Start from input/run_fm_experiment.py and its JSON configuration contract.",
                     "Stage 2 may tune only allowed FM hyperparameters; Stage 3 may make controlled model changes while preserving this evaluation contract.",
+                    "Extend the supplied candidate at its existing extension points; call trusted source helpers directly instead of duplicating their data or evaluation logic.",
+                    "Preserve build_features(splits, feature_state=None), create_model(feature_dimension, config=None), save_candidate_checkpoint, load_candidate_checkpoint, and run_training.",
+                    "Any new factor vocabulary, bucket, normalization statistic, or historical aggregate must be fitted from train only, returned as JSON-serializable feature_state, and reused unchanged for validation/test.",
+                    "The existing checkpoint path must save model weights, full config, feature_state, and feature_dimension; do not replace it with a weights-only checkpoint.",
+                    "When AI_SCIENTIST_INFERENCE_ONLY=1, importing the candidate must define its model/feature/checkpoint functions without loading data, training, evaluating, or writing artifacts.",
                     "Every new Stage 3 model component must be registered as a literal True entry in ABLATION_COMPONENTS and guarded with component_enabled(name), so Stage 4 can disable exactly that component without changing anything else.",
                     "Keep ABLATION_COMPONENTS, ABLATION_TARGET, component_enabled, and the ablation metadata in the runnable program.",
                     "Every runnable solution must print an AI_SCIENTIST_RESULT JSON object and save validation-only experiment_data.npy under ./working.",
@@ -783,6 +797,14 @@ class MinimalAgent:
                 "Make sure to use a filename 'experiment_data.npy' to save the data. Do not use any other filename.",
             ]
         }
+        if _is_kuairand_task(self.task_desc):
+            prompt["Instructions"] |= self._prompt_impl_guideline
+            prompt["Instructions"]["Implementation guideline"].extend(
+                [
+                    "This is tuning of one fixed candidate, not a new research idea.",
+                    "Change only literal values inside CONFIG. Preserve the supplied feature, model, training, evaluation, ablation, checkpoint, and inference implementations.",
+                ]
+            )
         prompt["Instructions"] |= self._prompt_hyperparam_tuning_resp_fmt
         plan, code = self.plan_and_code_query(prompt)
         return Node(
@@ -1357,6 +1379,8 @@ class ParallelAgent:
         best_stage3_node=None,
         best_stage2_node=None,
         best_stage1_node=None,
+        tuning_base_node=None,
+        research_base_node=None,
     ):
         super().__init__()
         self.task_desc = task_desc
@@ -1372,6 +1396,13 @@ class ParallelAgent:
         self.best_stage2_node = (
             best_stage2_node  # to initialize plotting code (stage 3)
         )
+        self.research_base_node = research_base_node
+        self.tuning_base_node = tuning_base_node or best_stage1_node
+        self.is_hyperparam_tuning = _is_hyperparam_tuning_stage(
+            stage_name, tuning_base_node
+        )
+        if self.is_hyperparam_tuning and self.tuning_base_node is None:
+            raise ValueError("a hyperparameter-tuning agent requires a base node")
         self.data_preview = None
         self.num_workers = cfg.agent.num_workers
         self.num_gpus = get_gpu_count()
@@ -1477,22 +1508,26 @@ class ParallelAgent:
             is_seed_agg_node=True,
         )
 
-    def _run_multi_seed_evaluation(self, node: Node) -> List[Node]:
+    def _run_multi_seed_evaluation(self, node: Node, num_seeds: Optional[int] = None) -> List[Node]:
         """Run multiple seeds of the same node to get statistical metrics.
         Returns a list of nodes with different random seeds."""
 
         # Convert node to dict for parallel processing
-        node_data = node.to_dict()
+        base_node_data = node.to_dict()
         node_code = node.code
 
         # Submit parallel jobs for different seeds
         seed_nodes = []
         futures = []
-        num_seeds = int(self.cfg.agent.multi_seed_eval.num_seeds)
-        if self.stage_name and self.stage_name.startswith("4_"):
-            ablation_cfg = self.cfg.agent.get("ablation", {})
-            num_seeds = int(ablation_cfg.get("num_seeds", num_seeds))
+        use_stage_default = num_seeds is None
+        if use_stage_default:
+            num_seeds = int(self.cfg.agent.multi_seed_eval.num_seeds)
+            if self.stage_name and self.stage_name.startswith("4_"):
+                ablation_cfg = self.cfg.agent.get("ablation", {})
+                num_seeds = int(ablation_cfg.get("num_seeds", num_seeds))
+        num_seeds = int(num_seeds)
         for seed in range(num_seeds):
+            node_data = copy.deepcopy(base_node_data)
             gpu_id = None
             if self.gpu_manager is not None:
                 try:
@@ -2123,20 +2158,25 @@ class ParallelAgent:
 
     def _generate_hyperparam_tuning_idea(self) -> Optional[HyperparamTuningIdea]:
         """Generate the next hyperparam tuning idea based on what's been done.
-        This is minaly for Stage 2 (baseline tuning).
+        Stage 2 tunes FM; explicit tuning agents tune one fixed Stage 3 candidate.
         """
         tried = list(self._hyperparam_tuning_state["tried_hyperparams"])
+        tuning_scope = (
+            "the fixed FM baseline"
+            if self.stage_name and self.stage_name.startswith("2_")
+            else "the fixed candidate algorithm"
+        )
 
         hyperparam_tuning_prompt = {
             "Introduction": (
-                "You are an AI researcher conducting hyperparameter tuning for baseline experiments. "
+                f"You are tuning {tuning_scope}. "
                 "Based on the current implementation and previous hyperparameter tuning attempts (if any), "
                 "propose ONE new hyperparameter tuning idea to see if it improves the performance."
                 "You should first check if simply training longer (more epochs) improves the performance."
                 "Then try tuning common hyperparameters such as learning rate, batch size, etc."
                 "Only propose algorithm-specific and/or model-specific hyperparameters after you have tried the above."
             ),
-            "Base code you are working on": wrap_code(self.best_stage1_node.code),
+            "Base code you are working on": wrap_code(self.tuning_base_node.code),
             "Previous Hyperparam Tuning Attempts": {
                 "Has been tried": tried if tried else "Nothing has been tried yet.",
             },
@@ -2144,6 +2184,8 @@ class ParallelAgent:
                 "Requirements": [
                     "1. Identify ONE specific hyperparameter to tune",
                     "2. Ensure the hyperparameter is different from previous attempts",
+                    "3. Preserve the model architecture, feature builder, loss, and data split",
+                    "4. Return one complete runnable configuration, not an internal sweep",
                 ]
             },
             "Response format": (
@@ -2274,7 +2316,7 @@ class ParallelAgent:
             leaves.extend(self._get_leaves(child))
         return leaves
 
-    def _select_parallel_nodes(self) -> List[Optional[Node]]:
+    def _select_parallel_nodes(self, max_nodes: Optional[int] = None) -> List[Optional[Node]]:
         """Select N nodes to process in parallel,
         balancing between tree exploration and exploitation.
         Note:
@@ -2288,9 +2330,12 @@ class ParallelAgent:
         nodes_to_process = []
         processed_trees = set()
         search_cfg = self.cfg.agent.search
+        target_count = self.num_workers
+        if max_nodes is not None:
+            target_count = min(target_count, max(0, int(max_nodes)))
         print(f"[cyan]self.num_workers: {self.num_workers}, [/cyan]")
 
-        while len(nodes_to_process) < self.num_workers:
+        while len(nodes_to_process) < target_count:
             # Initial drafting phase, creating root nodes
             print(
                 f"Checking draft nodes... num of journal.draft_nodes: {len(self.journal.draft_nodes)}, search_cfg.num_drafts: {search_cfg.num_drafts}"
@@ -2310,10 +2355,11 @@ class ParallelAgent:
             # Stage 4 is a controlled scientific comparison: a failed
             # leave-one-out run is recorded as failed and must never be turned
             # into an unconstrained LLM rewrite by the generic debug branch.
-            is_controlled_ablation = bool(
-                self.stage_name and self.stage_name.startswith("4_")
+            has_fixed_research_parent = (
+                self.research_base_node is not None
+                or bool(self.stage_name and self.stage_name.startswith("4_"))
             )
-            if not is_controlled_ablation and random.random() < search_cfg.debug_prob:
+            if not has_fixed_research_parent and random.random() < search_cfg.debug_prob:
                 print("Checking debuggable nodes")
                 # print(f"Buggy nodes: {self.journal.buggy_nodes}")
                 try:
@@ -2361,10 +2407,14 @@ class ParallelAgent:
             if self.stage_name and self.stage_name.startswith("4_"):
                 nodes_to_process.append(self.best_stage3_node)
                 continue
-            # Special handling for Stage 2 (Hyperparam tuning for baseline)
-            elif self.stage_name and self.stage_name.startswith("2_"):
-                nodes_to_process.append(self.best_stage1_node)
+            # Stage 2 tunes FM; candidate-tuning agents use their explicit base.
+            elif self.is_hyperparam_tuning:
+                nodes_to_process.append(self.tuning_base_node)
                 continue
+            elif self.research_base_node is not None:
+                nodes_to_process.append(self.research_base_node)
+                continue
+
             else:  # Stage 1, 3 (normal best-first search)
                 # Improvement phase
                 print("Checking good nodes..")
@@ -2402,9 +2452,9 @@ class ParallelAgent:
 
         return nodes_to_process
 
-    def step(self, exec_callback: ExecCallbackType):
+    def step(self, exec_callback: ExecCallbackType, max_nodes: Optional[int] = None):
         print("Selecting nodes to process")
-        nodes_to_process = self._select_parallel_nodes()
+        nodes_to_process = self._select_parallel_nodes(max_nodes=max_nodes)
         print(f"Selected nodes: {[n.id if n else None for n in nodes_to_process]}")
 
         # Convert nodes to dicts
@@ -2445,11 +2495,7 @@ class ParallelAgent:
                 except RuntimeError as e:
                     logger.warning(f"Could not acquire GPU: {e}. Running on CPU")
 
-            if (
-                self.stage_name
-                and self.stage_name.startswith("2_")
-                and node_data["is_buggy"] is False
-            ):
+            if self.is_hyperparam_tuning and node_data["is_buggy"] is False:
                 new_hyperparam_idea = self._generate_hyperparam_tuning_idea()
                 self._hyperparam_tuning_state["tried_hyperparams"].add(
                     new_hyperparam_idea.name
@@ -2529,6 +2575,8 @@ class ParallelAgent:
                 # Add node to journal's list and assign its step number
                 self.journal.append(result_node)
                 print("Added result node to journal")
+                if self._maybe_promote_tuning_base(result_node):
+                    print("Promoted result node to the progressive tuning base")
 
             except TimeoutError:
                 print("Worker process timed out, couldn't get the result")
@@ -2550,9 +2598,55 @@ class ParallelAgent:
                     self.gpu_manager.release_gpu(process_id)
                     logger.info(f"Released GPU for process {process_id}")
 
+    def _maybe_promote_tuning_base(self, result_node: Node) -> bool:
+        """Continue tuning from the best valid configuration seen so far."""
+        if (
+            not self.is_hyperparam_tuning
+            or result_node.is_buggy
+            or result_node.metric is None
+            or self.tuning_base_node is None
+            or self.tuning_base_node.metric is None
+        ):
+            return False
+
+        try:
+            candidate_score = result_node.metric.get_mean_value()
+            incumbent_score = self.tuning_base_node.metric.get_mean_value()
+            candidate_maximize = result_node.metric._should_maximize()
+            incumbent_maximize = self.tuning_base_node.metric._should_maximize()
+        except (AttributeError, TypeError, ValueError):
+            logger.warning("Ignoring tuning result with an unreadable metric")
+            return False
+
+        if not np.isfinite(candidate_score) or not np.isfinite(incumbent_score):
+            logger.warning("Ignoring tuning result with a non-finite metric")
+            return False
+        if candidate_maximize != incumbent_maximize:
+            logger.warning("Ignoring tuning result with a mismatched metric direction")
+            return False
+
+        improved = (
+            candidate_score > incumbent_score
+            if candidate_maximize
+            else candidate_score < incumbent_score
+        )
+        if not improved:
+            return False
+
+        old_base = self.tuning_base_node
+        self.tuning_base_node = result_node
+        logger.info(
+            "Promoted tuning base from %s (%.8f) to %s (%.8f)",
+            old_base.id,
+            incumbent_score,
+            result_node.id,
+            candidate_score,
+        )
+        return True
+
     def _update_hyperparam_tuning_state(self, result_node: Node):
         """Update hyperparam tuning tracking state based on execution results."""
-        if not self.stage_name or not self.stage_name.startswith("2_"):
+        if not self.is_hyperparam_tuning:
             return
 
         hyperparam_name = result_node.hyperparam_name

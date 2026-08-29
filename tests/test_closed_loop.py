@@ -1,0 +1,310 @@
+import re
+import tempfile
+import unittest
+from pathlib import Path
+
+from omegaconf import OmegaConf
+
+from ai_scientist.treesearch.agent_manager import AgentManager, Stage
+from ai_scientist.treesearch.closed_loop import ClosedLoopRunner
+from ai_scientist.treesearch.journal import Journal, Node
+from ai_scientist.treesearch.parallel_agent import (
+    _extract_enabled_ablation_components,
+)
+from ai_scientist.treesearch.utils.metric import MetricValue
+
+
+def _node(code, score, *, parent=None, ablation_name=None, is_seed=False):
+    return Node(
+        code=code,
+        metric=MetricValue(
+            value=score,
+            maximize=True,
+            name="validation primary",
+        ),
+        parent=parent,
+        is_buggy=False,
+        is_buggy_plots=False,
+        is_seed_node=is_seed,
+        ablation_name=ablation_name,
+    )
+
+
+class FakeManager:
+    def __init__(self, data_dir, output_dir):
+        self.cfg = OmegaConf.create(
+            {
+                "data_dir": str(data_dir),
+                "agent": {
+                    "search": {
+                        "num_drafts": 1,
+                        "debug_prob": 0.0,
+                        "max_debug_depth": 0,
+                    },
+                    "research_loop": {
+                        "enabled": True,
+                        "max_research_rounds": 2,
+                        "patience": 1,
+                        "stage1_validation_iterations": 1,
+                        "baseline_tuning_iterations": 2,
+                        "candidate_branches": 2,
+                        "stage3_generation_attempts": 2,
+                        "candidate_tuning_iterations": 2,
+                        "finalist_top_k": 2,
+                        "finalist_num_seeds": 3,
+                        "min_primary_gain": 0.002,
+                        "required_seed_wins": 2,
+                    },
+                    "ablation": {"max_components": 1},
+                    "final_model_dir": str(output_dir),
+                },
+            }
+        )
+        initial = Stage(
+            name="1_initial_implementation_1_preliminary",
+            description="preliminary",
+            goals="validate FM",
+            max_iterations=1,
+            num_drafts=1,
+            stage_number=1,
+        )
+        self.current_stage_number = 1
+        self.current_stage = initial
+        self.stages = [initial]
+        self.journals = {initial.name: Journal()}
+        self.main_stage_goals = {
+            1: "validate FM",
+            2: "tune FM",
+            3: "research",
+            4: "ablate",
+        }
+        self.checkpoint_calls = 0
+
+    def _curate_task_desc(self, stage):
+        return "KuaiRand-Pure validation metric nDCG@5"
+
+    def parse_stage_names(self, stage_name):
+        numbers = [int(value) for value in re.findall(r"\d+", stage_name)]
+        parts = re.split(r"\d+", stage_name)
+        return (
+            numbers[0],
+            parts[1].strip("_"),
+            numbers[1],
+            parts[-1].strip("_"),
+        )
+
+    def _save_checkpoint(self):
+        self.checkpoint_calls += 1
+
+
+class FakeAgent:
+    created_stage_names = []
+
+    def __init__(self, **kwargs):
+        self.journal = kwargs["journal"]
+        self.stage_name = kwargs["stage_name"]
+        self.tuning_base = kwargs["tuning_base_node"]
+        self.research_base = kwargs["research_base_node"]
+        self.stage3_base = kwargs["best_stage3_node"]
+        self.created_stage_names.append(self.stage_name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return False
+
+    def step(self, exec_callback, max_nodes=None):
+        count = int(max_nodes or 1)
+        if self.stage_name.startswith("1_"):
+            self.journal.append(
+                _node(
+                    "ABLATION_COMPONENTS = {}\nBASELINE = 'FM'\n",
+                    0.600,
+                )
+            )
+            return
+
+        if self.stage_name.startswith("2_"):
+            for index in range(count):
+                score = 0.601 + index * 0.001
+                self.journal.append(
+                    _node(
+                        self.tuning_base.code + f"# fm tuning {index}\n",
+                        score,
+                        parent=self.tuning_base,
+                    )
+                )
+            return
+
+        if self.stage_name.startswith("3_creative"):
+            base_score = self.research_base.metric.get_mean_value()
+            second_round = "round_two" in self.stage_name
+            for index in range(count):
+                if second_round:
+                    score = base_score - 0.001 - index * 0.001
+                else:
+                    score = base_score + 0.004 - index * 0.001
+                component = f"factor_{self.stage_name}_{index}"
+                code = (
+                    f"ABLATION_COMPONENTS = {{{component!r}: True}}\n"
+                    f"MODEL = 'candidate_{index}'\n"
+                )
+                self.journal.append(
+                    _node(code, score, parent=self.research_base)
+                )
+            return
+
+        if self.stage_name.startswith("3_candidate_tuning"):
+            base_score = self.tuning_base.metric.get_mean_value()
+            second_round = "round_two" in self.stage_name
+            increment = 0.0005 if second_round else 0.001
+            for index in range(count):
+                score = base_score + increment * (index + 1)
+                self.journal.append(
+                    _node(
+                        self.tuning_base.code + f"# candidate tuning {index}\n",
+                        score,
+                        parent=self.tuning_base,
+                    )
+                )
+            return
+
+        if self.stage_name.startswith("4_"):
+            components = _extract_enabled_ablation_components(
+                self.stage3_base.code
+            )
+            for component in components[:count]:
+                code = (
+                    "import os\n"
+                    "os.environ['AI_SCIENTIST_ABLATION_TARGET'] = "
+                    f"{component!r}\n"
+                    + self.stage3_base.code
+                )
+                self.journal.append(
+                    _node(
+                        code,
+                        self.stage3_base.metric.get_mean_value() + 0.0005,
+                        parent=self.stage3_base,
+                        ablation_name=component,
+                    )
+                )
+            return
+
+        raise AssertionError(f"unexpected stage {self.stage_name}")
+
+    def _run_multi_seed_evaluation(self, node, num_seeds=None):
+        offsets = (-0.0001, 0.0, 0.0001)
+        results = []
+        for offset in offsets[: int(num_seeds)]:
+            seed = _node(
+                node.code,
+                node.metric.get_mean_value() + offset,
+                parent=node,
+                is_seed=True,
+            )
+            self.journal.append(seed)
+            results.append(seed)
+        return results
+
+
+class ClosedLoopTests(unittest.TestCase):
+    def setUp(self):
+        FakeAgent.created_stage_names = []
+
+    def _data_dir(self, root):
+        data_dir = root / "KuaiRand-Pure" / "data"
+        data_dir.mkdir(parents=True)
+        headers = {
+            "log_standard_4_08_to_4_21_pure.csv": (
+                "user_id,video_id,date,time_ms,long_view\n"
+            ),
+            "user_features_pure.csv": "user_id,user_active_degree\n",
+            "video_features_basic_pure.csv": "video_id,author_id,tag\n",
+            "video_features_statistic_pure.csv": "video_id,show_cnt\n",
+        }
+        for name, header in headers.items():
+            (data_dir / name).write_text(header)
+        return root
+
+    def test_complete_loop_promotes_stage4_winner_then_reuses_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manager = FakeManager(
+                self._data_dir(root / "starter"),
+                root / "artifacts" / "final_model",
+            )
+            finalized = {}
+
+            def finalizer(journal, **kwargs):
+                finalized["journal"] = journal
+                finalized.update(kwargs)
+                return {"source_stage": kwargs["source_stage"]}
+
+            exported = {}
+
+            def submission_exporter(**kwargs):
+                exported.update(kwargs)
+                return {"path": "submission.csv", "checked": True}
+
+            runner = ClosedLoopRunner(
+                manager,
+                exec_callback=lambda *args: None,
+                agent_factory=FakeAgent,
+                finalizer=finalizer,
+                submission_exporter=submission_exporter,
+            )
+            result = runner.run()
+
+        self.assertEqual(result["state"].current_round, 2)
+        self.assertEqual(result["state"].no_improvement_rounds, 1)
+        self.assertAlmostEqual(result["incumbent"].score, 0.6085)
+        self.assertIn("'factor_3_creative_research_1_round_one_0': False", result["incumbent"].node.code)
+        self.assertEqual(manager.checkpoint_calls, 2)
+        self.assertIn("4_ablation_studies_1_round_one", FakeAgent.created_stage_names)
+        self.assertNotIn("4_ablation_studies_1_round_two", FakeAgent.created_stage_names)
+        self.assertIs(finalized["journal"], result["incumbent"].journal)
+        self.assertTrue(result["submission"]["checked"])
+        self.assertEqual(
+            exported["output_dir"],
+            Path(manager.cfg.agent.final_model_dir).resolve(),
+        )
+        self.assertEqual(
+            exported["starter_kit"],
+            Path(manager.cfg.data_dir).resolve(),
+        )
+
+        round_two_journal = manager.journals[
+            "3_creative_research_1_round_two"
+        ]
+        root_node = round_two_journal.nodes[0]
+        siblings = [
+            node for node in round_two_journal.nodes if node.parent is root_node
+        ]
+        self.assertEqual(len(siblings), 2)
+        self.assertIn(
+            "'factor_3_creative_research_1_round_one_0': False",
+            root_node.code,
+        )
+
+    def test_agent_manager_uses_closed_loop_only_when_enabled(self):
+        manager = object.__new__(AgentManager)
+        manager.cfg = OmegaConf.create(
+            {"agent": {"research_loop": {"enabled": True}}}
+        )
+        sentinel = {"closed": True}
+
+        from unittest.mock import patch
+
+        with patch(
+            "ai_scientist.treesearch.closed_loop.ClosedLoopRunner"
+        ) as runner_type:
+            runner_type.return_value.run.return_value = sentinel
+            result = AgentManager.run(manager, exec_callback=lambda: None)
+
+        self.assertIs(result, sentinel)
+        runner_type.assert_called_once()
+
+
+if __name__ == "__main__":
+    unittest.main()

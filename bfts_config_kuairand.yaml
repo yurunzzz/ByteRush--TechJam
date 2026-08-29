@@ -30,13 +30,26 @@ agent:
   max_stage: 4
   stages:
     stage1_max_iters: 2
-    stage2_max_iters: 2
+    stage2_max_iters: 20
     stage3_max_iters: 12
-    stage4_max_iters: 8
+    stage4_max_iters: 6
   steps: 1
   k_fold_validation: 1
   multi_seed_eval:
-    num_seeds: 1
+    num_seeds: 3
+  research_loop:
+    enabled: true
+    max_research_rounds: 3
+    patience: 3
+    stage1_validation_iterations: 2
+    baseline_tuning_iterations: 20
+    candidate_branches: 3
+    stage3_generation_attempts: 12
+    candidate_tuning_iterations: 12
+    finalist_top_k: 3
+    finalist_num_seeds: 3
+    min_primary_gain: 0.002
+    required_seed_wins: 2
   # Stage 4 entry requires both a promotable Stage 3 gain and a literal
   # ABLATION_COMPONENTS manifest in the winning code. Stage 4 runs controlled
   # leave-one-component-out ablations and three-seed validation before freezing.

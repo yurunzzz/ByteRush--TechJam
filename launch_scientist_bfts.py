@@ -8,6 +8,7 @@ import time
 import re
 import sys
 from datetime import datetime, timezone
+from omegaconf import OmegaConf
 from ai_scientist.llm import create_client
 
 from contextlib import contextmanager
@@ -18,8 +19,31 @@ from ai_scientist.treesearch.bfts_utils import (
     idea_to_markdown,
     edit_bfts_config_file,
 )
+from ai_scientist.treesearch.research_loop import (
+    estimate_max_experiment_runs,
+    research_loop_config_from_mapping,
+)
 from ai_scientist.utils.token_tracker import token_tracker
-from ai_scientist.utils.resource_tracker import CompetitionResourceTracker
+from ai_scientist.utils.resource_tracker import (
+    CompetitionResourceTracker,
+    DEFAULT_ITERATION_LIMIT,
+)
+
+
+def configured_iteration_limit(config_path):
+    """Match resource accounting to the enabled closed-loop search budget."""
+    cfg = OmegaConf.load(config_path)
+    loop_cfg = cfg.agent.get("research_loop", {})
+    if not bool(loop_cfg.get("enabled", False)):
+        return DEFAULT_ITERATION_LIMIT
+    loop = research_loop_config_from_mapping(loop_cfg)
+    max_components = int(
+        cfg.agent.get("ablation", {}).get("max_components", 6)
+    )
+    budget = estimate_max_experiment_runs(
+        loop, stage4_max_components=max_components
+    )
+    return budget["maximum_search_iterations"]
 
 
 def print_time():
@@ -205,15 +229,17 @@ if __name__ == "__main__":
     idea_dir = f"experiments/{date}_{idea['Name']}_attempt_{args.attempt_id}"
     print(f"Results will be saved in {idea_dir}")
     os.makedirs(idea_dir, exist_ok=True)
+    iteration_limit = configured_iteration_limit(args.config)
     resource_tracker = CompetitionResourceTracker(
         idea_dir,
-        iteration_limit=50,
+        iteration_limit=iteration_limit,
         started_at_utc=run_started_at_utc,
         started_monotonic=run_started_monotonic,
     )
     resource_tracker.start()
     print(f"Resource accounting: {resource_tracker.summary_path}")
 
+    print(f"Search iteration limit: {iteration_limit}")
     # Convert idea json to markdown file
     idea_path_md = osp.join(idea_dir, "idea.md")
 

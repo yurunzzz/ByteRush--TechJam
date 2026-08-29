@@ -32,23 +32,45 @@ def load(data_dir):
 def _bucket_edges(durations, n=10):
     return np.quantile(np.asarray(durations), np.linspace(0, 1, n + 1)[1:-1])
 
-def encode(splits):
+def encode(splits, feature_state=None, return_state=False):
     """把类别特征映射成连续 id。未见过的取值统一落到该域的 UNK 槽。
-    返回 (X, y, users) per split，X 为 int32 (N, len(FIELDS))，以及 field_dims。"""
-    tr = splits['train']
-    edges = _bucket_edges([x[5] for x in tr])
+    默认返回 (X, y, users) per split 和 field_dims。
+    return_state=True 时额外返回只在 train 上拟合的编码状态；传入
+    feature_state 可将同一状态原样用于 valid/test。"""
+    if feature_state is None:
+        tr = splits['train']
+        edges = _bucket_edges([x[5] for x in tr])
+    else:
+        if feature_state.get('fields') != FIELDS:
+            raise ValueError('feature_state fields 与当前 FIELDS 不一致')
+        edges = np.asarray(feature_state['edges'], dtype=np.float64)
 
     def raw(x):
         return [x[1], x[2], x[3], x[4], str(int(np.searchsorted(edges, x[5])))]
 
-    vocabs = [dict() for _ in FIELDS]
-    for x in tr:
-        for i, v in enumerate(raw(x)):
-            if v not in vocabs[i]:
-                vocabs[i][v] = len(vocabs[i])
-    unk = [len(v) for v in vocabs]                 # 每个域末尾留一个 UNK 槽
-    field_dims = [len(v) + 1 for v in vocabs]
-    offsets = np.cumsum([0] + field_dims[:-1]).astype(np.int32)
+    if feature_state is None:
+        vocabs = [dict() for _ in FIELDS]
+        for x in tr:
+            for i, v in enumerate(raw(x)):
+                if v not in vocabs[i]:
+                    vocabs[i][v] = len(vocabs[i])
+        unk = [len(v) for v in vocabs]             # 每个域末尾留一个 UNK 槽
+        field_dims = [len(v) + 1 for v in vocabs]
+        offsets = np.cumsum([0] + field_dims[:-1]).astype(np.int32)
+        feature_state = {
+            'schema_version': 1,
+            'fields': list(FIELDS),
+            'edges': edges.tolist(),
+            'vocabs': vocabs,
+            'unk': unk,
+            'field_dims': field_dims,
+            'offsets': offsets.tolist(),
+        }
+    else:
+        vocabs = feature_state['vocabs']
+        unk = [int(v) for v in feature_state['unk']]
+        field_dims = [int(v) for v in feature_state['field_dims']]
+        offsets = np.asarray(feature_state['offsets'], dtype=np.int32)
 
     enc = {}
     for name, rws in splits.items():
@@ -61,4 +83,7 @@ def encode(splits):
             y[n] = x[6]
             users.append(x[1])
         enc[name] = (X, y, users)
-    return enc, int(sum(field_dims))
+    result = (enc, int(sum(field_dims)))
+    if return_state:
+        return result + (feature_state,)
+    return result

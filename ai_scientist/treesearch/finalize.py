@@ -18,6 +18,14 @@ def _metric_value(node: Any) -> float:
     return float(node.metric.get_mean_value())
 
 
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _validation_metrics(node: Any) -> dict[str, float] | None:
     """Read trusted validation metrics saved for a node, when available."""
     if not node.exp_results_dir:
@@ -65,12 +73,15 @@ def freeze_stage4_winner(
         ]
         if len(seeds) < required_seeds:
             continue
-        seed_metrics = [_validation_metrics(seed) for seed in seeds]
-        seed_metrics = [metric for metric in seed_metrics if metric is not None]
-        if len(seed_metrics) < required_seeds:
+        seed_results = [
+            (seed, metrics)
+            for seed in seeds
+            if (metrics := _validation_metrics(seed)) is not None
+        ]
+        if len(seed_results) < required_seeds:
             continue
-        primary_values = [metric["primary"] for metric in seed_metrics]
-        candidates.append((float(np.mean(primary_values)), node, seeds, seed_metrics))
+        primary_values = [metrics["primary"] for _, metrics in seed_results]
+        candidates.append((float(np.mean(primary_values)), node, seed_results))
 
     if not candidates:
         raise RuntimeError(
@@ -79,7 +90,8 @@ def freeze_stage4_winner(
         )
 
     candidates.sort(key=lambda item: item[0], reverse=True)
-    _, winner, seed_nodes, seed_metrics = candidates[0]
+    _, winner, seed_results = candidates[0]
+    seed_metrics = [metrics for _, metrics in seed_results]
     summary = {}
     for name in ("GAUC", "nDCG@5", "primary"):
         values = [metric[name] for metric in seed_metrics]
@@ -88,6 +100,24 @@ def freeze_stage4_winner(
             "mean": float(np.mean(values)),
             "std": float(np.std(values, ddof=0)),
         }
+
+    best_seed_node, best_seed_metrics = max(
+        seed_results,
+        key=lambda item: item[1]["primary"],
+    )
+    if not best_seed_node.exp_results_dir:
+        raise RuntimeError(
+            f"best Stage-4 seed node {best_seed_node.id} has no result directory"
+        )
+    checkpoint_source = (
+        Path(best_seed_node.exp_results_dir) / "candidate_checkpoint.npz"
+    )
+    if not checkpoint_source.is_file():
+        raise RuntimeError(
+            f"best Stage-4 seed node {best_seed_node.id} has no complete "
+            f"checkpoint: {checkpoint_source}"
+        )
+    history_source = Path(best_seed_node.exp_results_dir) / "history.json"
 
     output_dir.mkdir(parents=True, exist_ok=True)
     for stale_name in (
@@ -98,15 +128,22 @@ def freeze_stage4_winner(
         "training_history.json",
         "export_checkpoint.npz",
         "export_history.json",
+        "submission.csv",
+        "submission.csv.metadata.json",
     ):
         stale_path = output_dir / stale_name
         if stale_path.exists():
             stale_path.unlink()
     model_path = output_dir / "model.py"
     model_path.write_text(winner.code)
-    digest = hashlib.sha256(winner.code.encode("utf-8")).hexdigest()
+    checkpoint_path = output_dir / "checkpoint.npz"
+    shutil.copy2(checkpoint_source, checkpoint_path)
+    if history_source.is_file():
+        shutil.copy2(history_source, output_dir / "training_history.json")
+    model_digest = hashlib.sha256(winner.code.encode("utf-8")).hexdigest()
+    checkpoint_digest = _file_sha256(checkpoint_path)
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "source_stage": source_stage,
         "source_node_id": winner.id,
@@ -116,28 +153,14 @@ def freeze_stage4_winner(
         "successful_seed_count": len(seed_metrics),
         "validation": summary,
         "selection_metric": "validation primary mean across seeds",
-        "model_sha256": digest,
+        "model_sha256": model_digest,
+        "checkpoint_sha256": checkpoint_digest,
+        "checkpoint_source_node_id": best_seed_node.id,
+        "checkpoint_validation_primary": best_seed_metrics["primary"],
         "test_metrics_used_for_selection": False,
     }
     (output_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n"
     )
     (output_dir / "source_node_id.txt").write_text(winner.id + "\n")
-
-    # Preserve the checkpoint from the best successful seed run for audit and
-    # optional deployment. The exporter still defaults to deterministic
-    # retraining so it can verify code/data compatibility end to end.
-    best_index = int(np.argmax([metric["primary"] for metric in seed_metrics]))
-    best_seed_node = seed_nodes[best_index]
-    if best_seed_node.exp_results_dir:
-        checkpoint = Path(best_seed_node.exp_results_dir) / "candidate_checkpoint.npz"
-        history = Path(best_seed_node.exp_results_dir) / "history.json"
-        if checkpoint.exists():
-            shutil.copy2(checkpoint, output_dir / "checkpoint.npz")
-            manifest["checkpoint_source_node_id"] = best_seed_node.id
-        if history.exists():
-            shutil.copy2(history, output_dir / "training_history.json")
-        (output_dir / "manifest.json").write_text(
-            json.dumps(manifest, indent=2, sort_keys=True) + "\n"
-        )
     return manifest

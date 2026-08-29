@@ -804,6 +804,16 @@ Your research idea:\n\n
 
     def run(self, exec_callback, step_callback=None):
         """Run the experiment through generated stages"""
+        research_loop_cfg = self.cfg.agent.get("research_loop", {})
+        if bool(research_loop_cfg.get("enabled", False)):
+            from .closed_loop import ClosedLoopRunner
+
+            return ClosedLoopRunner(
+                self,
+                exec_callback=exec_callback,
+                step_callback=step_callback,
+            ).run()
+
         while self.current_stage:  # Main stage loop
             main_stage = self.parse_stage_names(self.current_stage.name)[0]
             print(f"[green]Starting main stage: {main_stage}[/green]")
