@@ -26,27 +26,33 @@ debug:
 
 agent:
   type: parallel
-  num_workers: 1
+  num_workers: 3
+  max_workers_per_gpu: 3
   max_stage: 4
   stages:
     stage1_max_iters: 2
-    stage2_max_iters: 20
+    stage2_max_iters: 2
     stage3_max_iters: 12
-    stage4_max_iters: 6
+    stage4_max_iters: 8
   steps: 1
   k_fold_validation: 1
   multi_seed_eval:
-    num_seeds: 3
+    num_seeds: 1
   research_loop:
     enabled: true
-    max_research_rounds: 3
-    patience: 3
+    # Two rounds expose the Stage 4 -> next Stage 3 feedback path without
+    # turning the first comparison run into an overnight search.
+    max_research_rounds: 2
+    patience: 2
     stage1_validation_iterations: 2
-    baseline_tuning_iterations: 20
+    baseline_tuning_iterations: 2
     candidate_branches: 3
-    stage3_generation_attempts: 12
-    candidate_tuning_iterations: 12
-    finalist_top_k: 3
+    candidate_parallel_workers: 3
+    # At most 6 generation runs + 3 branches * 2 tuning runs = 12 Stage 3
+    # search runs, matching the teammate pipeline's Stage 3 budget.
+    stage3_generation_attempts: 6
+    candidate_tuning_iterations: 2
+    finalist_top_k: 1
     finalist_num_seeds: 3
     min_primary_gain: 0.002
     required_seed_wins: 2

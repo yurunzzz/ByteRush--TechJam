@@ -255,6 +255,7 @@ class ResearchLoopConfig:
     stage1_validation_iterations: int = 2
     baseline_tuning_iterations: int = 20
     candidate_branches: int = 3
+    candidate_parallel_workers: int = 1
     stage3_generation_attempts: int = 12
     candidate_tuning_iterations: int = 12
     finalist_top_k: int = 3

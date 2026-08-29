@@ -1,5 +1,7 @@
 import re
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -48,6 +50,7 @@ class FakeManager:
                         "stage1_validation_iterations": 1,
                         "baseline_tuning_iterations": 2,
                         "candidate_branches": 2,
+                        "candidate_parallel_workers": 2,
                         "stage3_generation_attempts": 2,
                         "candidate_tuning_iterations": 2,
                         "finalist_top_k": 2,
@@ -208,9 +211,35 @@ class FakeAgent:
         return results
 
 
+
+class ConcurrentFakeAgent(FakeAgent):
+    lock = threading.Lock()
+    active_candidate_branches = 0
+    max_active_candidate_branches = 0
+
+    def step(self, exec_callback, max_nodes=None):
+        if not self.stage_name.startswith("3_candidate_tuning"):
+            return super().step(exec_callback, max_nodes=max_nodes)
+
+        with self.lock:
+            type(self).active_candidate_branches += 1
+            type(self).max_active_candidate_branches = max(
+                type(self).max_active_candidate_branches,
+                type(self).active_candidate_branches,
+            )
+        try:
+            time.sleep(0.02)
+            return super().step(exec_callback, max_nodes=max_nodes)
+        finally:
+            with self.lock:
+                type(self).active_candidate_branches -= 1
+
+
 class ClosedLoopTests(unittest.TestCase):
     def setUp(self):
         FakeAgent.created_stage_names = []
+        ConcurrentFakeAgent.active_candidate_branches = 0
+        ConcurrentFakeAgent.max_active_candidate_branches = 0
 
     def _data_dir(self, root):
         data_dir = root / "KuaiRand-Pure" / "data"
@@ -250,7 +279,7 @@ class ClosedLoopTests(unittest.TestCase):
             runner = ClosedLoopRunner(
                 manager,
                 exec_callback=lambda *args: None,
-                agent_factory=FakeAgent,
+                agent_factory=ConcurrentFakeAgent,
                 finalizer=finalizer,
                 submission_exporter=submission_exporter,
             )
@@ -262,6 +291,9 @@ class ClosedLoopTests(unittest.TestCase):
         self.assertIn("'factor_3_creative_research_1_round_one_0': False", result["incumbent"].node.code)
         self.assertEqual(manager.checkpoint_calls, 2)
         self.assertIn("4_ablation_studies_1_round_one", FakeAgent.created_stage_names)
+        self.assertGreaterEqual(
+            ConcurrentFakeAgent.max_active_candidate_branches, 2
+        )
         self.assertNotIn("4_ablation_studies_1_round_two", FakeAgent.created_stage_names)
         self.assertIs(finalized["journal"], result["incumbent"].journal)
         self.assertTrue(result["submission"]["checked"])

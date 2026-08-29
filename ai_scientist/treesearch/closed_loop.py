@@ -7,6 +7,7 @@ import json
 import math
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import mean
@@ -268,6 +269,8 @@ class ClosedLoopRunner:
         research_base: Optional[Node] = None,
         stage3_base: Optional[Node] = None,
         task_context: str = "",
+        num_workers: Optional[int] = None,
+        max_search_workers: Optional[int] = None,
     ):
         stage_cfg = (
             self.manager.cfg.copy()
@@ -275,6 +278,8 @@ class ClosedLoopRunner:
             else copy.deepcopy(self.manager.cfg)
         )
         stage_cfg.agent.search.num_drafts = stage.num_drafts
+        if num_workers is not None:
+            stage_cfg.agent.num_workers = max(1, int(num_workers))
         return self.agent_factory(
             task_desc=self._task_desc(stage, task_context),
             cfg=stage_cfg,
@@ -285,6 +290,7 @@ class ClosedLoopRunner:
             best_stage1_node=tuning_base if stage.name.startswith("2_") else None,
             tuning_base_node=tuning_base,
             research_base_node=research_base,
+            max_search_workers=max_search_workers,
         )
 
     def _notify(self, stage: Any, journal: Journal) -> None:
@@ -387,7 +393,12 @@ class ClosedLoopRunner:
         )
         tuning_base = _clone_root(baseline)
         journal.append(tuning_base)
-        with self._agent(stage, journal, tuning_base=tuning_base) as agent:
+        with self._agent(
+            stage,
+            journal,
+            tuning_base=tuning_base,
+            max_search_workers=1,
+        ) as agent:
             self._run_budget(
                 agent,
                 stage,
@@ -464,12 +475,12 @@ class ClosedLoopRunner:
                         break
         return candidates
 
-    def _tune_candidate(
+    def _prepare_candidate_tuning(
         self,
         candidate: Node,
         round_number: int,
         branch_number: int,
-    ) -> Optional[EvaluatedConfiguration]:
+    ) -> tuple[Any, Journal, Node]:
         stage, journal = self._new_stage(
             name=(
                 "3_candidate_tuning_2_round_"
@@ -483,7 +494,22 @@ class ClosedLoopRunner:
         )
         tuning_base = _clone_root(candidate)
         journal.append(tuning_base)
-        with self._agent(stage, journal, tuning_base=tuning_base) as agent:
+        return stage, journal, tuning_base
+
+    def _execute_candidate_tuning(
+        self,
+        stage: Any,
+        journal: Journal,
+        tuning_base: Node,
+    ) -> Optional[EvaluatedConfiguration]:
+        # Each branch gets one worker so progressive tuning remains serial
+        # inside the branch while independent A/B/C branches run concurrently.
+        with self._agent(
+            stage,
+            journal,
+            tuning_base=tuning_base,
+            num_workers=1,
+        ) as agent:
             self._run_budget(
                 agent,
                 stage,
@@ -492,6 +518,54 @@ class ClosedLoopRunner:
                 inherited_nodes=1,
             )
             return self._evaluate_top_k(agent, stage, journal)
+
+    def _tune_candidate(
+        self,
+        candidate: Node,
+        round_number: int,
+        branch_number: int,
+    ) -> Optional[EvaluatedConfiguration]:
+        job = self._prepare_candidate_tuning(
+            candidate,
+            round_number,
+            branch_number,
+        )
+        return self._execute_candidate_tuning(*job)
+
+    def _tune_candidates(
+        self,
+        candidates: Sequence[Node],
+        round_number: int,
+    ) -> list[Optional[EvaluatedConfiguration]]:
+        jobs = []
+        for branch_number, candidate in enumerate(candidates, 1):
+            jobs.append(
+                self._prepare_candidate_tuning(
+                    candidate, round_number, branch_number
+                )
+            )
+        if not jobs:
+            return []
+
+        workers = min(
+            max(1, int(self.config.candidate_parallel_workers)),
+            len(jobs),
+        )
+        if workers == 1:
+            return [self._execute_candidate_tuning(*job) for job in jobs]
+
+        print(
+            f"[cyan]Tuning {len(jobs)} candidate branches with "
+            f"{workers} parallel workers[/cyan]"
+        )
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [
+                executor.submit(self._execute_candidate_tuning, *job)
+                for job in jobs
+            ]
+            # Consume futures in branch order so promotion semantics do not
+            # depend on which candidate happens to finish first.
+            return [future.result() for future in futures]
 
     def _run_stage4(
         self,
@@ -592,11 +666,9 @@ class ClosedLoopRunner:
             candidates = self._generate_candidates(
                 self.incumbent.node, round_number
             )
+            tuned_results = self._tune_candidates(candidates, round_number)
             promoted_results: dict[str, EvaluatedConfiguration] = {}
-            for branch_number, candidate in enumerate(candidates, 1):
-                result = self._tune_candidate(
-                    candidate, round_number, branch_number
-                )
+            for result in tuned_results:
                 if result is None:
                     continue
                 decision = self.state.evaluate_candidate(

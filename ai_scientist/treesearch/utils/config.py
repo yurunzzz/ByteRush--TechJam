@@ -70,6 +70,7 @@ class ResearchLoopSettings:
     stage1_validation_iterations: int = 2
     baseline_tuning_iterations: int = 20
     candidate_branches: int = 3
+    candidate_parallel_workers: int = 1
     stage3_generation_attempts: int = 12
     candidate_tuning_iterations: int = 12
     finalist_top_k: int = 3
@@ -96,6 +97,7 @@ class AgentConfig:
     multi_seed_eval: dict[str, int]
     max_stage: int
     final_model_dir: str = "artifacts/final_model"
+    max_workers_per_gpu: int = 1
 
     summary: Optional[StageConfig] = None
     select_node: Optional[StageConfig] = None

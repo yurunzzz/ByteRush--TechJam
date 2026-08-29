@@ -1321,10 +1321,14 @@ class MinimalAgent:
 class GPUManager:
     """Manages GPU allocation across processes"""
 
-    def __init__(self, num_gpus: int):
+    def __init__(self, num_gpus: int, max_workers_per_gpu: int = 1):
         self.num_gpus = num_gpus
+        self.max_workers_per_gpu = max(1, int(max_workers_per_gpu))
         self.available_gpus: Set[int] = set(range(num_gpus))
         self.gpu_assignments: Dict[str, int] = {}  # process_id -> gpu_id
+        self.gpu_loads: Dict[int, int] = {
+            gpu_id: 0 for gpu_id in range(num_gpus)
+        }
 
     def acquire_gpu(self, process_id: str) -> int:
         """Assigns a GPU to a process"""
@@ -1332,19 +1336,24 @@ class GPUManager:
             raise RuntimeError("No GPUs available")
         print(f"Available GPUs: {self.available_gpus}")
         print(f"Process ID: {process_id}")
-        gpu_id = min(self.available_gpus)
+        gpu_id = min(
+            self.available_gpus,
+            key=lambda candidate: (self.gpu_loads[candidate], candidate),
+        )
         print(f"Acquiring GPU {gpu_id} for process {process_id}")
-        self.available_gpus.remove(gpu_id)
         self.gpu_assignments[process_id] = gpu_id
         print(f"GPU assignments: {self.gpu_assignments}")
+        self.gpu_loads[gpu_id] += 1
+        if self.gpu_loads[gpu_id] >= self.max_workers_per_gpu:
+            self.available_gpus.remove(gpu_id)
         return gpu_id
 
     def release_gpu(self, process_id: str):
         """Releases GPU assigned to a process"""
         if process_id in self.gpu_assignments:
-            gpu_id = self.gpu_assignments[process_id]
+            gpu_id = self.gpu_assignments.pop(process_id)
+            self.gpu_loads[gpu_id] = max(0, self.gpu_loads[gpu_id] - 1)
             self.available_gpus.add(gpu_id)
-            del self.gpu_assignments[process_id]
 
 
 def get_gpu_count() -> int:
@@ -1381,6 +1390,7 @@ class ParallelAgent:
         best_stage1_node=None,
         tuning_base_node=None,
         research_base_node=None,
+        max_search_workers=None,
     ):
         super().__init__()
         self.task_desc = task_desc
@@ -1404,19 +1414,36 @@ class ParallelAgent:
         if self.is_hyperparam_tuning and self.tuning_base_node is None:
             raise ValueError("a hyperparameter-tuning agent requires a base node")
         self.data_preview = None
-        self.num_workers = cfg.agent.num_workers
+        self.num_workers = max(1, int(cfg.agent.num_workers))
+        self.max_search_workers = (
+            None
+            if max_search_workers is None
+            else max(1, int(max_search_workers))
+        )
         self.num_gpus = get_gpu_count()
+        self.max_workers_per_gpu = max(
+            1, int(cfg.agent.get("max_workers_per_gpu", 1))
+        )
         print(f"num_gpus: {self.num_gpus}")
         if self.num_gpus == 0:
             print("No GPUs detected, falling back to CPU-only mode")
         else:
             print(f"Detected {self.num_gpus} GPUs")
 
-        self.gpu_manager = GPUManager(self.num_gpus) if self.num_gpus > 0 else None
+        self.gpu_manager = (
+            GPUManager(self.num_gpus, self.max_workers_per_gpu)
+            if self.num_gpus > 0
+            else None
+        )
 
         if self.num_gpus > 0:
-            self.num_workers = min(self.num_workers, self.num_gpus)
-            logger.info(f"Limiting workers to {self.num_workers} to match GPU count")
+            gpu_worker_capacity = self.num_gpus * self.max_workers_per_gpu
+            self.num_workers = min(self.num_workers, gpu_worker_capacity)
+            logger.info(
+                f"Limiting workers to {self.num_workers} for "
+                f"{self.num_gpus} GPU(s) with "
+                f"{self.max_workers_per_gpu} worker slot(s) each"
+            )
 
         self.timeout = self.cfg.exec.timeout
         self.executor = ProcessPoolExecutor(
@@ -1529,6 +1556,7 @@ class ParallelAgent:
         for seed in range(num_seeds):
             node_data = copy.deepcopy(base_node_data)
             gpu_id = None
+            process_id = None
             if self.gpu_manager is not None:
                 try:
                     process_id = f"seed_{seed}_worker"
@@ -1571,25 +1599,28 @@ class ParallelAgent:
             memory_summary = ""
             print("[yellow]Starting multi-seed eval...[/yellow]")
             futures.append(
-                self.executor.submit(
-                    self._process_node_wrapper,
-                    node_data,
-                    self.task_desc,
-                    self.cfg,
-                    gpu_id,
-                    memory_summary,
-                    self.evaluation_metrics,
-                    self.stage_name,
-                    new_ablation_idea,
-                    new_hyperparam_idea,
-                    best_stage1_plot_code,
-                    best_stage2_plot_code,
-                    best_stage3_plot_code,
-                    seed_eval,
+                (
+                    self.executor.submit(
+                        self._process_node_wrapper,
+                        node_data,
+                        self.task_desc,
+                        self.cfg,
+                        gpu_id,
+                        memory_summary,
+                        self.evaluation_metrics,
+                        self.stage_name,
+                        new_ablation_idea,
+                        new_hyperparam_idea,
+                        best_stage1_plot_code,
+                        best_stage2_plot_code,
+                        best_stage3_plot_code,
+                        seed_eval,
+                    ),
+                    process_id,
                 )
             )
 
-        for future in futures:
+        for future, process_id in futures:
             try:
                 result_data = future.result(timeout=self.timeout)
                 result_node = Node.from_dict(result_data, self.journal)
@@ -1601,6 +1632,12 @@ class ParallelAgent:
                 print("Added result node to journal")
             except Exception as e:
                 logger.error(f"Error in multi-seed evaluation: {str(e)}")
+            finally:
+                if (
+                    self.gpu_manager is not None
+                    and process_id in self.gpu_manager.gpu_assignments
+                ):
+                    self.gpu_manager.release_gpu(process_id)
 
         return seed_nodes
 
@@ -2331,6 +2368,9 @@ class ParallelAgent:
         processed_trees = set()
         search_cfg = self.cfg.agent.search
         target_count = self.num_workers
+        max_search_workers = getattr(self, "max_search_workers", None)
+        if max_search_workers is not None:
+            target_count = min(target_count, max_search_workers)
         if max_nodes is not None:
             target_count = min(target_count, max(0, int(max_nodes)))
         print(f"[cyan]self.num_workers: {self.num_workers}, [/cyan]")

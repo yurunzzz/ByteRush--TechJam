@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from ai_scientist.treesearch.journal import Journal, Node
 from ai_scientist.treesearch.parallel_agent import (
+    GPUManager,
     HyperparamTuningIdea,
     MinimalAgent,
     ParallelAgent,
@@ -21,6 +22,19 @@ def _good_node(code: str, score: float = 0.6) -> Node:
 
 
 class CandidateTuningTests(unittest.TestCase):
+    def test_gpu_manager_allows_bounded_shared_gpu_slots(self):
+        manager = GPUManager(num_gpus=1, max_workers_per_gpu=3)
+
+        self.assertEqual(manager.acquire_gpu("worker-1"), 0)
+        self.assertEqual(manager.acquire_gpu("worker-2"), 0)
+        self.assertEqual(manager.acquire_gpu("worker-3"), 0)
+        with self.assertRaises(RuntimeError):
+            manager.acquire_gpu("worker-4")
+
+        manager.release_gpu("worker-2")
+        self.assertEqual(manager.acquire_gpu("worker-4"), 0)
+        self.assertEqual(manager.gpu_loads[0], 3)
+
     def test_stage2_remains_a_tuning_stage(self):
         self.assertTrue(_is_hyperparam_tuning_stage("2_baseline_tuning_1_first", None))
 
@@ -91,6 +105,11 @@ class CandidateTuningTests(unittest.TestCase):
 
         self.assertEqual(
             agent._select_parallel_nodes(max_nodes=2), [candidate, candidate]
+        )
+        agent.max_search_workers = 1
+        self.assertEqual(
+            agent._select_parallel_nodes(max_nodes=2),
+            [candidate],
         )
 
     def test_research_branches_are_siblings_from_the_incumbent(self):
