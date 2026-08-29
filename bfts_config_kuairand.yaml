@@ -9,7 +9,7 @@ copy_data: false
 exp_name: kuairand_stage3
 
 exec:
-  timeout: 420
+  timeout: 1000
   agent_file_name: runfile.py
   format_tb_ipython: false
 
@@ -30,8 +30,8 @@ agent:
   max_stage: 3
   stages:
     stage1_max_iters: 2
-    stage2_max_iters: 1
-    stage3_max_iters: 4
+    stage2_max_iters: 5
+    stage3_max_iters: 12
     stage4_max_iters: 8
   steps: 1
   k_fold_validation: 1
