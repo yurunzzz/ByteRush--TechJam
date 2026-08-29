@@ -15,10 +15,12 @@
 
 用法：
     python3 submit.py --make   submission.csv     # 用官方 FM baseline 生成一份示例提交
+    python3 submit.py --make-best submission.csv  # 用 Stage 4 冻结模型生成最终提交
     python3 submit.py --check  submission.csv     # 校验格式与对齐
     python3 submit.py --score  submission.csv     # 校验并打分（仅本地 valid 可用）
 """
 import argparse, csv, sys
+from pathlib import Path
 from data import load, encode
 from evaluate import evaluate
 
@@ -66,11 +68,29 @@ if __name__ == '__main__':
     ap.add_argument('path')
     ap.add_argument('--data_dir', default='./KuaiRand-Pure/data')
     ap.add_argument('--split', default='test', choices=['valid', 'test'])
+    ap.add_argument('--artifact_dir', default='../artifacts/final_model',
+                    help='Stage 4 冻结模型目录（仅 --make-best 使用）')
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument('--make',  action='store_true', help='用官方 FM baseline 生成示例提交')
+    g.add_argument('--make-best', action='store_true',
+                   help='用 Stage 4 冻结的 validation-best 模型生成 test 提交')
     g.add_argument('--check', action='store_true', help='只校验格式与对齐')
     g.add_argument('--score', action='store_true', help='校验并打分')
     a = ap.parse_args()
+
+    if a.score and a.split != 'valid':
+        raise ValueError('--score 只允许用于 valid，禁止计算或显示 test 指标')
+
+    if a.make_best:
+        if a.split != 'test':
+            raise ValueError('--make-best 只允许生成 test submission')
+        from export_best_submission import export_submission
+        export_submission(
+            output=a.path,
+            artifact_dir=a.artifact_dir,
+            starter_kit=Path(__file__).resolve().parent,
+        )
+        sys.exit(0)
 
     splits = load(a.data_dir)
     rows = splits[a.split]

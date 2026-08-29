@@ -6,6 +6,7 @@ from pathlib import Path
 import logging
 import math
 from .parallel_agent import ParallelAgent, _extract_enabled_ablation_components
+from .finalize import freeze_stage4_winner
 from .journal import Journal, Node
 import copy
 import re
@@ -298,6 +299,28 @@ Your research idea:\n\n
         print("Saving checkpoint to ", save_path)
         with open(save_path, "wb") as f:
             pickle.dump(checkpoint, f)
+
+    def _freeze_stage4_winner(self, stage_name: str) -> Dict[str, Any]:
+        """Freeze the statistically best full/ablated model after Stage 4."""
+        ablation_cfg = self.cfg.agent.get("ablation", {})
+        required_seeds = int(ablation_cfg.get("min_successful_seeds", 3))
+        output_dir = self.cfg.agent.get("final_model_dir", "artifacts/final_model")
+        manifest = freeze_stage4_winner(
+            self.journals[stage_name],
+            output_dir=output_dir,
+            source_stage=stage_name,
+            required_seeds=required_seeds,
+        )
+        logger.info(
+            "Frozen final model node %s to %s",
+            manifest["source_node_id"],
+            output_dir,
+        )
+        print(
+            f"[green]Frozen final model node {manifest['source_node_id']} "
+            f"to {output_dir}[/green]"
+        )
+        return manifest
 
     def _create_agent_for_stage(self, stage: Stage) -> ParallelAgent:
         """Create a ParallelAgent configured for the given stage"""
@@ -952,6 +975,8 @@ Your research idea:\n\n
                                 current_substage = None
                             break
             self._save_checkpoint()
+            if self.stages and self.stages[-1].name.startswith("4_"):
+                self._freeze_stage4_winner(self.stages[-1].name)
             if self.current_stage and self.current_stage.stage_number >= self.cfg.agent.max_stage:
                 logger.info(
                     f"Reached configured max_stage={self.cfg.agent.max_stage}; stopping."

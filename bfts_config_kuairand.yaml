@@ -3,10 +3,10 @@ desc_file: null
 preprocess_data: false
 goal: null
 eval: null
-log_dir: logs_stage3
-workspace_dir: workspaces_stage3
+log_dir: logs_stage4
+workspace_dir: workspaces_stage4
 copy_data: false
-exp_name: kuairand_stage3
+exp_name: kuairand_stage4
 
 exec:
   timeout: 1000
@@ -27,7 +27,7 @@ debug:
 agent:
   type: parallel
   num_workers: 1
-  max_stage: 3
+  max_stage: 4
   stages:
     stage1_max_iters: 2
     stage2_max_iters: 5
@@ -37,14 +37,16 @@ agent:
   k_fold_validation: 1
   multi_seed_eval:
     num_seeds: 1
-  # Stage 4 is implemented but deliberately gated and disabled by max_stage: 3.
-  # When max_stage is later raised to 4, entry requires both a promotable Stage
-  # 3 gain and a literal ABLATION_COMPONENTS manifest in the winning code.
+  # Stage 4 entry requires both a promotable Stage 3 gain and a literal
+  # ABLATION_COMPONENTS manifest in the winning code. Stage 4 runs controlled
+  # leave-one-component-out ablations and three-seed validation before freezing.
   ablation:
     mode: registered_component_leave_one_out
     min_primary_gain: 0.002
     num_seeds: 3
+    min_successful_seeds: 3
     max_components: 6
+  final_model_dir: artifacts/final_model
   expose_prediction: false
   data_preview: false
   code:

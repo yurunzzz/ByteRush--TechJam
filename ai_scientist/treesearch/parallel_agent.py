@@ -2056,6 +2056,17 @@ class ParallelAgent:
                             exp_data_path = exp_results_dir / exp_data_file.name
                             exp_data_file.resolve().rename(exp_data_path)
                             logger.info(f"Saved experiment data to {exp_data_path}")
+                        # Preserve deployment/audit artifacts emitted by trusted
+                        # KuaiRand candidates instead of leaving them in a worker
+                        # directory that later nodes may reuse or overwrite.
+                        for artifact_name in ("candidate_checkpoint.npz", "history.json"):
+                            artifact_path = plots_dir / artifact_name
+                            if artifact_path.exists():
+                                final_artifact_path = exp_results_dir / artifact_name
+                                artifact_path.resolve().rename(final_artifact_path)
+                                logger.info(
+                                    f"Saved experiment artifact to {final_artifact_path}"
+                                )
 
                         for plot_file in plots_dir.glob("*.png"):
                             # Get the base directory (parent of workspaces/logs)
