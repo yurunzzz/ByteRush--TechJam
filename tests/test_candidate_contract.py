@@ -67,6 +67,54 @@ def create_model(feature_dimension, config=None):
     return ('fm', feature_dimension)
 """
 
+def objective_candidate(role, step_body="", extra_code=""):
+    component = (
+        "same_user_ranking_loss"
+        if role.name == "ranking_objective"
+        else "real_auxiliary_target"
+    )
+    reference = (
+        "bpr_pairwise_implicit_2009"
+        if role.name == "ranking_objective"
+        else "esmm_2018"
+    )
+    return f"""
+CONFIG = {{'learning_rate': 0.001, 'epochs': 6}}
+RESEARCH_MANIFEST = {{
+    'candidate_id': 'objective_candidate',
+    'role': {role.name!r},
+    'group': {role.group!r},
+    'category': {role.category!r},
+    'hypothesis': 'align training with the ranking task',
+    'mechanism': 'a guarded objective with valid training inputs',
+    'mechanism_ids': [{component!r}],
+    'modified_symbols': ['CandidateModel.step', 'create_model'],
+    'expected_metric': ['GAUC', 'nDCG@5'],
+    'tunable_parameters': ['objective_weight'],
+    'ablation_components': [{component!r}],
+    'combination_compatibility': 'can support the unchanged FM scorer',
+    'change_scope': 'candidate training only',
+    'component_dependencies': {{}},
+    'evidence': [
+        {{'source_type': 'literature', 'reference': {reference!r}, 'supports': [{component!r}]}},
+    ],
+}}
+ABLATION_COMPONENTS = {{{component!r}: True}}
+def component_enabled(name):
+    return ABLATION_COMPONENTS[name]
+def build_features(splits, feature_state=None):
+    return splits, feature_state
+class CandidateModel:
+    def step(self, x, y):
+        if component_enabled({component!r}):
+            enabled = True
+{step_body}
+        return None
+def create_model(feature_dimension, config=None):
+    return ('objective', feature_dimension)
+{extra_code}
+"""
+
 
 class CandidateContractTests(unittest.TestCase):
     def test_factor_and_model_bundle_passes_contract(self):
@@ -94,6 +142,103 @@ class CandidateContractTests(unittest.TestCase):
         self.assertIn("supports must be a literal non-empty list", prompt)
         self.assertIn("inside the build_features function body", prompt)
         self.assertIn("features['history_author_ids']", prompt)
+    def test_objective_prompts_state_data_semantics(self):
+        ranking_prompt = DEFAULT_CANDIDATE_ROLES[2].prompt(
+            3, len(DEFAULT_CANDIDATE_ROLES)
+        )
+        auxiliary_prompt = DEFAULT_CANDIDATE_ROLES[3].prompt(
+            4, len(DEFAULT_CANDIDATE_ROLES)
+        )
+
+        self.assertIn("user_ids = x_tensor[:, 0]", ranking_prompt)
+        self.assertIn("different users is invalid", ranking_prompt)
+        self.assertIn("log_standard_4_08_to_4_21_pure.csv", auxiliary_prompt)
+        self.assertIn("no long_view fallback", auxiliary_prompt)
+
+    def test_cross_user_pairwise_candidate_is_rejected(self):
+        role = DEFAULT_CANDIDATE_ROLES[2]
+        code = objective_candidate(
+            role,
+            step_body="""
+        x_tensor = x
+        positive = y > 0
+        negative = y <= 0
+        pair_loss = positive.sum() + negative.sum()
+""",
+        )
+
+        result = validate_candidate_contract(BASE, code, role)
+
+        self.assertFalse(result.valid)
+        self.assertTrue(
+            any("x_tensor[:, 0]" in reason for reason in result.reasons),
+            result.reasons,
+        )
+
+    def test_same_user_pairwise_candidate_passes(self):
+        role = DEFAULT_CANDIDATE_ROLES[2]
+        code = objective_candidate(
+            role,
+            step_body="""
+        x_tensor = x
+        user_ids = x_tensor[:, 0]
+        for user_id in torch.unique(user_ids):
+            same_user = user_ids == user_id
+            pair_count = same_user.sum()
+""",
+        )
+
+        result = validate_candidate_contract(BASE, code, role)
+
+        self.assertTrue(result.valid, result.reasons)
+
+    def test_primary_label_auxiliary_copy_is_rejected(self):
+        role = DEFAULT_CANDIDATE_ROLES[3]
+        code = objective_candidate(
+            role,
+            extra_code="""
+def run_training():
+    train_y = labels
+    aux_y = train_y.copy()
+    return aux_y
+""",
+        )
+
+        result = validate_candidate_contract(BASE, code, role)
+
+        self.assertFalse(result.valid)
+        self.assertTrue(
+            any("primary long_view label" in reason for reason in result.reasons),
+            result.reasons,
+        )
+
+    def test_train_only_real_auxiliary_field_passes(self):
+        role = DEFAULT_CANDIDATE_ROLES[3]
+        code = objective_candidate(
+            role,
+            extra_code="""
+def build_auxiliary_targets(input_dir):
+    path = (
+        input_dir
+        / 'KuaiRand-Pure'
+        / 'data'
+        / 'log_standard_4_08_to_4_21_pure.csv'
+    )
+    targets = []
+    with open(path) as handle:
+        for row in csv.DictReader(handle):
+            targets.append(float(row['is_click']))
+    return targets
+
+def run_training():
+    aux_y = build_auxiliary_targets(input_dir)
+    return aux_y
+""",
+        )
+
+        result = validate_candidate_contract(BASE, code, role)
+
+        self.assertTrue(result.valid, result.reasons)
 
     def test_config_only_candidate_is_rejected(self):
         role = DEFAULT_CANDIDATE_ROLES[0]

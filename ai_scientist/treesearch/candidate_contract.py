@@ -28,6 +28,22 @@ class CandidateRole:
         evidence_ids = ", ".join(CURATED_EVIDENCE)
         base_name = self.name.split("_alternative_", 1)[0]
         techniques = TECHNIQUE_CATALOG.get(base_name, ())
+        role_contract = {
+            "ranking_objective": (
+                "\nRanking-objective executable contract:\n"
+                "- Extract encoded user IDs exactly from the first feature column, for example "
+                "user_ids = x_tensor[:, 0]. Build every pairwise or listwise group from those "
+                "IDs; a positive and negative from different users is invalid.\n"
+            ),
+            "auxiliary_objective": (
+                "\nAuxiliary-objective executable contract:\n"
+                "- The trusted loader tuple has no click/like/play-time label. Read a real auxiliary "
+                "field from the train-only log_standard_4_08_to_4_21_pure.csv, align it to train "
+                "examples by stable exposure keys, and never read the later log.\n"
+                "- Never derive an auxiliary target from train_y, y, long_view, or a copy/alias of "
+                "the primary label. There is no long_view fallback for a missing auxiliary field.\n"
+            ),
+        }.get(base_name, "")
         technique_text = "\n".join(f"  - {item}" for item in techniques)
         feedback_text = (
             "\nRole-specific feedback from rejected attempts:\n"
@@ -88,6 +104,7 @@ class CandidateRole:
             "feature state, component guards, checkpoint round-trip, and CUDA tensor "
             "placement. Return only the concise plan and complete code required by the "
             "global response format."
+            + role_contract
             + memory_text
             + feedback_text
         )
@@ -441,6 +458,247 @@ def _function_string_constants(code: str, function_name: str) -> set[str]:
     return set()
 
 
+def _named_function_nodes(code: str, function_name: str) -> tuple[ast.AST, ...]:
+    tree = _tree(code)
+    if tree is None:
+        return ()
+    return tuple(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == function_name
+    )
+
+
+def _is_full_slice(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Slice)
+        and node.lower is None
+        and node.upper is None
+        and node.step is None
+    )
+
+
+def _is_encoded_user_column(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Subscript):
+        return False
+    if not isinstance(node.value, ast.Name) or node.value.id not in {
+        "x",
+        "x_tensor",
+        "batch_x",
+    }:
+        return False
+    if not isinstance(node.slice, ast.Tuple) or len(node.slice.elts) != 2:
+        return False
+    rows, column = node.slice.elts
+    return (
+        _is_full_slice(rows)
+        and isinstance(column, ast.Constant)
+        and column.value == 0
+    )
+
+
+def _ranking_objective_reasons(candidate_code: str) -> list[str]:
+    step_nodes = _named_function_nodes(candidate_code, "step")
+    if not step_nodes:
+        return ["ranking objective has no step method"]
+
+    user_names: set[str] = set()
+    for step in step_nodes:
+        for node in ast.walk(step):
+            value = None
+            targets: list[ast.AST] = []
+            if isinstance(node, ast.Assign):
+                value = node.value
+                targets = list(node.targets)
+            elif isinstance(node, ast.AnnAssign):
+                value = node.value
+                targets = [node.target]
+            if value is None or not _is_encoded_user_column(value):
+                continue
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    user_names.add(target.id)
+
+    if not user_names:
+        return [
+            "ranking objective must extract encoded users from x_tensor[:, 0] "
+            "inside step"
+        ]
+
+    def contains_user_reference(node: ast.AST) -> bool:
+        return any(
+            (isinstance(item, ast.Name) and item.id in user_names)
+            or _is_encoded_user_column(item)
+            for item in ast.walk(node)
+        )
+
+    grouped = False
+    for step in step_nodes:
+        for node in ast.walk(step):
+            if isinstance(node, ast.Compare) and any(
+                isinstance(operator, (ast.Eq, ast.NotEq))
+                for operator in node.ops
+            ):
+                if contains_user_reference(node):
+                    grouped = True
+                    break
+        if grouped:
+            break
+
+    if not grouped:
+        return [
+            "ranking objective extracts users but does not construct "
+            "same-user groups or equality masks"
+        ]
+    return []
+
+
+_AUXILIARY_RAW_FIELDS = {
+    "is_click",
+    "is_like",
+    "is_follow",
+    "is_comment",
+    "is_forward",
+    "is_hate",
+    "play_time_ms",
+    "profile_stay_time",
+    "comment_stay_time",
+    "is_profile_enter",
+}
+_PRIMARY_LABEL_NAMES = {
+    "y",
+    "y_tensor",
+    "train_y",
+    "valid_y",
+    "long_view",
+    "long_view_y",
+    "long_view_labels",
+}
+
+
+def _expression_names(node: ast.AST | None) -> set[str]:
+    if node is None:
+        return set()
+    return {
+        item.id
+        for item in ast.walk(node)
+        if isinstance(item, ast.Name)
+    }
+
+
+def _mapping_access_key(node: ast.AST) -> str | None:
+    if (
+        isinstance(node, ast.Subscript)
+        and isinstance(node.slice, ast.Constant)
+        and isinstance(node.slice.value, str)
+    ):
+        return node.slice.value
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+    ):
+        return node.args[0].value
+    return None
+
+
+def _auxiliary_objective_reasons(candidate_code: str) -> list[str]:
+    tree = _tree(candidate_code)
+    if tree is None:
+        return ["auxiliary objective code is not valid Python"]
+
+    assignments: dict[str, set[str]] = {}
+    auxiliary_targets: set[str] = set()
+    for node in ast.walk(tree):
+        value = None
+        targets: list[ast.AST] = []
+        if isinstance(node, ast.Assign):
+            value = node.value
+            targets = list(node.targets)
+        elif isinstance(node, ast.AnnAssign):
+            value = node.value
+            targets = [node.target]
+        if value is None:
+            continue
+        dependencies = _expression_names(value)
+        for target in targets:
+            if not isinstance(target, ast.Name):
+                continue
+            assignments.setdefault(target.id, set()).update(dependencies)
+            lowered = target.id.lower()
+            if (
+                "aux" in lowered
+                or "click" in lowered
+                or "like" in lowered
+                or "follow" in lowered
+                or "play_time" in lowered
+                or "watch_target" in lowered
+            ):
+                auxiliary_targets.add(target.id)
+
+    tainted = set(_PRIMARY_LABEL_NAMES)
+    changed = True
+    while changed:
+        changed = False
+        for name, dependencies in assignments.items():
+            if name not in tainted and dependencies & tainted:
+                tainted.add(name)
+                changed = True
+
+    copied_primary = set(auxiliary_targets & tainted)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        for keyword in node.keywords:
+            if (
+                keyword.arg
+                and "aux" in keyword.arg.lower()
+                and _expression_names(keyword.value) & tainted
+            ):
+                copied_primary.add(keyword.arg)
+    if copied_primary:
+        return [
+            "auxiliary targets derive from the primary long_view label: "
+            + ", ".join(sorted(copied_primary))
+        ]
+
+    executable_functions = tuple(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    )
+    raw_fields = {
+        key
+        for function in executable_functions
+        for item in ast.walk(function)
+        if (key := _mapping_access_key(item)) in _AUXILIARY_RAW_FIELDS
+    }
+    if not raw_fields:
+        return [
+            "auxiliary objective does not read a real train-window auxiliary field"
+        ]
+
+    executable_strings = {
+        item.value
+        for function in executable_functions
+        for item in ast.walk(function)
+        if isinstance(item, ast.Constant) and isinstance(item.value, str)
+    }
+    if "log_standard_4_08_to_4_21_pure.csv" not in executable_strings:
+        return [
+            "auxiliary objective must source labels from the train-only log file"
+        ]
+    if "log_standard_4_22_to_5_08_pure.csv" in executable_strings:
+        return [
+            "auxiliary objective reads the validation/test-period log"
+        ]
+    return []
+
+
 def _substantive_dump(code: str) -> str | None:
     tree = _tree(code)
     if tree is None:
@@ -683,6 +941,12 @@ def validate_candidate_contract(
                 reasons.append(
                     "factor_model candidate does not materially change create_model"
                 )
+
+    base_role_name = role.name.split("_alternative_", 1)[0]
+    if base_role_name == "ranking_objective":
+        reasons.extend(_ranking_objective_reasons(candidate_code))
+    elif base_role_name == "auxiliary_objective":
+        reasons.extend(_auxiliary_objective_reasons(candidate_code))
 
     return CandidateContractResult(
         valid=not reasons,
