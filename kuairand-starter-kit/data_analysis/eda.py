@@ -117,16 +117,96 @@ def raw_log_scan(data_dir):
             print(f"      {c:<18} {pct(p/n)}  (n={n:,})")
 
 
+def build_summary(splits):
+    """把分析压成机器可读的 population 级事实, 供 agent / 程序 load。
+
+    只放描述性、population 级的量 —— 绝不放可当特征的 per-id 表, 以免 agent
+    直接贴进模型造成泄漏 / 非因果特征。天花板由 population 结构解析得到:
+    完美排序对任一含正例用户 nDCG@5=1, 故 nDCG 上界 = 有正例用户占比;
+    GAUC 上界恒为 1.0 (混合用户 AUC=1)。
+    """
+    def split_stat(rows):
+        pu = per_user(rows)
+        n_zero = sum(1 for v in pu.values() if sum(v) == 0)
+        n_all = sum(1 for v in pu.values() if sum(v) == len(v))
+        n_users = len(pu)
+        ll = np.array([len(v) for v in pu.values()])
+        ndcg_ceil = 1.0 - n_zero / n_users            # = 含正例用户占比
+        return {
+            "rows": len(rows),
+            "users": n_users,
+            "pos_rate": round(sum(x[6] for x in rows) / len(rows), 4),
+            "all_negative_pct": round(100 * n_zero / n_users, 1),
+            "all_positive_pct": round(100 * n_all / n_users, 1),
+            "discriminative_pct": round(100 * (n_users - n_zero - n_all) / n_users, 1),
+            "list_len_median": int(np.median(ll)),
+            "list_len_p90": int(np.quantile(ll, 0.9)),
+            "ceiling": {
+                "GAUC": 1.0,
+                "nDCG@5": round(ndcg_ceil, 4),
+                "primary": round((1.0 + ndcg_ceil) / 2.0, 4),
+            },
+        }
+
+    def unseen(train_rows, other_rows):
+        tr_v = {x[2] for x in train_rows}; tr_a = {x[3] for x in train_rows}
+        tr_u = {x[1] for x in train_rows}; n = len(other_rows)
+        return {
+            "unseen_user_pct": round(100 * sum(1 for x in other_rows if x[1] not in tr_u) / n, 2),
+            "unseen_video_pct": round(100 * sum(1 for x in other_rows if x[2] not in tr_v) / n, 2),
+            "unseen_author_pct": round(100 * sum(1 for x in other_rows if x[3] not in tr_a) / n, 2),
+        }
+
+    # tab 信号强度 = 正例率跨度 (仅统计曝光量足够的 tab)
+    tab_agg = collections.defaultdict(lambda: [0, 0])
+    for x in splits["train"]:
+        tab_agg[x[4]][0] += x[6]; tab_agg[x[4]][1] += 1
+    tab_rates = [p / n for p, n in tab_agg.values() if n >= 1000]
+
+    return {
+        "dataset": "KuaiRand-Pure",
+        "label": "long_view",
+        "task": "within-user ranking; primary = mean(GAUC, nDCG@5)",
+        "population": {name: split_stat(splits[name]) for name in ("valid", "test")},
+        "cold_start": {
+            "valid": unseen(splits["train"], splits["valid"]),
+            "test": unseen(splits["train"], splits["test"]),
+        },
+        "signal": {
+            "tab_posrate_min": round(min(tab_rates), 3),
+            "tab_posrate_max": round(max(tab_rates), 3),
+        },
+        "priors_for_agent": [
+            "Cold-start negligible (unseen video/author ~0.01%): do NOT spend capacity on content/ID-fallback features.",
+            "nDCG@5 is structurally capped (~27% all-negative users, nDCG=0 in the mean): optimize GAUC, not nDCG.",
+            "tab positive-rate spans an order of magnitude: prioritize tab x user / tab x video crosses; pure user-side first-order terms cannot change within-user order.",
+            "Pointwise logloss is misaligned with the ranking metric: try within-user pairwise/BPR first.",
+            "Any temporal or statistical feature MUST be built causally from strictly-earlier events only (no valid/test labels, no future).",
+        ],
+        "provenance": "Computed from the official data.py loader; population-level only, no per-id tables. Ceilings cross-checked against baseline_scores.json oracle_ceiling.",
+    }
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", type=Path,
                     default=Path(__file__).resolve().parent.parent / "KuaiRand-Pure" / "data")
     ap.add_argument("--raw-log-scan", action="store_true",
                     help="额外扫原始日志, 列出全部可用反馈列")
+    ap.add_argument("--emit-json", nargs="?", type=Path, const=Path(__file__).resolve().parent / "eda_summary.json",
+                    default=None, help="写机器可读事实到该路径 (供 agent 使用), 默认 eda_summary.json; 不加则不写")
     args = ap.parse_args()
 
     print("加载官方切分中 ...")
     splits = data_module.load(str(args.data_dir))
+
+    if args.emit_json is not None:
+        import json
+        summary = build_summary(splits)
+        args.emit_json.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n")
+        print(f"machine-readable summary -> {args.emit_json}")
+        return
+
     for name in ("train", "valid", "test"):
         analyze_split(name, splits[name])
 
