@@ -13,6 +13,7 @@ from .backend import FunctionSpec, compile_prompt_to_md, query
 from .candidate_contract import (
     config_assignment,
     literal_assignment,
+    restore_dynamic_config_fields,
     validate_tuning_contract,
 )
 from .interpreter import ExecutionResult
@@ -820,10 +821,13 @@ class MinimalAgent:
                     "Change only literal values inside CONFIG. Preserve the supplied feature, model, training, evaluation, ablation, checkpoint, and inference implementations.",
                     "Implement exactly one complete CONFIG proposal from the tuning idea; do not run an internal grid, random search, or Optuna study inside this node.",
                     "Copy the full parent program and change no symbol outside CONFIG or the required research metadata.",
+                    "Keep CONFIG['seed'] runtime-controlled by AI_SCIENTIST_SEED; never replace its expression with a fixed integer.",
                 ]
             )
         prompt["Instructions"] |= self._prompt_hyperparam_tuning_resp_fmt
         plan, code = self.plan_and_code_query(prompt)
+        if _is_kuairand_task(self.task_desc):
+            code = restore_dynamic_config_fields(parent_node.code, code)
         return Node(
             plan="Hyperparam tuning name: " + hyperparam_idea.name + ".\n" + plan,
             code=code,

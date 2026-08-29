@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 
 from ai_scientist.treesearch.journal import Journal, Node
+from ai_scientist.treesearch.candidate_contract import config_assignment
 from ai_scientist.treesearch.parallel_agent import (
     GPUManager,
     HyperparamTuningIdea,
@@ -114,6 +115,30 @@ class CandidateTuningTests(unittest.TestCase):
         self.assertIn("build_features(splits, feature_state=None)", guideline)
         self.assertIn("AI_SCIENTIST_INFERENCE_ONLY=1", guideline)
         self.assertEqual(result.code, parent.code)
+
+    def test_kuairand_tuning_node_restores_runtime_seed(self):
+        parent_code = (
+            "import os\n"
+            "CONFIG = {'seed': int(os.environ.get('AI_SCIENTIST_SEED', '0')), "
+            "'learning_rate': 0.001, 'max_epochs': 40}\n"
+        )
+        proposed = parent_code.replace(
+            "int(os.environ.get('AI_SCIENTIST_SEED', '0'))",
+            "0",
+        ).replace("'max_epochs': 40", "'max_epochs': 12")
+        parent = _good_node(parent_code)
+        agent = object.__new__(MinimalAgent)
+        agent.task_desc = "KuaiRand-Pure validation primary and nDCG@5"
+        agent.plan_and_code_query = lambda prompt: ("plan", proposed)
+
+        result = agent._generate_hyperparam_tuning_node(
+            parent,
+            HyperparamTuningIdea("epochs", "tune CONFIG"),
+        )
+        config = config_assignment(result.code)
+
+        self.assertIn("__ast_expression__", config["seed"])
+        self.assertEqual(config["max_epochs"], 12)
 
     def test_explicit_candidate_becomes_the_tuning_parent(self):
         candidate = _good_node("candidate-code")

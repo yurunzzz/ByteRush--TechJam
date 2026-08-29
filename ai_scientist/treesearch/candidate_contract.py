@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 import json
 import math
 from dataclasses import dataclass
@@ -309,6 +310,80 @@ def _is_config_expression(value: Any) -> bool:
         and set(value) == {"__ast_expression__"}
         and isinstance(value.get("__ast_expression__"), str)
     )
+
+
+def restore_dynamic_config_fields(base_code: str, candidate_code: str) -> str:
+    """Restore runtime-controlled CONFIG expressions before a tuning run."""
+    base_tree = _tree(base_code)
+    candidate_tree = _tree(candidate_code)
+    if base_tree is None or candidate_tree is None:
+        return candidate_code
+
+    def config_node(tree: ast.Module) -> ast.Dict | None:
+        for statement in tree.body:
+            value = None
+            if isinstance(statement, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == "CONFIG"
+                for target in statement.targets
+            ):
+                value = statement.value
+            elif (
+                isinstance(statement, ast.AnnAssign)
+                and isinstance(statement.target, ast.Name)
+                and statement.target.id == "CONFIG"
+            ):
+                value = statement.value
+            if value is not None:
+                return value if isinstance(value, ast.Dict) else None
+        return None
+
+    base_node = config_node(base_tree)
+    candidate_node = config_node(candidate_tree)
+    if base_node is None or candidate_node is None:
+        return candidate_code
+
+    def fields(node: ast.Dict) -> dict[str, tuple[int, ast.expr]] | None:
+        result = {}
+        for index, (key_node, value_node) in enumerate(zip(node.keys, node.values)):
+            if key_node is None:
+                return None
+            try:
+                key = ast.literal_eval(key_node)
+            except (ValueError, TypeError, SyntaxError):
+                return None
+            if not isinstance(key, str) or key in result:
+                return None
+            result[key] = (index, value_node)
+        return result
+
+    base_fields = fields(base_node)
+    candidate_fields = fields(candidate_node)
+    if (
+        base_fields is None
+        or candidate_fields is None
+        or set(base_fields) != set(candidate_fields)
+    ):
+        return candidate_code
+
+    changed = False
+    for key, (_, base_value) in base_fields.items():
+        try:
+            ast.literal_eval(base_value)
+            continue
+        except (ValueError, TypeError, SyntaxError):
+            pass
+        candidate_index, candidate_value = candidate_fields[key]
+        if ast.dump(candidate_value, include_attributes=False) != ast.dump(
+            base_value,
+            include_attributes=False,
+        ):
+            candidate_node.values[candidate_index] = copy.deepcopy(base_value)
+            changed = True
+
+    if not changed:
+        return candidate_code
+    ast.fix_missing_locations(candidate_tree)
+    return ast.unparse(candidate_tree) + "\n"
 
 
 def component_guard_calls(code: str) -> set[str]:

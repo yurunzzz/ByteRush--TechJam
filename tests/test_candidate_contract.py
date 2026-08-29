@@ -5,6 +5,7 @@ from ai_scientist.treesearch.candidate_contract import (
     candidate_semantic_signature,
     config_assignment,
     format_factor_change,
+    restore_dynamic_config_fields,
     select_candidate_roles,
     validate_candidate_contract,
     validate_tuning_contract,
@@ -142,6 +143,24 @@ class CandidateContractTests(unittest.TestCase):
         self.assertTrue(any("dynamic CONFIG" in reason for reason in seed_result.reasons))
         self.assertFalse(key_result.valid)
         self.assertTrue(any("CONFIG keys" in reason for reason in key_result.reasons))
+
+    def test_runtime_seed_is_restored_before_tuning_execution(self):
+        base = BASE.replace(
+            "CONFIG = {'learning_rate': 0.001, 'epochs': 6}",
+            "CONFIG = {'seed': int(os.environ.get('AI_SCIENTIST_SEED', '0')), "
+            "'learning_rate': 0.001, 'epochs': 6}",
+        )
+        proposed = base.replace(
+            "int(os.environ.get('AI_SCIENTIST_SEED', '0'))",
+            "0",
+        ).replace("'epochs': 6", "'epochs': 12")
+
+        restored = restore_dynamic_config_fields(base, proposed)
+        result = validate_tuning_contract(base, restored)
+
+        self.assertTrue(result.valid, result.reasons)
+        self.assertIn("__ast_expression__", result.config["seed"])
+        self.assertEqual(result.config["epochs"], 12)
 
     def test_dynamic_portfolio_keeps_all_groups_and_eight_slots(self):
         summary = {
