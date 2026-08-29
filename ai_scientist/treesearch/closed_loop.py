@@ -996,6 +996,8 @@ class ClosedLoopRunner:
         candidate: EvaluatedConfiguration,
         round_number: int,
         candidate_number: int,
+        *,
+        stage_name: Optional[str] = None,
     ) -> Optional[EvaluatedConfiguration]:
         stable = _materialize_ablation_winner(candidate.node)
         if stable.metric is None:
@@ -1008,7 +1010,8 @@ class ClosedLoopRunner:
                 None,
             )
         stage, journal = self._new_stage(
-            name=(
+            name=stage_name
+            or (
                 f"4_final_confirmation_2_round_{self._word(round_number)}_"
                 f"candidate_{self._word(candidate_number)}"
             ),
@@ -1035,6 +1038,31 @@ class ClosedLoopRunner:
                 candidate_id=candidate.candidate_id,
             )
         return results[0] if results else None
+
+    def _ensure_final_confirmation(self) -> None:
+        if self.incumbent is None:
+            raise RuntimeError("cannot confirm without an incumbent")
+        required = self.config.final_confirmation_num_seeds
+        if len(self.incumbent.seed_scores) >= required:
+            return
+
+        confirmed = self._confirm_candidate(
+            self.incumbent,
+            round_number=max(self.state.current_round, 1),
+            candidate_number=1,
+            stage_name="4_final_incumbent_confirmation_1_five_seed",
+        )
+        if confirmed is None or len(confirmed.seed_scores) != required:
+            raise RuntimeError(
+                "final incumbent did not complete the required five-seed confirmation"
+            )
+        self.incumbent = confirmed
+        self.state.set_incumbent(
+            confirmed.node.id,
+            confirmed.score,
+            confirmed.seed_scores,
+        )
+        self._save_memory()
 
     def _save_memory(self) -> None:
         self.memory_dir.mkdir(parents=True, exist_ok=True)
@@ -1174,6 +1202,7 @@ class ClosedLoopRunner:
             self._save_memory()
             self.manager._save_checkpoint()
 
+        self._ensure_final_confirmation()
         manifest = self._finalize()
         submission = self.submission_exporter(
             output_dir=self.output_dir,

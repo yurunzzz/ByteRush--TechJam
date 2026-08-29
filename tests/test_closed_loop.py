@@ -279,6 +279,22 @@ class ConcurrentFakeAgent(FakeAgent):
                 type(self).active_candidate_branches -= 1
 
 
+class NoImprovementFakeAgent(FakeAgent):
+    def step(self, exec_callback, max_nodes=None):
+        before = len(self.journal.nodes)
+        super().step(exec_callback, max_nodes=max_nodes)
+        if not self.stage_name.startswith("3_creative"):
+            return
+
+        base_score = self.research_base.metric.get_mean_value()
+        for index, node in enumerate(self.journal.nodes[before:]):
+            node.metric = MetricValue(
+                value=base_score - 0.004 - index * 0.001,
+                maximize=True,
+                name="validation primary",
+            )
+
+
 class ClosedLoopTests(unittest.TestCase):
     def setUp(self):
         FakeAgent.created_stage_names = []
@@ -391,6 +407,41 @@ class ClosedLoopTests(unittest.TestCase):
 
         self.assertIs(result, sentinel)
         runner_type.assert_called_once()
+
+    def test_baseline_gets_five_seed_confirmation_when_no_candidate_improves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manager = FakeManager(
+                self._data_dir(root / "starter"),
+                root / "artifacts" / "final_model",
+            )
+            finalized = {}
+
+            def finalizer(journal, **kwargs):
+                finalized["journal"] = journal
+                finalized.update(kwargs)
+                return {"source_stage": kwargs["source_stage"]}
+
+            runner = ClosedLoopRunner(
+                manager,
+                exec_callback=lambda *args: None,
+                agent_factory=NoImprovementFakeAgent,
+                finalizer=finalizer,
+                submission_exporter=lambda **kwargs: {
+                    "path": "submission.csv",
+                    "checked": True,
+                },
+            )
+            result = runner.run()
+
+        self.assertEqual(result["state"].current_round, 1)
+        self.assertEqual(len(result["incumbent"].seed_scores), 5)
+        self.assertEqual(len(result["state"].incumbent_seed_scores), 5)
+        self.assertEqual(finalized["required_seeds"], 5)
+        self.assertIn(
+            "4_final_incumbent_confirmation_1_five_seed",
+            NoImprovementFakeAgent.created_stage_names,
+        )
 
 
 if __name__ == "__main__":
