@@ -5,21 +5,33 @@ import ast
 import copy
 import json
 import math
+import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
+from itertools import combinations
 from pathlib import Path
 from statistics import mean
 from typing import Any, Callable, Optional, Sequence
 
 from rich import print
 
+from .candidate_contract import (
+    CandidateRole,
+    candidate_semantic_signature,
+    component_guard_calls,
+    format_factor_change,
+    literal_assignment,
+    validate_candidate_contract,
+    select_candidate_roles,
+)
 from .factor_context import build_factor_context
 from .finalize import freeze_stage4_winner
 from .journal import Journal, Node
 from .parallel_agent import ParallelAgent, _extract_enabled_ablation_components
 from .research_loop import (
+    AblationEvidence,
     PromotionPolicy,
     ResearchLoopConfig,
     ResearchLoopState,
@@ -37,6 +49,9 @@ class EvaluatedConfiguration:
     stage_name: str
     score: float
     seed_scores: list[float]
+    metric_means: dict[str, float] = field(default_factory=dict)
+    role: Optional[CandidateRole] = None
+    candidate_id: Optional[str] = None
 
 
 def export_and_check_submission(
@@ -117,6 +132,35 @@ def _node_score(node: Node) -> Optional[float]:
     return result.score
 
 
+def _node_metrics(node: Node) -> dict[str, float]:
+    """Read trusted validation metrics already attached to a completed node."""
+    metrics: dict[str, float] = {}
+    primary = _node_score(node)
+    if primary is not None:
+        metrics["primary"] = primary
+    output = getattr(node, "parse_term_out", "")
+    if isinstance(output, (list, tuple)):
+        output = "\n".join(map(str, output))
+    for name, pattern in {
+        "GAUC": r"validation\s+GAUC\s*:\s*([-+0-9.eE]+)",
+        "nDCG@5": r"validation\s+nDCG@5\s*:\s*([-+0-9.eE]+)",
+    }.items():
+        match = re.search(pattern, str(output), flags=re.IGNORECASE)
+        if match:
+            value = float(match.group(1))
+            if math.isfinite(value):
+                metrics[name] = value
+    return metrics
+
+
+def _mean_metrics(nodes: Sequence[Node]) -> dict[str, float]:
+    values: dict[str, list[float]] = {}
+    for node in nodes:
+        for name, value in _node_metrics(node).items():
+            values.setdefault(name, []).append(value)
+    return {name: mean(items) for name, items in values.items() if items}
+
+
 def _ranked_nodes(journal: Journal, limit: Optional[int] = None) -> list[Node]:
     candidates = []
     for node in journal.nodes:
@@ -139,7 +183,9 @@ def _materialize_ablation_winner(node: Node) -> Node:
     except SyntaxError:
         return _clone_root(node)
 
-    component = node.ablation_name
+    components = tuple(
+        component for component in node.ablation_name.split("+") if component
+    )
     changed_manifest = False
     cleaned_body = []
     for statement in tree.body:
@@ -164,8 +210,11 @@ def _materialize_ablation_winner(node: Node) -> Node:
                 manifest = ast.literal_eval(statement.value)
             except (ValueError, TypeError, SyntaxError):
                 manifest = None
-            if isinstance(manifest, dict) and component in manifest:
-                manifest[component] = False
+            if isinstance(manifest, dict) and all(
+                component in manifest for component in components
+            ):
+                for component in components:
+                    manifest[component] = False
                 statement.value = ast.parse(repr(manifest), mode="eval").body
                 changed_manifest = True
         cleaned_body.append(statement)
@@ -178,6 +227,25 @@ def _materialize_ablation_winner(node: Node) -> Node:
     result.code = ast.unparse(tree) + "\n"
     result.ablation_name = None
     return result
+
+
+def _joint_ablation_node(full_model: Node, components: Sequence[str]) -> Node:
+    working = _clone_root(full_model)
+    for component in components:
+        working.ablation_name = component
+        working = _materialize_ablation_winner(working)
+    label = "+".join(components)
+    return Node(
+        plan=(
+            "Controlled joint ablation. Disable exactly "
+            + ", ".join(components)
+            + "; preserve every other setting."
+        ),
+        code=working.code,
+        parent=full_model,
+        is_buggy=False,
+        ablation_name=label,
+    )
 
 
 class ClosedLoopRunner:
@@ -218,8 +286,10 @@ class ClosedLoopRunner:
         self.output_dir = Path(
             _cfg_get(manager.cfg.agent, "final_model_dir", "artifacts/final_model")
         ).resolve()
+        self.candidate_role_by_node_id: dict[str, CandidateRole] = {}
         self.memory_dir = self.output_dir.parent / "research_loop"
         self.generated_fingerprints: set[str] = set()
+        self.generated_semantic_signatures: set[str] = set()
         self.incumbent: Optional[EvaluatedConfiguration] = None
 
     def _new_stage(
@@ -271,6 +341,7 @@ class ClosedLoopRunner:
         task_context: str = "",
         num_workers: Optional[int] = None,
         max_search_workers: Optional[int] = None,
+        candidate_contexts: Optional[Sequence[str]] = None,
     ):
         stage_cfg = (
             self.manager.cfg.copy()
@@ -291,6 +362,7 @@ class ClosedLoopRunner:
             tuning_base_node=tuning_base,
             research_base_node=research_base,
             max_search_workers=max_search_workers,
+            candidate_contexts=candidate_contexts,
         )
 
     def _notify(self, stage: Any, journal: Journal) -> None:
@@ -332,9 +404,13 @@ class ClosedLoopRunner:
         stage: Any,
         journal: Journal,
         nodes: Sequence[Node],
+        *,
+        num_seeds: Optional[int] = None,
+        role: Optional[CandidateRole] = None,
+        candidate_id: Optional[str] = None,
     ) -> list[EvaluatedConfiguration]:
         evaluated = []
-        required = self.config.finalist_num_seeds
+        required = int(num_seeds or self.config.finalist_num_seeds)
         for node in nodes:
             seed_nodes = agent._run_multi_seed_evaluation(
                 node, num_seeds=required
@@ -354,6 +430,9 @@ class ClosedLoopRunner:
                     stage_name=stage.name,
                     score=mean(seed_scores),
                     seed_scores=seed_scores,
+                    metric_means=_mean_metrics(seed_nodes),
+                    role=role,
+                    candidate_id=candidate_id,
                 )
             )
         return evaluated
@@ -414,6 +493,12 @@ class ClosedLoopRunner:
     def _generate_candidates(
         self, incumbent: Node, round_number: int
     ) -> list[Node]:
+        roles = select_candidate_roles(
+            self.state.memory.direction_summary(),
+            round_number=round_number,
+            branch_count=self.config.candidate_branches,
+        )
+        role_by_name = {role.name: role for role in roles}
         word = self._word(round_number)
         stage, journal = self._new_stage(
             name=f"3_creative_research_1_round_{word}",
@@ -428,25 +513,61 @@ class ClosedLoopRunner:
             round_number=round_number,
             failed_hypotheses=self.state.memory.failed_hypotheses,
         )
-        candidates = []
+        context += (
+            "\nDirection evidence from previous rounds:\n"
+            + json.dumps(
+                self.state.memory.direction_summary(),
+                sort_keys=True,
+                ensure_ascii=True,
+            )
+        )
+        accepted: dict[str, Node] = {}
+        retry_feedback: dict[str, list[str]] = {
+            role.name: [] for role in roles
+        }
         attempts = 0
         seen_node_ids = {research_base.id}
+
+        def role_prompt(role: CandidateRole, index: int) -> str:
+            evidence_memory = (
+                "Local direction evidence: "
+                + self.state.memory.prompt_evidence(role.group)
+                + "\nCross-branch portfolio lessons: "
+                + self.state.memory.portfolio_lessons()
+            )
+            return role.prompt(
+                index,
+                len(roles),
+                retry_feedback=retry_feedback[role.name],
+                evidence_memory=evidence_memory,
+            )
+
         with self._agent(
             stage,
             journal,
             research_base=research_base,
             task_context=context,
+            candidate_contexts=[
+                role_prompt(role, index)
+                for index, role in enumerate(roles, 1)
+            ],
         ) as agent:
-            while (
-                attempts < self.config.stage3_generation_attempts
-                and len(candidates) < self.config.candidate_branches
-            ):
+            while attempts < self.config.stage3_generation_attempts:
+                pending = [role for role in roles if role.name not in accepted]
+                if not pending:
+                    break
+                assigned = pending[: min(
+                    self.config.stage3_generation_attempts - attempts,
+                    len(pending),
+                )]
+                agent.candidate_contexts = [
+                    role_prompt(role, roles.index(role) + 1)
+                    for role in assigned
+                ]
                 before = self._experiment_count(journal)
-                remaining_attempts = self.config.stage3_generation_attempts - attempts
-                remaining_candidates = self.config.candidate_branches - len(candidates)
                 agent.step(
                     self.exec_callback,
-                    max_nodes=min(remaining_attempts, remaining_candidates),
+                    max_nodes=len(assigned),
                 )
                 after = self._experiment_count(journal)
                 added = after - before
@@ -454,53 +575,115 @@ class ClosedLoopRunner:
                     break
                 attempts += added
                 self._notify(stage, journal)
-                for node in journal.nodes:
-                    if node.id in seen_node_ids:
-                        continue
+                new_nodes = [
+                    node for node in journal.nodes if node.id not in seen_node_ids
+                ]
+                for expected_role, node in zip(assigned, new_nodes):
                     seen_node_ids.add(node.id)
                     if _node_score(node) is None:
+                        detail = str(getattr(node, "analysis", "execution failed"))
+                        reason = f"execution failed: {detail[:300]}"
+                        retry_feedback[expected_role.name].append(reason)
+                        self.state.memory.failed_hypotheses.append(
+                            f"{expected_role.name}: {reason}"
+                        )
+                        continue
+                    manifest = literal_assignment(node.code, "RESEARCH_MANIFEST")
+                    role_name = (
+                        manifest.get("role") if isinstance(manifest, dict) else None
+                    )
+                    role = role_by_name.get(str(role_name))
+                    if role is None or role.name != expected_role.name:
+                        reason = (
+                            f"expected role {expected_role.name!r}, received "
+                            f"manifest role {role_name!r}"
+                        )
+                        retry_feedback[expected_role.name].append(reason)
+                        self.state.memory.failed_hypotheses.append(reason)
+                        print(f"[yellow]Rejected Stage 3 candidate: {reason}[/yellow]")
+                        continue
+                    contract = validate_candidate_contract(
+                        research_base.code,
+                        node.code,
+                        role,
+                    )
+                    if not contract.valid:
+                        reason = "; ".join(contract.reasons)
+                        retry_feedback[role.name].append(reason)
+                        self.state.memory.failed_hypotheses.append(
+                            f"{role.name}: {reason}"
+                        )
+                        print(f"[yellow]Rejected Stage 3 candidate: {reason}[/yellow]")
+                        continue
+                    semantic_signature = candidate_semantic_signature(contract)
+                    if semantic_signature in self.generated_semantic_signatures:
+                        reason = "semantic duplicate of an earlier mechanism/factor bundle"
+                        retry_feedback[role.name].append(reason)
+                        self.state.memory.failed_hypotheses.append(
+                            f"{role.name}: {reason}"
+                        )
                         continue
                     fingerprint = candidate_fingerprint(node.code)
                     if fingerprint in self.generated_fingerprints:
-                        continue
-                    components = _extract_enabled_ablation_components(node.code)
-                    if not components:
+                        reason = "duplicate code fingerprint"
+                        retry_feedback[role.name].append(reason)
                         self.state.memory.failed_hypotheses.append(
-                            f"node {node.id} omitted ABLATION_COMPONENTS"
+                            f"{role.name}: {reason}"
                         )
                         continue
                     self.generated_fingerprints.add(fingerprint)
-                    candidates.append(node)
-                    if len(candidates) >= self.config.candidate_branches:
-                        break
-        return candidates
+                    self.generated_semantic_signatures.add(semantic_signature)
+                    accepted[role.name] = node
+                    self.candidate_role_by_node_id[node.id] = role
+                    print(
+                        f"[green]Accepted {role.group}/{role.name} candidate "
+                        f"{node.id}[/green]"
+                    )
+                    factor_change = format_factor_change(contract)
+                    if factor_change:
+                        print(f"[cyan]Generated factors:\n{factor_change}[/cyan]")
+        return [accepted[role.name] for role in roles if role.name in accepted]
 
     def _prepare_candidate_tuning(
         self,
         candidate: Node,
         round_number: int,
         branch_number: int,
-    ) -> tuple[Any, Journal, Node]:
+        *,
+        phase: str,
+        budget: int,
+        role: CandidateRole,
+        candidate_id: str,
+    ) -> tuple[Any, Journal, Node, int, CandidateRole, str]:
+        substage = 2 if phase == "coarse" else 3
         stage, journal = self._new_stage(
             name=(
-                "3_candidate_tuning_2_round_"
+                f"3_candidate_tuning_{substage}_{phase}_round_"
                 f"{self._word(round_number)}_branch_{self._word(branch_number)}"
             ),
             goals=(
                 "Keep this candidate architecture, feature builder, loss, and "
-                "split fixed; tune one complete configuration per node."
+                "split fixed; tune one complete CONFIG per node. "
+                + (
+                    "Cover the plausible range broadly."
+                    if phase == "coarse"
+                    else "Refine near the strongest coarse configuration."
+                )
             ),
-            max_iterations=self.config.candidate_tuning_iterations,
+            max_iterations=budget,
         )
         tuning_base = _clone_root(candidate)
         journal.append(tuning_base)
-        return stage, journal, tuning_base
+        return stage, journal, tuning_base, budget, role, candidate_id
 
     def _execute_candidate_tuning(
         self,
         stage: Any,
         journal: Journal,
         tuning_base: Node,
+        budget: int,
+        role: CandidateRole,
+        candidate_id: str,
     ) -> Optional[EvaluatedConfiguration]:
         # Each branch gets one worker so progressive tuning remains serial
         # inside the branch while independent A/B/C branches run concurrently.
@@ -514,46 +697,38 @@ class ClosedLoopRunner:
                 agent,
                 stage,
                 journal,
-                self.config.candidate_tuning_iterations,
+                budget,
                 inherited_nodes=1,
             )
-            return self._evaluate_top_k(agent, stage, journal)
-
-    def _tune_candidate(
-        self,
-        candidate: Node,
-        round_number: int,
-        branch_number: int,
-    ) -> Optional[EvaluatedConfiguration]:
-        job = self._prepare_candidate_tuning(
-            candidate,
-            round_number,
-            branch_number,
+        best = _ranked_nodes(journal, 1)
+        if not best:
+            return None
+        score = _node_score(best[0])
+        if score is None:
+            return None
+        return EvaluatedConfiguration(
+            node=best[0],
+            journal=journal,
+            stage_name=stage.name,
+            score=score,
+            seed_scores=[],
+            metric_means=_node_metrics(best[0]),
+            role=role,
+            candidate_id=candidate_id,
         )
-        return self._execute_candidate_tuning(*job)
 
-    def _tune_candidates(
+    def _execute_tuning_jobs(
         self,
-        candidates: Sequence[Node],
-        round_number: int,
+        jobs: Sequence[tuple[Any, Journal, Node, int, CandidateRole, str]],
     ) -> list[Optional[EvaluatedConfiguration]]:
-        jobs = []
-        for branch_number, candidate in enumerate(candidates, 1):
-            jobs.append(
-                self._prepare_candidate_tuning(
-                    candidate, round_number, branch_number
-                )
-            )
         if not jobs:
             return []
-
         workers = min(
             max(1, int(self.config.candidate_parallel_workers)),
             len(jobs),
         )
         if workers == 1:
             return [self._execute_candidate_tuning(*job) for job in jobs]
-
         print(
             f"[cyan]Tuning {len(jobs)} candidate branches with "
             f"{workers} parallel workers[/cyan]"
@@ -563,22 +738,103 @@ class ClosedLoopRunner:
                 executor.submit(self._execute_candidate_tuning, *job)
                 for job in jobs
             ]
-            # Consume futures in branch order so promotion semantics do not
-            # depend on which candidate happens to finish first.
             return [future.result() for future in futures]
+
+    def _tune_candidates(
+        self,
+        candidates: Sequence[Node],
+        round_number: int,
+    ) -> list[EvaluatedConfiguration]:
+        coarse_jobs = []
+        for branch_number, candidate in enumerate(candidates, 1):
+            role = self.candidate_role_by_node_id.get(candidate.id)
+            if role is None:
+                continue
+            coarse_jobs.append(
+                self._prepare_candidate_tuning(
+                    candidate,
+                    round_number,
+                    branch_number,
+                    phase="coarse",
+                    budget=self.config.candidate_tuning_iterations,
+                    role=role,
+                    candidate_id=candidate.id,
+                )
+            )
+        coarse_results = [
+            result
+            for result in self._execute_tuning_jobs(coarse_jobs)
+            if result is not None
+        ]
+        if not coarse_results:
+            return []
+        coarse_results.sort(key=lambda result: result.score, reverse=True)
+        refinement_bases = coarse_results[
+            : self.config.candidate_refinement_top_k
+        ]
+        refinement_jobs = [
+            self._prepare_candidate_tuning(
+                result.node,
+                round_number,
+                branch_number,
+                phase="refinement",
+                budget=self.config.candidate_refinement_iterations,
+                role=result.role,
+                candidate_id=result.candidate_id,
+            )
+            for branch_number, result in enumerate(refinement_bases, 1)
+            if result.role is not None and result.candidate_id is not None
+        ]
+        refined = {
+            result.candidate_id: result
+            for result in self._execute_tuning_jobs(refinement_jobs)
+            if result is not None and result.candidate_id is not None
+        }
+        merged = [refined.get(result.candidate_id, result) for result in coarse_results]
+        merged.sort(key=lambda result: result.score, reverse=True)
+        finalists = merged[: self.config.candidate_finalist_top_k]
+
+        evaluated: list[EvaluatedConfiguration] = []
+        for result in finalists:
+            stage = next(
+                stage for stage in self.manager.stages
+                if stage.name == result.stage_name
+            )
+            with self._agent(
+                stage,
+                result.journal,
+                tuning_base=result.node,
+                num_workers=self.config.finalist_num_seeds,
+            ) as agent:
+                repeated = self._evaluate_nodes(
+                    agent,
+                    stage,
+                    result.journal,
+                    [result.node],
+                    role=result.role,
+                    candidate_id=result.candidate_id,
+                )
+            evaluated.extend(repeated)
+        return sorted(evaluated, key=lambda result: result.score, reverse=True)
 
     def _run_stage4(
         self,
         promoted: EvaluatedConfiguration,
         round_number: int,
+        candidate_number: int,
     ) -> Optional[EvaluatedConfiguration]:
         components = _extract_enabled_ablation_components(promoted.node.code)[
             : self.max_ablation_components
         ]
+        guarded = component_guard_calls(promoted.node.code)
+        components = [component for component in components if component in guarded]
         if not components:
-            return None
+            return promoted
         stage, journal = self._new_stage(
-            name=f"4_ablation_studies_1_round_{self._word(round_number)}",
+            name=(
+                f"4_ablation_studies_1_round_{self._word(round_number)}_"
+                f"candidate_{self._word(candidate_number)}"
+            ),
             goals=self.manager.main_stage_goals[4],
             max_iterations=len(components),
         )
@@ -596,9 +852,189 @@ class ClosedLoopRunner:
                 len(components),
                 inherited_nodes=1,
             )
-            variants = _ranked_nodes(journal)
-            results = self._evaluate_nodes(agent, stage, journal, variants)
-        return max(results, key=lambda result: result.score) if results else None
+            single_nodes = [
+                node
+                for node in journal.nodes
+                if node.ablation_name in components and _node_score(node) is not None
+            ]
+            results = self._evaluate_nodes(
+                agent,
+                stage,
+                journal,
+                [full_model, *single_nodes],
+                role=promoted.role,
+                candidate_id=promoted.candidate_id,
+            )
+            if not results:
+                return None
+            full_result = next(
+                (result for result in results if result.node.ablation_name is None),
+                None,
+            )
+            if full_result is None:
+                return None
+
+            single_results = {
+                result.node.ablation_name: result
+                for result in results
+                if result.node.ablation_name in components
+            }
+            ranked_components = sorted(
+                single_results,
+                key=lambda component: abs(
+                    full_result.score - single_results[component].score
+                ),
+                reverse=True,
+            )
+            important = ranked_components[: min(4, len(ranked_components))]
+            pair_specs = list(combinations(important, 2))[
+                : self.config.ablation_synergy_pairs
+            ]
+            pair_nodes = [
+                _joint_ablation_node(full_model, pair) for pair in pair_specs
+            ]
+            for node in pair_nodes:
+                journal.append(node)
+            pair_results = self._evaluate_nodes(
+                agent,
+                stage,
+                journal,
+                pair_nodes,
+                role=promoted.role,
+                candidate_id=promoted.candidate_id,
+            )
+
+        category = promoted.role.group if promoted.role else ""
+        full_metrics = full_result.metric_means
+        for component, result in single_results.items():
+            contribution = full_result.score - result.score
+            seed_wins = sum(
+                full > ablated
+                for full, ablated in zip(
+                    full_result.seed_scores,
+                    result.seed_scores,
+                )
+            )
+            verdict = (
+                "positive"
+                if contribution > 0.0002
+                else "harmful"
+                if contribution < -0.0002
+                else "neutral"
+            )
+            self.state.memory.record_ablation(
+                AblationEvidence(
+                    round_number=round_number,
+                    candidate_id=promoted.candidate_id or promoted.node.id,
+                    component=component,
+                    category=category,
+                    full_score=full_result.score,
+                    ablated_score=result.score,
+                    primary_contribution=contribution,
+                    seed_wins=seed_wins,
+                    verdict=verdict,
+                    gauc_contribution=(
+                        full_metrics["GAUC"] - result.metric_means["GAUC"]
+                        if "GAUC" in full_metrics and "GAUC" in result.metric_means
+                        else None
+                    ),
+                    ndcg5_contribution=(
+                        full_metrics["nDCG@5"] - result.metric_means["nDCG@5"]
+                        if "nDCG@5" in full_metrics
+                        and "nDCG@5" in result.metric_means
+                        else None
+                    ),
+                )
+            )
+
+        for result in pair_results:
+            pair = tuple(
+                component
+                for component in (result.node.ablation_name or "").split("+")
+                if component in single_results
+            )
+            if len(pair) != 2:
+                continue
+            contributions = [
+                full_result.score - single_results[item].score for item in pair
+            ]
+            joint_contribution = full_result.score - result.score
+            synergy = joint_contribution - sum(contributions)
+            self.state.memory.record_ablation(
+                AblationEvidence(
+                    round_number=round_number,
+                    candidate_id=promoted.candidate_id or promoted.node.id,
+                    component="+".join(pair),
+                    category=category,
+                    full_score=full_result.score,
+                    ablated_score=result.score,
+                    primary_contribution=joint_contribution,
+                    seed_wins=sum(
+                        full > ablated
+                        for full, ablated in zip(
+                            full_result.seed_scores,
+                            result.seed_scores,
+                        )
+                    ),
+                    verdict=(
+                        "positive_synergy"
+                        if synergy > 0.0002
+                        else "negative_synergy"
+                        if synergy < -0.0002
+                        else "additive"
+                    ),
+                    interaction_with=list(pair),
+                    synergy=synergy,
+                )
+            )
+
+        all_results = [*results, *pair_results]
+        return max(all_results, key=lambda result: result.score)
+
+    def _confirm_candidate(
+        self,
+        candidate: EvaluatedConfiguration,
+        round_number: int,
+        candidate_number: int,
+    ) -> Optional[EvaluatedConfiguration]:
+        stable = _materialize_ablation_winner(candidate.node)
+        if stable.metric is None:
+            stable.metric = next(
+                (
+                    copy.deepcopy(child.metric)
+                    for child in candidate.node.children
+                    if child.is_seed_node and _node_score(child) is not None
+                ),
+                None,
+            )
+        stage, journal = self._new_stage(
+            name=(
+                f"4_final_confirmation_2_round_{self._word(round_number)}_"
+                f"candidate_{self._word(candidate_number)}"
+            ),
+            goals=(
+                "Run the frozen validation-best candidate across five independent "
+                "seeds. Do not change code or CONFIG."
+            ),
+            max_iterations=0,
+        )
+        journal.append(stable)
+        with self._agent(
+            stage,
+            journal,
+            stage3_base=stable,
+            num_workers=self.config.candidate_parallel_workers,
+        ) as agent:
+            results = self._evaluate_nodes(
+                agent,
+                stage,
+                journal,
+                [stable],
+                num_seeds=self.config.final_confirmation_num_seeds,
+                role=candidate.role,
+                candidate_id=candidate.candidate_id,
+            )
+        return results[0] if results else None
 
     def _save_memory(self) -> None:
         self.memory_dir.mkdir(parents=True, exist_ok=True)
@@ -623,7 +1059,7 @@ class ClosedLoopRunner:
             self.incumbent.journal,
             output_dir=self.output_dir,
             source_stage=self.incumbent.stage_name,
-            required_seeds=self.config.finalist_num_seeds,
+            required_seeds=self.config.final_confirmation_num_seeds,
         )
 
     @staticmethod
@@ -669,48 +1105,70 @@ class ClosedLoopRunner:
             tuned_results = self._tune_candidates(candidates, round_number)
             promoted_results: dict[str, EvaluatedConfiguration] = {}
             for result in tuned_results:
-                if result is None:
-                    continue
+                candidate_id = result.candidate_id or result.node.id
+                role = result.role
                 decision = self.state.evaluate_candidate(
-                    node_id=result.node.id,
+                    node_id=candidate_id,
                     fingerprint=candidate_fingerprint(result.node.code),
+                    score=result.score,
+                    seed_scores=result.seed_scores,
+                    role=role.name if role else "",
+                    category=role.group if role else "",
+                )
+                print(
+                    f"[cyan]Candidate {candidate_id}: "
+                    f"{decision.reason}[/cyan]"
+                )
+                if decision.promoted:
+                    promoted_results[candidate_id] = result
+
+            promoted = sorted(
+                promoted_results.values(),
+                key=lambda result: result.score,
+                reverse=True,
+            )[: self.config.ablation_candidate_top_k]
+            stage4_results = [
+                result
+                for candidate_number, promoted_result in enumerate(promoted, 1)
+                if (
+                    result := self._run_stage4(
+                        promoted_result,
+                        round_number,
+                        candidate_number,
+                    )
+                )
+                is not None
+            ]
+            confirmed = [
+                result
+                for candidate_number, stage4_result in enumerate(
+                    stage4_results, 1
+                )
+                if (
+                    result := self._confirm_candidate(
+                        stage4_result,
+                        round_number,
+                        candidate_number,
+                    )
+                )
+                is not None
+            ]
+            confirmed.sort(key=lambda result: result.score, reverse=True)
+            for result in confirmed:
+                candidate_id = result.candidate_id or result.node.id
+                confirmation = self.state.accept_pending_candidate(
+                    node_id=candidate_id,
+                    final_node_id=result.node.id,
                     score=result.score,
                     seed_scores=result.seed_scores,
                 )
                 print(
-                    f"[cyan]Candidate {result.node.id}: "
-                    f"{decision.reason}[/cyan]"
+                    f"[cyan]Final confirmation for {candidate_id}: "
+                    f"{confirmation.reason}[/cyan]"
                 )
-                if decision.promoted:
-                    promoted_results[result.node.id] = result
-
-            pending_id = self.state.pending_candidate_id
-            if pending_id and pending_id in promoted_results:
-                stage4_winner = self._run_stage4(
-                    promoted_results[pending_id], round_number
-                )
-                if stage4_winner is not None:
-                    next_parent = _materialize_ablation_winner(
-                        stage4_winner.node
-                    )
-                    confirmation = self.state.accept_pending_candidate(
-                        node_id=pending_id,
-                        final_node_id=next_parent.id,
-                        score=stage4_winner.score,
-                        seed_scores=stage4_winner.seed_scores,
-                    )
-                    print(
-                        f"[cyan]Stage 4 confirmation for {pending_id}: "
-                        f"{confirmation.reason}[/cyan]"
-                    )
-                    if confirmation.promoted:
-                        self.incumbent = EvaluatedConfiguration(
-                            node=next_parent,
-                            journal=stage4_winner.journal,
-                            stage_name=stage4_winner.stage_name,
-                            score=stage4_winner.score,
-                            seed_scores=stage4_winner.seed_scores,
-                        )
+                if confirmation.promoted:
+                    self.incumbent = result
+                    break
 
             self.state.finish_round()
             self._save_memory()

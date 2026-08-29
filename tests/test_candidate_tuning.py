@@ -35,6 +35,54 @@ class CandidateTuningTests(unittest.TestCase):
         self.assertEqual(manager.acquire_gpu("worker-4"), 0)
         self.assertEqual(manager.gpu_loads[0], 3)
 
+    def test_five_seed_evaluation_runs_in_gpu_sized_batches(self):
+        class ImmediateFuture:
+            def __init__(self, value):
+                self.value = value
+
+            def result(self, timeout=None):
+                return self.value
+
+        class ImmediateExecutor:
+            def submit(self, fn, *args):
+                return ImmediateFuture(fn(*args))
+
+        parent = _good_node("MODEL = 'candidate'\n")
+        journal = Journal(nodes=[parent])
+        manager = GPUManager(num_gpus=1, max_workers_per_gpu=3)
+        concurrent_assignments = []
+        acquire_gpu = manager.acquire_gpu
+
+        def tracked_acquire(process_id):
+            gpu_id = acquire_gpu(process_id)
+            concurrent_assignments.append(len(manager.gpu_assignments))
+            return gpu_id
+
+        manager.acquire_gpu = tracked_acquire
+        agent = object.__new__(ParallelAgent)
+        agent.cfg = SimpleNamespace()
+        agent.stage_name = "final_confirmation"
+        agent.num_workers = 3
+        agent.gpu_manager = manager
+        agent.executor = ImmediateExecutor()
+        agent.timeout = 1
+        agent.task_desc = "KuaiRand"
+        agent.evaluation_metrics = None
+        agent.journal = journal
+
+        def process_with_parent(node_data, *args):
+            result = _good_node(node_data["code"], score=0.61)
+            result.parent = parent
+            return result.to_dict()
+
+        agent._process_node_wrapper = process_with_parent
+
+        seeds = agent._run_multi_seed_evaluation(parent, num_seeds=5)
+
+        self.assertEqual(len(seeds), 5)
+        self.assertEqual(max(concurrent_assignments), 3)
+        self.assertEqual(manager.gpu_loads, {0: 0})
+
     def test_stage2_remains_a_tuning_stage(self):
         self.assertTrue(_is_hyperparam_tuning_stage("2_baseline_tuning_1_first", None))
 

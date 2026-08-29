@@ -167,19 +167,17 @@ class AgentManager:
                 - Use no external training dataset, Hugging Face dataset, or test-derived signal
                 - Select configurations only by validation primary and record GAUC and nDCG@5 separately.""",
             3: """
-                - Before refining FM further, complete at least two successful new-model experiments using two different non-FM architectures, chosen from Wide & Deep, DeepFM, DCN, xDeepFM, NCF, or a lightweight MLP
-                - A successful new-model experiment must finish training, emit a finite validation GAUC, nDCG@5, and primary, and preserve the trusted evaluation contract; buggy runs, duplicate architectures, and FM-only hyperparameter changes do not count toward the two required experiments
-                - Treat the first two valid non-FM architectures as controlled prototypes: introduce only one principal change per experiment and keep all unrelated data processing, training budget, and evaluation choices comparable to the best valid parent
-                - After two valid non-FM architectures have been evaluated, continue with the most promising controlled directions rather than repeatedly proposing the same failed modification
-                - Explore controlled improvements on KuaiRand-Pure in this recommended priority order:
-                  1. Align training with ranking metrics using pairwise BPR or a user-level listwise softmax objective; retain a pointwise or hybrid objective when ranking-only training harms calibration
-                  2. Add causal user-history interest modeling, such as a lightweight DIN/SIM-style module, using only interactions earlier than the target event
-                  3. Add auxiliary objectives from available organizer-provided fields such as is_click, is_like, is_follow, is_comment, is_forward, and play_time_ms while keeping long_view as the primary task
-                  4. Model watch time with an appropriate censored-regression or one-sided objective when the required duration fields are available, while still selecting by long_view ranking metrics
-                  5. Compare non-FM architectures including DeepFM, Wide & Deep, DCN, xDeepFM, NCF, and lightweight MLP variants
-                  6. Investigate hourmin/date features and train-validation temporal distribution shift without changing the chronological split
-                  7. If the organizer-provided random-exposure log is already available locally, use it only as an additional unbiased diagnostic; never replace the official validation set or select nodes using that auxiliary result
-                - Make one interpretable change per branch and compare it with the best valid parent under comparable compute
+                - Follow the assigned research role for this branch; sibling roles provide diversity and may be reallocated in later rounds from validation and ablation evidence
+                - A candidate may be one coherent evidence-backed bundle containing a central model change plus its required factors, embeddings, objectives, and training mechanisms
+                - Do not use a CONFIG-only hyperparameter change as a research candidate; every valid branch must materially change features, model computation, loss, or training behavior
+                - When a model mechanism requires corresponding factors, implement factor extraction, encoding/embedding, and the consuming model path together in this branch
+                - Cite only the supplied curated literature IDs, stored validation evidence, or a direct functional dependency when justifying a combination
+                - Declare a literal RESEARCH_MANIFEST and, for feature work, FEATURE_FACTORS with raw fields, transformations, output fields, and frozen state policy
+                - Register and guard every new component independently so Stage 4 can measure both component contribution and important pairwise synergy
+                - A valid experiment must finish training, emit finite validation GAUC, nDCG@5, and primary, and preserve the trusted evaluation contract
+                - Use only the assigned role-specific technique menu and evidence memory; do not copy unrelated methods into this branch
+                - The global method catalog is routed across sibling branches by the controller, so preserve the assigned mechanism instead of proposing another direction
+                - Keep every bundled change interpretable and evidence-linked; compare the complete candidate with the best valid parent under comparable compute
                 - Respect the encoded input contract: train_x and valid_x are dense integer feature-ID arrays with shape (rows, 5), not one-hot or scipy sparse matrices; use embedding lookup such as V[X], never X @ V
                 - Preserve CandidateModel's constructor plus step, predict, state_dict, and load_state_dict interfaces so the trusted validation loop can train and checkpoint the candidate
                 - Vectorize score and gradient computation over each batch; do not write Python loops over samples or feature rows
@@ -189,7 +187,12 @@ class AgentManager:
                 - Use no external training dataset and never use validation labels as features or test feedback for decisions
                 - Select nodes by validation primary and replicate promising gains across seeds""",
             4: """
-                - Conduct systematic component analysis that reveals the contribution of each part
+                - Run only after the current Stage 3 round has completed tuning and shortlisted its strongest candidates
+                - Conduct deterministic leave-one-component-out analysis for every registered and actually guarded component
+                - Run bounded pairwise joint ablations for the most important component pairs and estimate their synergy
+                - Reject an ablation when disabling a declared component does not change the effective code path or feature schema
+                - Report each component's primary, GAUC, and nDCG@5 contribution, seed wins, uncertainty, and positive/neutral/harmful verdict
+                - Feed component and synergy evidence into the next Stage 3 direction portfolio and combination prompt
                 - Use only the same fixed KuaiRand-Pure train/validation split
                 - Replicate the best legal configuration across seeds and report mean and standard deviation
                 - Keep the validation-best checkpoint rather than the last trained checkpoint""",

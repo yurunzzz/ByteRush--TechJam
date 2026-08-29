@@ -1,6 +1,7 @@
 import unittest
 
 from ai_scientist.treesearch.research_loop import (
+    AblationEvidence,
     PromotionPolicy,
     ResearchLoopConfig,
     ResearchLoopState,
@@ -76,7 +77,31 @@ class PromotionPolicyTests(unittest.TestCase):
 
 class ResearchLoopStateTests(unittest.TestCase):
     def test_default_patience_matches_official_convergence_rule(self):
-        self.assertEqual(ResearchLoopConfig().patience, 3)
+        self.assertEqual(ResearchLoopConfig().patience, 2)
+
+    def test_cross_component_synergy_is_available_to_next_round_prompt(self):
+        state = ResearchLoopState()
+        state.memory.record_ablation(
+            AblationEvidence(
+                round_number=1,
+                candidate_id="candidate-a",
+                component="history_factor+ranking_loss",
+                category="evidence_combination",
+                full_score=0.710,
+                ablated_score=0.704,
+                primary_contribution=0.006,
+                seed_wins=3,
+                verdict="positive_synergy",
+                interaction_with=["history_factor", "ranking_loss"],
+                synergy=0.002,
+            )
+        )
+
+        prompt_memory = state.memory.portfolio_lessons()
+
+        self.assertIn("history_factor+ranking_loss", prompt_memory)
+        self.assertIn("positive_synergy", prompt_memory)
+        self.assertIn('"synergy": 0.002', prompt_memory)
 
     def test_production_budget_is_calculated_from_all_loop_layers(self):
         budget = estimate_max_experiment_runs(
@@ -84,9 +109,9 @@ class ResearchLoopStateTests(unittest.TestCase):
         )
 
         self.assertEqual(budget["stage2_seed_evaluation"], 9)
-        self.assertEqual(budget["per_research_round"], 102)
-        self.assertEqual(budget["maximum_search_iterations"], 184)
-        self.assertEqual(budget["maximum_total"], 337)
+        self.assertEqual(budget["per_research_round"], 210)
+        self.assertEqual(budget["maximum_search_iterations"], 562)
+        self.assertEqual(budget["maximum_total"], 875)
 
     def test_partial_mapping_keeps_production_defaults(self):
         config = research_loop_config_from_mapping(
@@ -94,7 +119,7 @@ class ResearchLoopStateTests(unittest.TestCase):
         )
 
         self.assertEqual(config.candidate_tuning_iterations, 4)
-        self.assertEqual(config.baseline_tuning_iterations, 20)
+        self.assertEqual(config.baseline_tuning_iterations, 24)
         self.assertEqual(config.finalist_num_seeds, 3)
 
     def test_duplicate_candidates_are_rejected(self):
@@ -164,6 +189,29 @@ class ResearchLoopStateTests(unittest.TestCase):
         self.assertAlmostEqual(state.incumbent_score, 0.700)
         self.assertFalse(state.round_improved)
         self.assertIn("Stage 4 confirmation rejected", state.memory.failed_hypotheses[-1])
+
+    def test_any_promoted_top_candidate_can_win_five_seed_confirmation(self):
+        state = ResearchLoopState()
+        state.set_incumbent("baseline", 0.700, [0.700, 0.700, 0.700])
+        state.start_round()
+        for node_id, score in (("candidate-a", 0.706), ("candidate-b", 0.704)):
+            decision = state.evaluate_candidate(
+                node_id=node_id,
+                fingerprint=candidate_fingerprint(node_id),
+                score=score,
+                seed_scores=[score, score, score],
+            )
+            self.assertTrue(decision.promoted)
+
+        confirmation = state.accept_pending_candidate(
+            node_id="candidate-b",
+            final_node_id="candidate-b-final",
+            score=0.705,
+            seed_scores=[0.704, 0.705, 0.706, 0.705, 0.705],
+        )
+
+        self.assertTrue(confirmation.promoted)
+        self.assertEqual(state.incumbent_node_id, "candidate-b-final")
 
     def test_patience_counts_failed_rounds_not_failed_candidates(self):
         state = ResearchLoopState(

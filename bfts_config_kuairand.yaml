@@ -31,29 +31,34 @@ agent:
   max_stage: 4
   stages:
     stage1_max_iters: 2
-    stage2_max_iters: 2
-    stage3_max_iters: 12
-    stage4_max_iters: 8
+    stage2_max_iters: 24
+    stage3_max_iters: 16
+    stage4_max_iters: 9
   steps: 1
   k_fold_validation: 1
   multi_seed_eval:
-    num_seeds: 1
+    num_seeds: 3
   research_loop:
     enabled: true
-    # Two rounds expose the Stage 4 -> next Stage 3 feedback path without
-    # turning the first comparison run into an overnight search.
-    max_research_rounds: 2
+    max_research_rounds: 4
     patience: 2
     stage1_validation_iterations: 2
-    baseline_tuning_iterations: 2
-    candidate_branches: 3
+    baseline_tuning_iterations: 24
+    # Four research groups with two distinct mechanisms per group.
+    candidate_branches: 8
     candidate_parallel_workers: 3
-    # At most 6 generation runs + 3 branches * 2 tuning runs = 12 Stage 3
-    # search runs, matching the teammate pipeline's Stage 3 budget.
-    stage3_generation_attempts: 6
-    candidate_tuning_iterations: 2
-    finalist_top_k: 1
+    # Allow one contract/execution repair attempt per requested leaf.
+    stage3_generation_attempts: 16
+    # All leaves receive coarse tuning; only the strongest three are refined.
+    candidate_tuning_iterations: 8
+    candidate_refinement_top_k: 3
+    candidate_refinement_iterations: 12
+    candidate_finalist_top_k: 2
+    finalist_top_k: 3
     finalist_num_seeds: 3
+    final_confirmation_num_seeds: 5
+    ablation_candidate_top_k: 2
+    ablation_synergy_pairs: 3
     min_primary_gain: 0.002
     required_seed_wins: 2
   # Stage 4 entry requires both a promotable Stage 3 gain and a literal
