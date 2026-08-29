@@ -30,7 +30,7 @@ agent:
   max_stage: 4
   stages:
     stage1_max_iters: 2
-    stage2_max_iters: 5
+    stage2_max_iters: 2
     stage3_max_iters: 12
     stage4_max_iters: 8
   steps: 1

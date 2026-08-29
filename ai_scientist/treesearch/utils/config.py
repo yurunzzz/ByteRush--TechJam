@@ -58,6 +58,7 @@ class AblationConfig:
     mode: str = "registered_component_leave_one_out"
     min_primary_gain: float = 0.002
     num_seeds: int = 3
+    min_successful_seeds: int = 3
     max_components: int = 8
 
 
@@ -78,6 +79,7 @@ class AgentConfig:
     type: str
     multi_seed_eval: dict[str, int]
     max_stage: int
+    final_model_dir: str = "artifacts/final_model"
 
     summary: Optional[StageConfig] = None
     select_node: Optional[StageConfig] = None
