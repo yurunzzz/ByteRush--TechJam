@@ -1,0 +1,61 @@
+{
+  "dataset": "KuaiRand-Pure",
+  "label": "long_view",
+  "task": "within-user ranking; primary = mean(GAUC, nDCG@5)",
+  "population": {
+    "valid": {
+      "rows": 124909,
+      "users": 22377,
+      "pos_rate": 0.3133,
+      "all_negative_pct": 30.3,
+      "all_positive_pct": 11.9,
+      "discriminative_pct": 57.8,
+      "list_len_median": 4,
+      "list_len_p90": 12,
+      "ceiling": {
+        "GAUC": 1.0,
+        "nDCG@5": 0.6968,
+        "primary": 0.8484
+      }
+    },
+    "test": {
+      "rows": 170588,
+      "users": 23875,
+      "pos_rate": 0.3135,
+      "all_negative_pct": 27.1,
+      "all_positive_pct": 9.2,
+      "discriminative_pct": 63.7,
+      "list_len_median": 5,
+      "list_len_p90": 16,
+      "ceiling": {
+        "GAUC": 1.0,
+        "nDCG@5": 0.7289,
+        "primary": 0.8645
+      }
+    }
+  },
+  "cold_start": {
+    "valid": {
+      "unseen_user_pct": 1.59,
+      "unseen_video_pct": 0.01,
+      "unseen_author_pct": 0.01
+    },
+    "test": {
+      "unseen_user_pct": 3.62,
+      "unseen_video_pct": 0.01,
+      "unseen_author_pct": 0.0
+    }
+  },
+  "signal": {
+    "tab_posrate_min": 0.004,
+    "tab_posrate_max": 0.489
+  },
+  "priors_for_agent": [
+    "Cold-start negligible (unseen video/author ~0.01%): do NOT spend capacity on content/ID-fallback features.",
+    "nDCG@5 is structurally capped (~27% all-negative users, nDCG=0 in the mean): optimize GAUC, not nDCG.",
+    "tab positive-rate spans an order of magnitude: prioritize tab x user / tab x video crosses; pure user-side first-order terms cannot change within-user order.",
+    "Pointwise logloss is misaligned with the ranking metric: try within-user pairwise/BPR first.",
+    "Any temporal or statistical feature MUST be built causally from strictly-earlier events only (no valid/test labels, no future)."
+  ],
+  "provenance": "Computed from the official data.py loader; population-level only, no per-id tables. Ceilings cross-checked against baseline_scores.json oracle_ceiling."
+}

@@ -1,0 +1,342 @@
+<title>KuaiRand-Pure 排序诊断</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --ground:#F4F5F7; --panel:#FFFFFF; --panel-2:#FBFBFD;
+    --ink:#17181C; --ink-2:#3E414B; --muted:#71757F; --hair:#E4E5EA;
+    --accent:#3D4EAC; --accent-soft:#EAECF8;
+    --floor:#9A9DA6; --pop:#B08A3E; --fm:#3D4EAC; --ceil:#1F9E6E;
+    --danger:#B8503F; --danger-soft:#F6E9E6;
+    --track:#E9EAEF;
+    --shadow:0 1px 2px rgba(20,22,30,.04),0 6px 20px rgba(20,22,30,.05);
+  }
+  :root:not([data-theme="light"]){}
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#121318; --panel:#191B22; --panel-2:#15161C;
+      --ink:#EDEEF2; --ink-2:#C3C6CF; --muted:#8B8F9A; --hair:#2A2C35;
+      --accent:#8E9BF0; --accent-soft:#22253A;
+      --floor:#787C86; --pop:#C9A863; --fm:#8E9BF0; --ceil:#4FC08A;
+      --danger:#E08571; --danger-soft:#2E2320;
+      --track:#24262F;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#121318; --panel:#191B22; --panel-2:#15161C;
+    --ink:#EDEEF2; --ink-2:#C3C6CF; --muted:#8B8F9A; --hair:#2A2C35;
+    --accent:#8E9BF0; --accent-soft:#22253A;
+    --floor:#787C86; --pop:#C9A863; --fm:#8E9BF0; --ceil:#4FC08A;
+    --danger:#E08571; --danger-soft:#2E2320;
+    --track:#24262F;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--ground); color:var(--ink);
+    font-family:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+    font-size:16px; line-height:1.6; letter-spacing:-.003em;
+  }
+  .wrap{max-width:940px; margin:0 auto; padding:clamp(28px,5vw,72px) clamp(18px,4vw,44px) 96px}
+  .mono{font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums}
+  .num{font-variant-numeric:tabular-nums}
+
+  /* ---- header ---- */
+  .eyebrow{
+    font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:500;
+    letter-spacing:.18em; text-transform:uppercase; color:var(--accent);
+    display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+  }
+  .eyebrow::after{content:""; height:1px; flex:1; min-width:40px; background:var(--hair)}
+  h1{
+    font-family:"Fraunces",Georgia,serif; font-weight:600;
+    font-size:clamp(30px,5.4vw,50px); line-height:1.04; letter-spacing:-.02em;
+    text-wrap:balance; margin:.5em 0 .3em;
+  }
+  .lede{font-size:clamp(17px,2.2vw,20px); color:var(--ink-2); max-width:64ch; margin:0}
+  .meta{
+    margin-top:22px; padding-top:18px; border-top:1px solid var(--hair);
+    display:flex; flex-wrap:wrap; gap:8px 26px; font-size:13px; color:var(--muted);
+    font-family:"IBM Plex Mono",monospace;
+  }
+  .meta b{color:var(--ink-2); font-weight:500}
+
+  /* ---- stat tiles ---- */
+  .tiles{display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin:34px 0 12px}
+  @media(max-width:640px){.tiles{grid-template-columns:1fr}}
+  .tile{
+    background:var(--panel); border:1px solid var(--hair); border-radius:14px;
+    padding:20px 20px 18px; box-shadow:var(--shadow); position:relative; overflow:hidden;
+  }
+  .tile .k{font-family:"IBM Plex Mono",monospace; font-size:12px; letter-spacing:.05em;
+    text-transform:uppercase; color:var(--muted)}
+  .tile .v{font-family:"Fraunces",serif; font-weight:600; font-size:40px; line-height:1;
+    margin:.28em 0 .12em; letter-spacing:-.02em}
+  .tile .d{font-size:13.5px; color:var(--ink-2); line-height:1.45}
+  .tile.good .v{color:var(--ceil)} .tile.warn .v{color:var(--danger)} .tile.ok .v{color:var(--accent)}
+
+  /* ---- sections ---- */
+  section{margin-top:52px}
+  h2{
+    font-family:"Fraunces",serif; font-weight:600; font-size:clamp(21px,3vw,27px);
+    letter-spacing:-.015em; margin:0 0 6px; display:flex; align-items:baseline; gap:12px;
+  }
+  h2 .idx{font-family:"IBM Plex Mono",monospace; font-size:14px; font-weight:500;
+    color:var(--accent); letter-spacing:0}
+  .sub{color:var(--muted); font-size:14.5px; margin:0 0 20px}
+  p{margin:0 0 14px; max-width:72ch} p:last-child{margin-bottom:0}
+  strong{font-weight:600}
+  .kbd{font-family:"IBM Plex Mono",monospace; font-size:.88em; background:var(--accent-soft);
+    color:var(--accent); padding:1px 6px; border-radius:5px}
+
+  /* ---- bounds ladder ---- */
+  .ladder{background:var(--panel); border:1px solid var(--hair); border-radius:16px;
+    padding:26px clamp(18px,3vw,30px) 20px; box-shadow:var(--shadow)}
+  .metric{padding:18px 0; border-bottom:1px dashed var(--hair)}
+  .metric:last-child{border-bottom:0; padding-bottom:6px}
+  .metric-head{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:14px}
+  .metric-head .name{font-weight:600; font-size:16px}
+  .metric-head .name span{color:var(--muted); font-weight:400; font-size:13px; margin-left:8px}
+  .metric-head .gap{font-family:"IBM Plex Mono",monospace; font-size:12.5px; color:var(--muted)}
+  .metric-head .gap b{color:var(--accent); font-weight:600}
+  .track{position:relative; height:44px; background:var(--track); border-radius:9px}
+  .fill{position:absolute; top:0; bottom:0; left:0; border-radius:9px 0 0 9px;
+    background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 8%,transparent),color-mix(in srgb,var(--accent) 20%,transparent))}
+  .unreach{position:absolute; top:0; bottom:0; border-radius:0 9px 9px 0;
+    background:repeating-linear-gradient(45deg,transparent,transparent 5px,color-mix(in srgb,var(--danger) 14%,transparent) 5px,color-mix(in srgb,var(--danger) 14%,transparent) 10px);
+    border-left:2px solid var(--ceil)}
+  .mark{position:absolute; top:50%; transform:translate(-50%,-50%); width:2px; height:26px;
+    background:var(--m); border-radius:2px}
+  .mark::after{content:attr(data-v); position:absolute; left:50%; transform:translateX(-50%);
+    top:-19px; font-family:"IBM Plex Mono",monospace; font-size:11px; font-weight:600; color:var(--m); white-space:nowrap}
+  .mark::before{content:attr(data-l); position:absolute; left:50%; transform:translateX(-50%);
+    bottom:-18px; font-family:"IBM Plex Mono",monospace; font-size:10px; letter-spacing:.02em;
+    color:var(--m); white-space:nowrap; opacity:.9}
+  .dot{width:11px; height:11px; border-radius:50%; background:var(--m); top:50%; transform:translate(-50%,-50%)}
+  .axis{display:flex; justify-content:space-between; font-family:"IBM Plex Mono",monospace;
+    font-size:11px; color:var(--muted); margin-top:8px}
+  .legend{display:flex; flex-wrap:wrap; gap:6px 18px; margin-top:20px; padding-top:16px;
+    border-top:1px solid var(--hair); font-size:12.5px; color:var(--ink-2); font-family:"IBM Plex Mono",monospace}
+  .legend span{display:inline-flex; align-items:center; gap:7px}
+  .legend i{width:10px; height:10px; border-radius:3px; display:inline-block}
+
+  /* ---- tables ---- */
+  .scroll{overflow-x:auto; margin:4px 0 0; border:1px solid var(--hair); border-radius:12px}
+  table{border-collapse:collapse; width:100%; font-size:14px}
+  th,td{padding:11px 14px; text-align:right; border-bottom:1px solid var(--hair); white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  thead th{background:var(--panel-2); font-family:"IBM Plex Mono",monospace; font-weight:500;
+    font-size:12px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); position:sticky; top:0}
+  tbody tr:last-child td{border-bottom:0}
+  tbody td{font-family:"IBM Plex Mono",monospace}
+  tbody td:first-child{font-family:"IBM Plex Sans",sans-serif}
+  tr.hl td{background:var(--accent-soft)}
+  tr.hl td:first-child{font-weight:600; color:var(--accent)}
+  .cell-ceil{color:var(--ceil); font-weight:600}
+  .cap{font-size:12.5px; color:var(--muted); margin-top:8px}
+
+  /* ---- taxonomy bar ---- */
+  .taxbar{display:flex; height:56px; border-radius:12px; overflow:hidden; border:1px solid var(--hair); margin:6px 0 16px}
+  .taxbar div{display:flex; flex-direction:column; justify-content:center; align-items:center;
+    color:#fff; font-family:"IBM Plex Mono",monospace; padding:0 8px; text-align:center; line-height:1.2}
+  .taxbar .s1{background:var(--accent)} .taxbar .s2{background:var(--danger)} .taxbar .s3{background:var(--floor)}
+  .taxbar b{font-size:16px} .taxbar small{font-size:10.5px; opacity:.92; font-weight:400}
+
+  /* ---- findings / implications ---- */
+  .find{display:grid; gap:12px}
+  .row{display:grid; grid-template-columns:auto 1fr; gap:16px; align-items:start;
+    background:var(--panel); border:1px solid var(--hair); border-radius:13px; padding:16px 18px; box-shadow:var(--shadow)}
+  .pri{font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:600; letter-spacing:.03em;
+    padding:4px 9px; border-radius:6px; white-space:nowrap; height:fit-content}
+  .pri.go{background:color-mix(in srgb,var(--ceil) 15%,transparent); color:var(--ceil)}
+  .pri.later{background:var(--accent-soft); color:var(--accent)}
+  .pri.skip{background:color-mix(in srgb,var(--floor) 22%,transparent); color:var(--muted)}
+  .row .t{font-weight:600; margin:0 0 3px} .row .b{margin:0; font-size:14.5px; color:var(--ink-2); max-width:none}
+  .row .b em{font-style:normal; color:var(--danger); font-weight:500}
+
+  footer{margin-top:56px; padding-top:20px; border-top:1px solid var(--hair);
+    font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--muted); line-height:1.7}
+  footer code{background:var(--panel-2); padding:1px 5px; border-radius:4px; border:1px solid var(--hair)}
+  @media (prefers-reduced-motion:no-preference){
+    .tile,.row{transition:transform .15s ease}
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">KuaiRand-Pure · long_view within-user ranking</div>
+    <h1>该往 GAUC 使劲，不是 nDCG</h1>
+    <p class="lede">对官方切分做任务导向 EDA，得到一个明确的行动方向：主分还剩约七成可达空间，但绝大多数在 GAUC 一侧。主要矛盾不是冷启动，而是 <strong>训练目标与排序指标不一致</strong>；先分清哪些是数据锁死、哪些能改，再把力气花在能改的地方。</p>
+    <div class="meta">
+      <span><b>train</b> 04-08→04-21</span>
+      <span><b>valid</b> 04-22→04-28</span>
+      <span><b>test</b> 04-29→05-08 · 170,588 行 · 23,875 用户</span>
+      <span><b>指标</b> ½(GAUC + nDCG@5)</span>
+    </div>
+  </header>
+
+  <div class="tiles">
+    <div class="tile warn">
+      <div class="k">nDCG@5 理论天花板</div>
+      <div class="v num">0.729</div>
+      <div class="d">完美模型也够不到 1.0 —— 27% 全负用户 nDCG 恒为 0 且计入平均。</div>
+    </div>
+    <div class="tile ok">
+      <div class="k">进入 GAUC 的用户</div>
+      <div class="v num">63.7<span style="font-size:22px">%</span></div>
+      <div class="d">只有同时含正负例的"有区分度"用户真正贡献 GAUC。</div>
+    </div>
+    <div class="tile good">
+      <div class="k">冷启动 UNK 率</div>
+      <div class="v num">0.01<span style="font-size:22px">%</span></div>
+      <div class="d">未见 video / author 几乎为零 —— 纯 ID FM 的盲区不存在。</div>
+    </div>
+  </div>
+
+  <section>
+    <h2><span class="idx">01</span>界限阶梯：还剩多少提升空间</h2>
+    <p class="sub">同一条 0.45 → 0.90 轴上放四个标记（test split）。斜纹区 = 任何模型都到不了的禁区。</p>
+    <div class="ladder">
+
+      <div class="metric">
+        <div class="metric-head">
+          <div class="name">GAUC <span>整体用户内排序</span></div>
+          <div class="gap">FM→天花板还剩 <b>0.339</b></div>
+        </div>
+        <div class="track" role="img" aria-label="GAUC: random 0.500, popularity 0.631, FM 0.661, ceiling 1.0">
+          <div class="fill" style="width:47.1%"></div>
+          <span class="mark dot" style="left:11.1%;--m:var(--floor)" data-l="random" data-v="0.500"></span>
+          <span class="mark dot" style="left:40.2%;--m:var(--pop)" data-l="pop" data-v="0.631"></span>
+          <span class="mark" style="left:46.9%;--m:var(--fm)" data-l="FM" data-v="0.661"></span>
+          <span class="mark dot" style="left:100%;--m:var(--ceil)" data-l="oracle" data-v="1.000"></span>
+        </div>
+      </div>
+
+      <div class="metric">
+        <div class="metric-head">
+          <div class="name">nDCG@5 <span>头部 5 个位置</span></div>
+          <div class="gap">天花板仅 <b>0.729</b> · 结构上限</div>
+        </div>
+        <div class="track" role="img" aria-label="nDCG@5: random 0.451, popularity 0.512, FM 0.528, ceiling 0.729, above is unreachable">
+          <div class="fill" style="width:17.4%"></div>
+          <div class="unreach" style="left:62.0%; right:0"></div>
+          <span class="mark dot" style="left:0.2%;--m:var(--floor)" data-l="random" data-v="0.451"></span>
+          <span class="mark dot" style="left:13.8%;--m:var(--pop)" data-l="pop" data-v="0.512"></span>
+          <span class="mark" style="left:17.4%;--m:var(--fm)" data-l="FM" data-v="0.528"></span>
+          <span class="mark" style="left:62.0%;--m:var(--ceil)" data-l="oracle" data-v="0.729"></span>
+        </div>
+      </div>
+
+      <div class="metric">
+        <div class="metric-head">
+          <div class="name">primary <span>= ½(GAUC + nDCG@5)</span></div>
+          <div class="gap">FM 已吃下可达区间的 <b>31%</b></div>
+        </div>
+        <div class="track" role="img" aria-label="primary: random 0.475, popularity 0.572, FM 0.595, ceiling 0.865">
+          <div class="fill" style="width:32.1%"></div>
+          <div class="unreach" style="left:92.2%; right:0"></div>
+          <span class="mark dot" style="left:5.6%;--m:var(--floor)" data-l="random" data-v="0.475"></span>
+          <span class="mark dot" style="left:27.1%;--m:var(--pop)" data-l="pop" data-v="0.572"></span>
+          <span class="mark" style="left:32.1%;--m:var(--fm)" data-l="FM" data-v="0.595"></span>
+          <span class="mark" style="left:92.2%;--m:var(--ceil)" data-l="oracle" data-v="0.865"></span>
+        </div>
+        <div class="axis"><span>0.45</span><span>0.90</span></div>
+      </div>
+
+      <div class="legend">
+        <span><i style="background:var(--floor)"></i>random 地板</span>
+        <span><i style="background:var(--pop)"></i>item-popularity</span>
+        <span><i style="background:var(--fm)"></i>FM 现任基线</span>
+        <span><i style="background:var(--ceil)"></i>oracle 天花板</span>
+        <span><i style="background:repeating-linear-gradient(45deg,transparent,transparent 3px,color-mix(in srgb,var(--danger) 40%,transparent) 3px,color-mix(in srgb,var(--danger) 40%,transparent) 6px)"></i>结构禁区</span>
+      </div>
+    </div>
+    <p style="margin-top:16px">读法：FM 在 test 上主分 <span class="mono">0.595</span>，可达区间 <span class="mono">0.475 → 0.865</span>，只吃下 <strong>31%</strong> —— 七成空间还在，值得改。其中 <strong>GAUC 侧空间（+0.339）是 nDCG 侧（+0.201）的一倍多</strong>，故主分增长应主要来自 GAUC（为何 nDCG 空间小，见下节）。研究选型仍以 valid 为准（天花板 0.848）。</p>
+  </section>
+
+  <section>
+    <h2><span class="idx">02</span>用户构成锁死了 nDCG</h2>
+    <p class="sub">指标先按用户算再平均，所以"谁进平均、谁被剔除"由数据说了算，模型改不了。</p>
+    <div class="taxbar" role="img" aria-label="63.7% 有区分度用户, 27.1% 全负用户, 9.2% 全正用户">
+      <div class="s1" style="flex:63.7"><b>63.7%</b><small>有区分度 · 进 GAUC</small></div>
+      <div class="s2" style="flex:27.1"><b>27.1%</b><small>全负 · nDCG=0</small></div>
+      <div class="s3" style="flex:9.2"><b>9.2%</b><small>全正 · GAUC 不计</small></div>
+    </div>
+    <p>27.1% 的用户名下一个 <span class="kbd">long_view=1</span> 都没有 —— 他们的 nDCG@5 恒为 0 却计入平均，直接把 nDCG 上限从 1.0 压到 <strong>0.729</strong>（这就是上节 nDCG 空间小的原因）。另有 9.2% 全正用户被 GAUC 排除（AUC 在单一类别上无定义）。这是口径决定的损失，模型救不了。</p>
+  </section>
+
+  <section>
+    <h2><span class="idx">03</span>冷启动几乎不存在（反直觉）</h2>
+    <p class="sub">纯 ID 的 FM 最怕未见 ID 落入 UNK 共享向量 —— 但这份数据上基本不会发生。</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>相对 train 的未见占比</th><th>未见 user</th><th>未见 video</th><th>未见 author</th></tr></thead>
+        <tbody>
+          <tr><td>valid（按曝光行）</td><td>1.59%</td><td class="cell-ceil">0.01%</td><td class="cell-ceil">0.01%</td></tr>
+          <tr><td>test（按曝光行）</td><td>3.62%</td><td class="cell-ceil">0.01%</td><td class="cell-ceil">0.00%</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:14px">未见 video/author ≈ 0.01%，item 侧 embedding 几乎总能命中 —— <strong>没有冷启动样本可救，加内容特征/兜底的投入产出比极低</strong>。这是 EDA 直接砍掉一个方向的例子。</p>
+  </section>
+
+  <section>
+    <h2><span class="idx">04</span>特征信号 & 时间漂移</h2>
+    <p class="sub">哪些现有域真有区分度，训练分布是否稳定。</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>tab（前 5 大曝光）</th><th>曝光量</th><th>long_view 正例率</th></tr></thead>
+        <tbody>
+          <tr class="hl"><td>tab = 4</td><td>9,764</td><td>45.6%</td></tr>
+          <tr><td>tab = 2</td><td>5,239</td><td>37.3%</td></tr>
+          <tr><td>tab = 1（主）</td><td>130,841</td><td>34.8%</td></tr>
+          <tr><td>tab = 6</td><td>7,944</td><td>8.6%</td></tr>
+          <tr><td>tab = 0</td><td>14,348</td><td>3.7%</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:14px"><strong>tab 是强信号</strong>：正例率从 3.7% 到 45.6% 横跨一个数量级，值得做 <span class="kbd">tab × user</span> / <span class="kbd">tab × video</span> 交叉。时长桶影响温和（多数落 27–37%）。时间上，正例率从 train 早期 ~34% 缓降到 test 尾部 ~30%，<strong>漂移存在但不剧烈</strong> —— recency 加权可试，优先级低于目标函数。</p>
+  </section>
+
+  <section>
+    <h2><span class="idx">05</span>建模优先级</h2>
+    <p class="sub">每条锚定上面某节观察，只给动作与新增理由，不复述已列数字。</p>
+    <div class="find">
+      <div class="row">
+        <span class="pri go">先做</span>
+        <div><p class="t">Pairwise / BPR 目标函数</p><p class="b">baseline 用 pointwise logloss，评测却是排序指标；对齐两者是最大且最直接的杠杆，正对 §01 里 GAUC 那侧的空间。</p></div>
+      </div>
+      <div class="row">
+        <span class="pri go">先做</span>
+        <div><p class="t">tab 交叉特征</p><p class="b">§04 的 tab 与 user/video 交叉能改变用户内相对序；纯用户侧一阶项则无效 —— 它给一个用户的每条曝光加同一常数，动不了排序。</p></div>
+      </div>
+      <div class="row">
+        <span class="pri later">再看</span>
+        <div><p class="t">因果时序特征 / recency 加权</p><p class="b">漂移温和，收益中等。历史 long_view 率、近 N 次行为池化须严格用更早事件构造，<em>禁止未来信息</em>。</p></div>
+      </div>
+      <div class="row">
+        <span class="pri later">再看</span>
+        <div><p class="t">多任务：click / 完播</p><p class="b">日志含稠密辅助反馈可作辅助任务；long_view 仍是唯一选型目标，逐个加并做负迁移消融。</p></div>
+      </div>
+      <div class="row">
+        <span class="pri skip">放弃</span>
+        <div><p class="t">冷启动 / 内容兜底</p><p class="b">§03：没有冷启动样本可救。</p></div>
+      </div>
+      <div class="row">
+        <span class="pri skip">放弃</span>
+        <div><p class="t">死磕 nDCG / 单纯扩容</p><p class="b">§02 的 nDCG 天花板是结构性的；加宽 embedding 8→16→32 经组织方消融证明无效。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    复现：<code>python eda.py --data-dir …/KuaiRand-Pure/data</code> · <code>python eda_plots.py --out-dir eda_figs</code><br>
+    上下界与 random/popularity 分数取自官方 <code>baseline_scores.json</code>（oracle_ceiling / test_set_composition），已由独立 EDA 交叉验证一致。口径见 <code>evaluate.py</code>，不可改。<br>
+    FM seed std ≈ 0.0008，收敛判据 ε=0.002 / 连续 3 次 —— 单跑微小提升不可信，改进需多 seed 报 mean±std。
+  </footer>
+
+</div>
