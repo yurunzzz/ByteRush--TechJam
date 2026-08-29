@@ -1,8 +1,10 @@
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from ai_scientist.treesearch.journal import Journal, Node
 from ai_scientist.treesearch.candidate_contract import config_assignment
+from ai_scientist.treesearch.backend import compile_prompt_to_md
 from ai_scientist.treesearch.parallel_agent import (
     GPUManager,
     HyperparamTuningIdea,
@@ -139,6 +141,45 @@ class CandidateTuningTests(unittest.TestCase):
 
         self.assertIn("__ast_expression__", config["seed"])
         self.assertEqual(config["max_epochs"], 12)
+
+    def test_scored_config_history_compiles_for_next_tuning_idea(self):
+        base = _good_node("CONFIG = {'learning_rate': 0.001}\n")
+        agent = object.__new__(ParallelAgent)
+        agent.stage_name = "2_baseline_tuning_1_closed_loop"
+        agent.tuning_base_node = base
+        agent._hyperparam_tuning_state = {
+            "tried_hyperparams": {"config_baseline_001"},
+            "tried_configurations": [
+                {
+                    "config": {
+                        "seed": {"__ast_expression__": "runtime seed"},
+                        "learning_rate": 0.001,
+                    },
+                    "validation_primary": 0.6016,
+                }
+            ],
+        }
+        agent.cfg = SimpleNamespace(
+            agent=SimpleNamespace(
+                code=SimpleNamespace(model="test-model", temp=0.0)
+            )
+        )
+
+        def compile_then_answer(system_message, **kwargs):
+            compiled = compile_prompt_to_md(system_message)
+            self.assertIn("validation_primary", compiled)
+            return (
+                "HYPERPARAM NAME: config_baseline_002\n"
+                "DESCRIPTION: change learning_rate to 0.0005"
+            )
+
+        with patch(
+            "ai_scientist.treesearch.parallel_agent.query",
+            side_effect=compile_then_answer,
+        ):
+            idea = agent._generate_hyperparam_tuning_idea()
+
+        self.assertEqual(idea.name, "config_baseline_002")
 
     def test_explicit_candidate_becomes_the_tuning_parent(self):
         candidate = _good_node("candidate-code")

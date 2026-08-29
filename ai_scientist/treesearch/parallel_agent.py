@@ -2233,7 +2233,14 @@ class ParallelAgent:
             "Previous Hyperparam Tuning Attempts": {
                 "Has been tried": tried if tried else "Nothing has been tried yet.",
                 "Executed configurations and validation scores": (
-                    tried_configs if tried_configs else "Nothing has been executed yet."
+                    json.dumps(
+                        tried_configs,
+                        sort_keys=True,
+                        ensure_ascii=True,
+                        default=str,
+                    )
+                    if tried_configs
+                    else "Nothing has been executed yet."
                 ),
             },
             "Instructions": {
