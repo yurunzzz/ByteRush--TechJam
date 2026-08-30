@@ -109,8 +109,20 @@ def export_submission(
                 raise RuntimeError(
                     "frozen feature dimension does not match checkpoint model"
                 )
-            test_x, _, _ = encoded["test"]
-            scores = np.asarray(model.predict(test_x), dtype=np.float64)
+            test_payload = encoded["test"]
+            if len(test_payload) == 3:
+                test_x, _, _ = test_payload
+                scores = np.asarray(model.predict(test_x), dtype=np.float64)
+            elif len(test_payload) == 4:
+                test_x, _, _, test_context = test_payload
+                scores = np.asarray(
+                    model.predict(test_x, test_context), dtype=np.float64
+                )
+            else:
+                raise RuntimeError(
+                    "unsupported frozen test payload: expected 3 or 4 items, "
+                    f"got {len(test_payload)}"
+                )
             if scores.shape != (len(loaded["test"]),):
                 raise RuntimeError(
                     f"test prediction shape {scores.shape}, expected ({len(loaded['test'])},)"
