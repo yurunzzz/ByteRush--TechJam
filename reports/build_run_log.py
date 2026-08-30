@@ -29,29 +29,33 @@ P_NDCG = re.compile(r'"nDCG@5":\s*([0-9.]+)')
 P_DIR = re.compile(r'(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})')
 
 
-def competition_baseline() -> float | None:
+def references() -> dict:
+    """Reference primary scores from baseline_scores.json (validation split).
+
+    The real bar to beat is fm_official; `random` is only a sanity check and must
+    NOT be used as the baseline. oracle_ceiling is the denominator for headroom.
+    """
     bs = ROOT / "kuairand-starter-kit" / "baseline_scores.json"
+    out = {"random": None, "item_popularity": None, "fm_official": None, "oracle_ceiling": None}
     if not bs.exists():
-        return None
-    def find(o):
-        if isinstance(o, dict):
-            if isinstance(o.get("primary"), (int, float)):
-                return o["primary"]
-            for v in o.values():
-                r = find(v)
-                if r is not None:
-                    return r
-        return None
+        return out
     try:
-        return find(json.load(open(bs)))
+        sc = json.load(open(bs)).get("scores", {})
+        for name in out:
+            out[name] = sc.get(name, {}).get("valid", {}).get("primary")
     except Exception:
-        return None
+        pass
+    return out
 
 
 def best_metric(run: Path):
-    """Best validation primary (+aligned GAUC/nDCG) across the run's history.json files."""
+    """Best validation primary (+aligned GAUC/nDCG) across ALL history.json in the run.
+
+    Searches the whole run tree — early runs store history.json under
+    <stage>/process_*/working/, not under logs/.
+    """
     best = None
-    for hf in glob.glob(str(run / "logs/**/history.json"), recursive=True):
+    for hf in glob.glob(str(run / "**/history.json"), recursive=True):
         try:
             txt = open(hf, encoding="utf-8", errors="ignore").read()
         except Exception:
@@ -181,7 +185,9 @@ def fmt_delta(x):
 
 
 def render_markdown(ledger: dict, min_seconds: float) -> str:
-    baseline = ledger.get("baseline_primary")
+    baseline = ledger.get("baseline_primary")          # fm_official
+    refs = ledger.get("references", {})
+    oracle = refs.get("oracle_ceiling")
     runs = sorted(ledger["runs"].values(), key=lambda r: r["sort_key"])
 
     # deltas vs previous scored run
@@ -194,34 +200,57 @@ def render_markdown(ledger: dict, min_seconds: float) -> str:
             prev = bp
 
     scored = [r for r in runs if r.get("best_primary") is not None]
-    shown = [r for r in runs if (r.get("best_primary") is not None) or ((r.get("duration_s") or 0) >= min_seconds)]
+    # show any run that produced a metric OR has resource tracking; count the rest
+    shown = [r for r in runs if (r.get("best_primary") is not None) or (r.get("duration_s") is not None)]
+    dropped = len(runs) - len(shown)
 
-    # aggregates over runs that have resource tracking
     tracked = [r for r in shown if r.get("duration_s")]
     tot_tokens = sum(r.get("llm_total_tokens") or 0 for r in tracked)
     tot_calls = sum(r.get("llm_calls") or 0 for r in tracked)
     tot_wall = sum(r.get("duration_s") or 0 for r in tracked)
     tot_train = sum(r.get("training_s") or 0 for r in tracked)
     best = max((r["best_primary"] for r in scored), default=None)
+    best_run = max(scored, key=lambda r: r["best_primary"], default=None) if scored else None
 
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     L = []
     L.append("# KuaiRand Agent Run Log")
     L.append("")
     L.append(f"*ByteRush · TechJam — KuaiRand-Pure long_view ranking · primary = mean(GAUC, nDCG@5)*  ")
-    L.append(f"*Auto-generated {now} · {len(shown)} runs shown / {len(runs)} launched*")
+    L.append(f"*Auto-generated {now} · {len(shown)} runs shown / {len(runs)} launched ({dropped} sub-minute aborts hidden)*")
+    L.append("")
+    L.append("## Reference scores (validation)")
+    L.append("")
+    L.append("The bar to beat is **`fm_official`** — `random` is only a sanity check. "
+             "`oracle_ceiling` is the theoretical max (nDCG capped by all-negative users) and the denominator for headroom.")
+    L.append("")
+    L.append("| Reference | Primary | Note |")
+    L.append("|---|---|---|")
+    L.append(f"| random | `{refs.get('random')}` | sanity check only — **not** the baseline |")
+    L.append(f"| item_popularity | `{refs.get('item_popularity')}` | official non-trained baseline |")
+    L.append(f"| **fm_official** | **`{refs.get('fm_official')}`** | **official FM baseline — the real bar** |")
+    L.append(f"| oracle_ceiling | `{refs.get('oracle_ceiling')}` | theoretical upper bound |")
     L.append("")
     L.append("## Summary")
     L.append("")
     L.append("| Metric | Value |")
     L.append("|---|---|")
-    L.append(f"| FM baseline (starter kit) | `{baseline:.4f}` |" if baseline is not None else "| FM baseline | n/a |")
+    L.append(f"| FM baseline (fm_official) | `{baseline:.4f}` |" if baseline is not None else "| FM baseline | n/a |")
     if best is not None and baseline is not None:
-        L.append(f"| **Best validation primary** | **`{best:.4f}`** (+{best-baseline:.4f} vs baseline) |")
+        hr = ""
+        if oracle and oracle > baseline:
+            hr = f" · {100*(best-baseline)/(oracle-baseline):.1f}% of oracle headroom"
+        when = f" ({best_run['start'][:16]})" if best_run and best_run.get("start") else ""
+        L.append(f"| **Best validation primary** | **`{best:.4f}`** ({fmt_delta(best-baseline)} vs FM baseline{hr}){when} |")
     L.append(f"| Scored runs | {len(scored)} of {len(runs)} launched |")
     L.append(f"| Total LLM tokens | {fmt_tokens(tot_tokens)} across ~{tot_calls:,} calls |")
     L.append(f"| Agent wall-clock | {tot_wall/3600:.1f} h |")
     L.append(f"| GPU-active training | {tot_train/60:.0f} min |")
+    L.append("")
+    L.append(f"> **Reality check:** measured against the real FM baseline (`{baseline:.4f}`), the agent's best is "
+             f"only **{fmt_delta(best-baseline)}** — essentially matching the provided FM. Early runs reproduced FM at "
+             f"~0.6014; later architecture changes (DeepFM, BPR, DIN attention) added <0.004. The '+0.12' figure from an "
+             f"earlier draft compared against `random` and was misleading.")
     L.append("")
 
     L.append("## Per-run ledger")
@@ -292,7 +321,9 @@ def main():
 
     REPORTS.mkdir(exist_ok=True)
     ledger = load_ledger()
-    ledger["baseline_primary"] = competition_baseline()
+    refs = references()
+    ledger["references"] = refs
+    ledger["baseline_primary"] = refs.get("fm_official")   # the real bar, not `random`
 
     if args.run:
         run = Path(args.run)
