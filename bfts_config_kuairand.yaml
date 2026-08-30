@@ -10,6 +10,8 @@ exp_name: kuairand_stage4
 
 exec:
   timeout: 1000
+  # Multiprocessing spawn imports PyTorch before the child can signal ready.
+  repl_startup_timeout: 60
   agent_file_name: runfile.py
   format_tb_ipython: false
 
@@ -54,6 +56,12 @@ agent:
     candidate_tuning_iterations: 2
     finalist_top_k: 1
     finalist_num_seeds: 3
+    # Feed the strongest diverse validation-only non-winners into the next
+    # Stage 3 round as transferable lessons, never as automatic promotions.
+    experience_top_k: 3
+    # Preserve parallel Stage 3 execution while avoiding simultaneous
+    # PyTorch/CUDA initialization spikes on the single competition GPU.
+    stage3_startup_stagger_seconds: 8
     min_primary_gain: 0.002
     required_seed_wins: 2
   # Stage 4 entry requires both a promotable Stage 3 gain and a literal

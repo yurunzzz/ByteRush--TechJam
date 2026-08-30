@@ -26,6 +26,7 @@ from rich import print
 from pathlib import Path
 import base64
 import sys
+import time
 import numpy as np
 
 logger = logging.getLogger("ai-scientist")
@@ -1424,6 +1425,11 @@ class ParallelAgent:
         self.max_workers_per_gpu = max(
             1, int(cfg.agent.get("max_workers_per_gpu", 1))
         )
+        research_loop_cfg = cfg.agent.get("research_loop", {})
+        self.stage3_startup_stagger_seconds = max(
+            0.0,
+            float(research_loop_cfg.get("stage3_startup_stagger_seconds", 0.0)),
+        )
         print(f"num_gpus: {self.num_gpus}")
         if self.num_gpus == 0:
             print("No GPUs detected, falling back to CPU-only mode")
@@ -1459,6 +1465,22 @@ class ParallelAgent:
         self._hyperparam_tuning_state = {  # store hyperparam tuning ideas
             "tried_hyperparams": set(),
         }
+
+    def _maybe_stagger_stage3_start(self, submitted: int, total: int) -> None:
+        """Stagger child initialization without serializing experiment runtime."""
+        if (
+            self.num_gpus == 1
+            and self.stage_name
+            and self.stage_name.startswith("3_")
+            and self.stage3_startup_stagger_seconds > 0
+            and submitted < total
+        ):
+            delay = self.stage3_startup_stagger_seconds
+            print(
+                f"[cyan]Staggering next Stage 3 worker start by {delay:.1f}s "
+                "on the single GPU[/cyan]"
+            )
+            time.sleep(delay)
 
     def _define_global_metrics(self) -> str:
         """Define eval metric to be used across all experiments"""
@@ -1619,6 +1641,7 @@ class ParallelAgent:
                     process_id,
                 )
             )
+            self._maybe_stagger_stage3_start(len(futures), num_seeds)
 
         for future, process_id in futures:
             try:
@@ -1667,6 +1690,9 @@ class ParallelAgent:
                 process_interpreter = Interpreter(
                     working_dir=self.cfg.workspace_dir,
                     timeout=self.cfg.exec.timeout,
+                    startup_timeout=getattr(
+                        self.cfg.exec, "repl_startup_timeout", 60
+                    ),
                     format_tb_ipython=self.cfg.exec.format_tb_ipython,
                     agent_file_name=self.cfg.exec.agent_file_name,
                     env_vars={"AI_SCIENTIST_ROOT": os.getenv("AI_SCIENTIST_ROOT")},
@@ -1779,6 +1805,7 @@ class ParallelAgent:
         process_interpreter = Interpreter(
             working_dir=workspace,
             timeout=cfg.exec.timeout,
+            startup_timeout=getattr(cfg.exec, "repl_startup_timeout", 60),
             format_tb_ipython=cfg.exec.format_tb_ipython,
             agent_file_name=cfg.exec.agent_file_name,
         )
@@ -2192,6 +2219,10 @@ class ParallelAgent:
 
             traceback.print_exc()
             raise
+        finally:
+            # Startup failures used to leave the late-starting REPL child alive.
+            # Cleanup is idempotent, so it is safe after both success and failure.
+            process_interpreter.cleanup_session()
 
     def _generate_hyperparam_tuning_idea(self) -> Optional[HyperparamTuningIdea]:
         """Generate the next hyperparam tuning idea based on what's been done.
@@ -2586,6 +2617,7 @@ class ParallelAgent:
                     seed_eval,
                 )
             )
+            self._maybe_stagger_stage3_start(len(futures), len(node_data_list))
 
         if not futures:
             print("[green]No remaining controlled Stage 4 ablations.[/green]")
@@ -2627,7 +2659,17 @@ class ParallelAgent:
                 import traceback
 
                 traceback.print_exc()
-                raise
+                if not (
+                    self.stage_name
+                    and self.stage_name.startswith("3_")
+                    and isinstance(e, RuntimeError)
+                    and "REPL child process failed to start execution" in str(e)
+                ):
+                    raise
+                logger.warning(
+                    "Skipping one Stage 3 worker that failed REPL startup; "
+                    "other parallel candidates will continue."
+                )
             finally:
                 # Release GPU for this process if it was using one
                 process_id = f"worker_{i}"

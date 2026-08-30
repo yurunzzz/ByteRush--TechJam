@@ -7,6 +7,7 @@ import json
 import math
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -18,7 +19,12 @@ from rich import print
 from .factor_context import build_factor_context
 from .finalize import freeze_stage4_winner
 from .journal import Journal, Node
-from .parallel_agent import ParallelAgent, _extract_enabled_ablation_components
+from .parallel_agent import (
+    ParallelAgent,
+    _extract_enabled_ablation_components,
+    _load_kuairand_validation_metric,
+    get_gpu_count,
+)
 from .research_loop import (
     PromotionPolicy,
     ResearchLoopConfig,
@@ -37,6 +43,8 @@ class EvaluatedConfiguration:
     stage_name: str
     score: float
     seed_scores: list[float]
+    metrics: dict[str, Optional[float]]
+    seed_metrics: list[dict[str, Optional[float]]]
 
 
 def export_and_check_submission(
@@ -115,6 +123,70 @@ def _node_score(node: Node) -> Optional[float]:
     if result is None or not math.isfinite(result.score):
         return None
     return result.score
+
+
+def _node_validation_metrics(node: Node) -> dict[str, Optional[float]]:
+    """Read only trusted KuaiRand validation metrics for experience memory."""
+    score = _node_score(node)
+    if score is None:
+        return {}
+    if node.exp_results_dir:
+        result_dir = Path(node.exp_results_dir)
+        metric_dirs = [result_dir]
+        if result_dir.is_dir():
+            metric_dirs.extend(
+                path.parent for path in result_dir.rglob("experiment_data.npy")
+            )
+        term_out = "".join(node._term_out or [])
+        seen_dirs = set()
+        for metric_dir in metric_dirs:
+            resolved = metric_dir.resolve()
+            if resolved in seen_dirs:
+                continue
+            seen_dirs.add(resolved)
+            try:
+                gauc, ndcg5, primary = _load_kuairand_validation_metric(
+                    str(resolved), term_out
+                )
+                return {
+                    "GAUC": float(gauc),
+                    "nDCG@5": float(ndcg5),
+                    "primary": float(primary),
+                }
+            except (OSError, KeyError, TypeError, ValueError):
+                continue
+    # Generic tests may expose only the selection score. Never infer component
+    # metrics from arbitrary output, where test-like values could appear.
+    return {"GAUC": None, "nDCG@5": None, "primary": float(score)}
+
+
+def _mean_validation_metrics(
+    metrics: Sequence[dict[str, Optional[float]]],
+) -> dict[str, Optional[float]]:
+    result = {}
+    for name in ("GAUC", "nDCG@5", "primary"):
+        values = [
+            float(item[name])
+            for item in metrics
+            if item.get(name) is not None and math.isfinite(float(item[name]))
+        ]
+        result[name] = mean(values) if values else None
+    return result
+
+
+def _principal_change(node: Node) -> str:
+    components = _extract_enabled_ablation_components(node.code)
+    component_text = ", ".join(components) if components else "unregistered component"
+    narrative = next(
+        (
+            str(value).strip()
+            for value in (node.overall_plan, node.plan, node.analysis)
+            if value and str(value).strip()
+        ),
+        "controlled candidate change",
+    )
+    narrative = " ".join(narrative.split())[:240]
+    return f"{component_text}: {narrative}"
 
 
 def _ranked_nodes(journal: Journal, limit: Optional[int] = None) -> list[Node]:
@@ -347,6 +419,8 @@ class ClosedLoopRunner:
             ]
             if len(seed_scores) != required:
                 continue
+            seed_metrics = [_node_validation_metrics(seed) for seed in seed_nodes]
+            metrics = _mean_validation_metrics(seed_metrics)
             evaluated.append(
                 EvaluatedConfiguration(
                     node=node,
@@ -354,6 +428,8 @@ class ClosedLoopRunner:
                     stage_name=stage.name,
                     score=mean(seed_scores),
                     seed_scores=seed_scores,
+                    metrics=metrics,
+                    seed_metrics=seed_metrics,
                 )
             )
         return evaluated
@@ -427,6 +503,9 @@ class ClosedLoopRunner:
             incumbent_code=research_base.code,
             round_number=round_number,
             failed_hypotheses=self.state.memory.failed_hypotheses,
+        )
+        context += "\n\n" + self.state.experience_prompt(
+            before_round=round_number
         )
         candidates = []
         attempts = 0
@@ -558,11 +637,21 @@ class ClosedLoopRunner:
             f"[cyan]Tuning {len(jobs)} candidate branches with "
             f"{workers} parallel workers[/cyan]"
         )
+        stagger_delay = max(
+            0.0, float(self.config.stage3_startup_stagger_seconds)
+        )
+        should_stagger = stagger_delay > 0 and get_gpu_count() == 1
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = [
-                executor.submit(self._execute_candidate_tuning, *job)
-                for job in jobs
-            ]
+            futures = []
+            for index, job in enumerate(jobs):
+                futures.append(executor.submit(self._execute_candidate_tuning, *job))
+                if should_stagger and index < len(jobs) - 1:
+                    print(
+                        f"[cyan]Staggering next Stage 3 candidate start by "
+                        f"{stagger_delay:.1f}s; active candidates keep running "
+                        "in parallel[/cyan]"
+                    )
+                    time.sleep(stagger_delay)
             # Consume futures in branch order so promotion semantics do not
             # depend on which candidate happens to finish first.
             return [future.result() for future in futures]
@@ -610,11 +699,22 @@ class ClosedLoopRunner:
             "incumbent_node_id": self.state.incumbent_node_id,
             "incumbent_score": self.state.incumbent_score,
             "incumbent_seed_scores": self.state.incumbent_seed_scores,
+            "incumbent_metrics": self.state.incumbent_metrics,
             "memory": self.state.memory.to_dict(),
         }
         (self.memory_dir / "state.json").write_text(
             json.dumps(payload, indent=2, sort_keys=True) + "\n"
         )
+
+    def _save_round_summary(self, round_number: int) -> None:
+        summary = self.state.round_summary(round_number)
+        archive_dir = self.memory_dir / "round_summaries"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        serialized = json.dumps(summary, indent=2, sort_keys=True) + "\n"
+        (archive_dir / f"round_{round_number:03d}.json").write_text(serialized)
+        (self.memory_dir / "round_summary.json").write_text(serialized)
+        prompt = self.state.experience_prompt(before_round=round_number + 1)
+        (self.memory_dir / "round_summary.prompt.txt").write_text(prompt + "\n")
 
     def _finalize(self) -> dict[str, Any]:
         if self.incumbent is None:
@@ -657,6 +757,7 @@ class ClosedLoopRunner:
             self.incumbent.node.id,
             self.incumbent.score,
             self.incumbent.seed_scores,
+            metrics=self.incumbent.metrics,
         )
         self._save_memory()
 
@@ -676,6 +777,12 @@ class ClosedLoopRunner:
                     fingerprint=candidate_fingerprint(result.node.code),
                     score=result.score,
                     seed_scores=result.seed_scores,
+                    metrics=result.metrics,
+                    seed_metrics=result.seed_metrics,
+                    principal_change=_principal_change(result.node),
+                    components=_extract_enabled_ablation_components(
+                        result.node.code
+                    ),
                 )
                 print(
                     f"[cyan]Candidate {result.node.id}: "
@@ -698,6 +805,7 @@ class ClosedLoopRunner:
                         final_node_id=next_parent.id,
                         score=stage4_winner.score,
                         seed_scores=stage4_winner.seed_scores,
+                        metrics=stage4_winner.metrics,
                     )
                     print(
                         f"[cyan]Stage 4 confirmation for {pending_id}: "
@@ -710,9 +818,12 @@ class ClosedLoopRunner:
                             stage_name=stage4_winner.stage_name,
                             score=stage4_winner.score,
                             seed_scores=stage4_winner.seed_scores,
+                            metrics=stage4_winner.metrics,
+                            seed_metrics=stage4_winner.seed_metrics,
                         )
 
             self.state.finish_round()
+            self._save_round_summary(round_number)
             self._save_memory()
             self.manager._save_checkpoint()
 

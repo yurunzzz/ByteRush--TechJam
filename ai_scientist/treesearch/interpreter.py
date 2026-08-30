@@ -83,6 +83,7 @@ class Interpreter:
         self,
         working_dir: Path | str,
         timeout: int = 3600,
+        startup_timeout: int = 60,
         format_tb_ipython: bool = False,
         agent_file_name: str = "runfile.py",
         env_vars: dict[str, str] = {},
@@ -93,6 +94,8 @@ class Interpreter:
         Args:
             working_dir (Path | str): working directory of the agent
             timeout (int, optional): Timeout for each code execution step. Defaults to 3600.
+            startup_timeout (int, optional): Seconds to wait for a spawned child
+                to signal that it is ready. Defaults to 60.
             format_tb_ipython (bool, optional): Whether to use IPython or default python REPL formatting for exceptions. Defaults to False.
             agent_file_name (str, optional): The name for the agent's code file. Defaults to "runfile.py".
             env_vars (dict[str, str], optional): Environment variables to set in the child process. Defaults to {}.
@@ -103,6 +106,7 @@ class Interpreter:
             self.working_dir.exists()
         ), f"Working directory {self.working_dir} does not exist"
         self.timeout = timeout
+        self.startup_timeout = max(1, int(startup_timeout))
         self.format_tb_ipython = format_tb_ipython
         self.agent_file_name = agent_file_name
         self.process: Process = None  # type: ignore
@@ -247,12 +251,13 @@ class Interpreter:
 
         # wait for child to actually start execution (we don't want interrupt child setup)
         try:
-            state = self.event_outq.get(timeout=10)
+            state = self.event_outq.get(timeout=self.startup_timeout)
         except queue.Empty:
             msg = "REPL child process failed to start execution"
             logger.critical(msg)
             while not self.result_outq.empty():
                 logger.error(f"REPL output queue dump: {self.result_outq.get()}")
+            self.cleanup_session()
             raise RuntimeError(msg) from None
         assert state[0] == "state:ready", state
         start_time = time.time()

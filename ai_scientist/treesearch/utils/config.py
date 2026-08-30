@@ -75,6 +75,8 @@ class ResearchLoopSettings:
     candidate_tuning_iterations: int = 12
     finalist_top_k: int = 3
     finalist_num_seeds: int = 3
+    experience_top_k: int = 3
+    stage3_startup_stagger_seconds: float = 0.0
     min_primary_gain: float = 0.002
     required_seed_wins: int = 2
 
@@ -110,6 +112,7 @@ class ExecConfig:
     timeout: int
     agent_file_name: str
     format_tb_ipython: bool
+    repl_startup_timeout: int = 60
 
 
 @dataclass

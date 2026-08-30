@@ -124,6 +124,41 @@ def candidate_fingerprint(
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def validation_metrics_only(
+    metrics: Optional[Mapping[str, Optional[float]]],
+    *,
+    primary_fallback: Optional[float] = None,
+) -> dict[str, Optional[float]]:
+    """Keep only explicitly named validation ranking metrics.
+
+    Keys containing ``test`` or any unrecognized field are intentionally
+    discarded so experience memory cannot become a side channel for test
+    feedback.
+    """
+    allowed = {
+        "gauc": "GAUC",
+        "validationgauc": "GAUC",
+        "ndcg5": "nDCG@5",
+        "validationndcg5": "nDCG@5",
+        "primary": "primary",
+        "validationprimary": "primary",
+    }
+    result: dict[str, Optional[float]] = {
+        "GAUC": None,
+        "nDCG@5": None,
+        "primary": primary_fallback,
+    }
+    for raw_name, raw_value in (metrics or {}).items():
+        normalized = _normalized_metric_name(raw_name)
+        canonical = allowed.get(normalized)
+        if canonical is None or "test" in normalized:
+            continue
+        result[canonical] = _finite_float(raw_value)
+    if result["primary"] is None:
+        result["primary"] = primary_fallback
+    return result
+
+
 @dataclass(frozen=True)
 class PromotionDecision:
     promoted: bool
@@ -221,6 +256,15 @@ class ExperimentRecord:
     seed_scores: list[float]
     promoted: bool
     reason: str
+    metrics: dict[str, Optional[float]] = field(default_factory=dict)
+    metric_deltas: dict[str, Optional[float]] = field(default_factory=dict)
+    seed_metrics: list[dict[str, Optional[float]]] = field(default_factory=list)
+    seed_mean: Optional[float] = None
+    seed_std: Optional[float] = None
+    seed_wins: int = 0
+    principal_change: str = "unspecified controlled change"
+    components: list[str] = field(default_factory=list)
+    stage4_confirmed: Optional[bool] = None
 
 
 @dataclass
@@ -239,6 +283,58 @@ class ExperimentMemory:
         self.records.append(record)
         if not record.promoted:
             self.failed_hypotheses.append(record.reason)
+
+    def mark_stage4_confirmation(
+        self, node_id: str, *, confirmed: bool, reason: str
+    ) -> None:
+        for record in reversed(self.records):
+            if record.node_id != node_id:
+                continue
+            record.stage4_confirmed = confirmed
+            if not confirmed:
+                self.failed_hypotheses.append(
+                    f"Stage 4 confirmation rejected node {node_id}: {reason}"
+                )
+            return
+
+    def records_for_round(self, round_number: int) -> list[ExperimentRecord]:
+        return [
+            record
+            for record in self.records
+            if record.round_number == round_number
+        ]
+
+    def diverse_near_winners(
+        self, *, round_number: Optional[int] = None, limit: int = 3
+    ) -> list[ExperimentRecord]:
+        """Return strong, diverse, successful candidates that did not win.
+
+        Diversity is enforced by the declared principal change and registered
+        component set.  Fingerprints still prevent exact code/config repeats.
+        """
+        candidates = [
+            record
+            for record in self.records
+            if record.score is not None
+            and record.stage4_confirmed is not True
+            and "duplicate code/config/feature fingerprint" not in record.reason
+            and (round_number is None or record.round_number == round_number)
+        ]
+        candidates.sort(key=lambda record: float(record.score), reverse=True)
+        selected = []
+        seen_directions = set()
+        for record in candidates:
+            direction = (
+                record.principal_change.strip().lower(),
+                tuple(sorted(record.components)),
+            )
+            if direction in seen_directions:
+                continue
+            seen_directions.add(direction)
+            selected.append(record)
+            if len(selected) >= max(0, int(limit)):
+                break
+        return selected
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -260,6 +356,8 @@ class ResearchLoopConfig:
     candidate_tuning_iterations: int = 12
     finalist_top_k: int = 3
     finalist_num_seeds: int = 3
+    experience_top_k: int = 3
+    stage3_startup_stagger_seconds: float = 0.0
 
 
 def research_loop_config_from_mapping(raw: Any) -> ResearchLoopConfig:
@@ -334,6 +432,7 @@ class ResearchLoopState:
     incumbent_node_id: Optional[str] = None
     incumbent_score: Optional[float] = None
     incumbent_seed_scores: list[float] = field(default_factory=list)
+    incumbent_metrics: dict[str, Optional[float]] = field(default_factory=dict)
     pending_candidate_id: Optional[str] = None
     pending_candidate_score: Optional[float] = None
     round_open: bool = False
@@ -344,10 +443,14 @@ class ResearchLoopState:
         node_id: str,
         score: float,
         seed_scores: Sequence[float] = (),
+        metrics: Optional[Mapping[str, Optional[float]]] = None,
     ) -> None:
         self.incumbent_node_id = node_id
         self.incumbent_score = score
         self.incumbent_seed_scores = list(seed_scores)
+        self.incumbent_metrics = validation_metrics_only(
+            metrics, primary_fallback=score
+        )
         self.pending_candidate_id = None
         self.pending_candidate_score = None
 
@@ -370,6 +473,10 @@ class ResearchLoopState:
         fingerprint: str,
         score: float,
         seed_scores: Sequence[float],
+        metrics: Optional[Mapping[str, Optional[float]]] = None,
+        seed_metrics: Sequence[Mapping[str, Optional[float]]] = (),
+        principal_change: str = "unspecified controlled change",
+        components: Sequence[str] = (),
     ) -> PromotionDecision:
         if not self.round_open:
             raise RuntimeError("start_round must be called before evaluating candidates")
@@ -393,6 +500,30 @@ class ResearchLoopState:
                 incumbent_seed_scores=self.incumbent_seed_scores,
             )
 
+        candidate_metrics = validation_metrics_only(
+            metrics, primary_fallback=score
+        )
+        metric_deltas = {}
+        for metric_name in ("GAUC", "nDCG@5", "primary"):
+            candidate_value = candidate_metrics.get(metric_name)
+            incumbent_value = self.incumbent_metrics.get(metric_name)
+            metric_deltas[metric_name] = (
+                float(candidate_value) - float(incumbent_value)
+                if candidate_value is not None and incumbent_value is not None
+                else None
+            )
+        finite_seed_scores = [
+            float(value) for value in seed_scores if math.isfinite(value)
+        ]
+        seed_mean = mean(finite_seed_scores) if finite_seed_scores else None
+        seed_std = (
+            math.sqrt(
+                sum((value - seed_mean) ** 2 for value in finite_seed_scores)
+                / len(finite_seed_scores)
+            )
+            if seed_mean is not None
+            else None
+        )
         self.memory.record(
             ExperimentRecord(
                 round_number=self.current_round,
@@ -402,6 +533,16 @@ class ResearchLoopState:
                 seed_scores=list(seed_scores),
                 promoted=decision.promoted,
                 reason=decision.reason,
+                metrics=candidate_metrics,
+                metric_deltas=metric_deltas,
+                seed_metrics=[
+                    validation_metrics_only(item) for item in seed_metrics
+                ],
+                seed_mean=seed_mean,
+                seed_std=seed_std,
+                seed_wins=decision.seed_wins,
+                principal_change=principal_change,
+                components=list(components),
             )
         )
         if decision.promoted and (
@@ -423,6 +564,7 @@ class ResearchLoopState:
         final_node_id: Optional[str] = None,
         score: float,
         seed_scores: Sequence[float],
+        metrics: Optional[Mapping[str, Optional[float]]] = None,
     ) -> PromotionDecision:
         if not self.round_open:
             raise RuntimeError("there is no open research round")
@@ -437,15 +579,113 @@ class ResearchLoopState:
             incumbent_seed_scores=self.incumbent_seed_scores,
         )
         if not decision.promoted:
-            self.memory.failed_hypotheses.append(
-                f"Stage 4 confirmation rejected node {node_id}: {decision.reason}"
+            self.memory.mark_stage4_confirmation(
+                node_id, confirmed=False, reason=decision.reason
             )
             self.pending_candidate_id = None
             self.pending_candidate_score = None
             return decision
-        self.set_incumbent(final_node_id or node_id, score, seed_scores)
+        self.memory.mark_stage4_confirmation(
+            node_id, confirmed=True, reason=decision.reason
+        )
+        self.set_incumbent(
+            final_node_id or node_id,
+            score,
+            seed_scores,
+            metrics=metrics,
+        )
         self.round_improved = True
         return decision
+
+    def round_summary(
+        self, round_number: int, *, near_winner_limit: Optional[int] = None
+    ) -> dict[str, Any]:
+        records = self.memory.records_for_round(round_number)
+        limit = (
+            self.config.experience_top_k
+            if near_winner_limit is None
+            else near_winner_limit
+        )
+        near_winners = self.memory.diverse_near_winners(
+            round_number=round_number,
+            limit=limit,
+        )
+        return {
+            "schema_version": 1,
+            "feedback_scope": "validation_only",
+            "test_metrics_used": False,
+            "round_number": round_number,
+            "incumbent": {
+                "node_id": self.incumbent_node_id,
+                "score": self.incumbent_score,
+                "metrics": dict(self.incumbent_metrics),
+                "seed_scores": list(self.incumbent_seed_scores),
+            },
+            "candidates": [asdict(record) for record in records],
+            "near_winners": [asdict(record) for record in near_winners],
+            "recent_failed_hypotheses": self.memory.failed_hypotheses[-6:],
+            "fingerprint_count": len(self.memory.fingerprints),
+        }
+
+    @staticmethod
+    def _format_optional(value: Optional[float], *, signed: bool = False) -> str:
+        if value is None:
+            return "n/a"
+        return f"{value:+.6f}" if signed else f"{value:.6f}"
+
+    def experience_prompt(self, *, before_round: int) -> str:
+        """Build a concise validation-only experience brief for Stage 3."""
+        previous_round = before_round - 1
+        if previous_round < 1:
+            return (
+                "Structured candidate experience: no previous Stage 3 round; "
+                "start from the current incumbent."
+            )
+        records = self.memory.records_for_round(previous_round)
+        near_winners = self.memory.diverse_near_winners(
+            round_number=previous_round,
+            limit=self.config.experience_top_k,
+        )
+        lines = [
+            "Structured validation-only candidate experience from the previous round:",
+            "- Never use test labels, test metrics, or test-derived feedback.",
+            f"- Previous round evaluated {len(records)} unique fingerprints.",
+            "- Current incumbent metrics: "
+            f"GAUC={self._format_optional(self.incumbent_metrics.get('GAUC'))}, "
+            f"nDCG@5={self._format_optional(self.incumbent_metrics.get('nDCG@5'))}, "
+            f"primary={self._format_optional(self.incumbent_metrics.get('primary'))}.",
+        ]
+        if near_winners:
+            lines.append(
+                "- Transferable near-winner lessons; adapt one at a time to the "
+                "incumbent, do not copy an entire rejected candidate unchanged:"
+            )
+            for record in near_winners:
+                deltas = record.metric_deltas
+                lines.append(
+                    "  - "
+                    f"{record.principal_change}; components="
+                    f"{','.join(record.components) or 'unregistered'}; "
+                    f"delta_GAUC={self._format_optional(deltas.get('GAUC'), signed=True)}, "
+                    f"delta_nDCG@5={self._format_optional(deltas.get('nDCG@5'), signed=True)}, "
+                    f"delta_primary={self._format_optional(deltas.get('primary'), signed=True)}; "
+                    f"seed_wins={record.seed_wins}/{len(record.seed_scores)}, "
+                    f"seed_std={self._format_optional(record.seed_std)}; "
+                    f"decision={record.reason}."
+                )
+        else:
+            lines.append("- No successful non-winning candidate is available for transfer.")
+        if self.memory.failed_hypotheses:
+            lines.append("- Recent rejected directions; do not repeat unchanged:")
+            lines.extend(
+                f"  - {reason}"
+                for reason in self.memory.failed_hypotheses[-6:]
+            )
+        lines.append(
+            "- Exact code/config/feature fingerprints remain blocked even when "
+            "they appear in this summary."
+        )
+        return "\n".join(lines)
 
     def finish_round(self) -> None:
         if not self.round_open:

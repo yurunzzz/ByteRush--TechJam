@@ -1,3 +1,4 @@
+import json
 import re
 import tempfile
 import threading
@@ -5,10 +6,14 @@ import time
 import unittest
 from pathlib import Path
 
+import numpy as np
 from omegaconf import OmegaConf
 
 from ai_scientist.treesearch.agent_manager import AgentManager, Stage
-from ai_scientist.treesearch.closed_loop import ClosedLoopRunner
+from ai_scientist.treesearch.closed_loop import (
+    ClosedLoopRunner,
+    _node_validation_metrics,
+)
 from ai_scientist.treesearch.journal import Journal, Node
 from ai_scientist.treesearch.parallel_agent import (
     _extract_enabled_ablation_components,
@@ -102,6 +107,7 @@ class FakeManager:
 
 class FakeAgent:
     created_stage_names = []
+    created_task_descs = {}
 
     def __init__(self, **kwargs):
         self.journal = kwargs["journal"]
@@ -110,6 +116,7 @@ class FakeAgent:
         self.research_base = kwargs["research_base_node"]
         self.stage3_base = kwargs["best_stage3_node"]
         self.created_stage_names.append(self.stage_name)
+        self.created_task_descs[self.stage_name] = kwargs["task_desc"]
 
     def __enter__(self):
         return self
@@ -238,6 +245,7 @@ class ConcurrentFakeAgent(FakeAgent):
 class ClosedLoopTests(unittest.TestCase):
     def setUp(self):
         FakeAgent.created_stage_names = []
+        FakeAgent.created_task_descs = {}
         ConcurrentFakeAgent.active_candidate_branches = 0
         ConcurrentFakeAgent.max_active_candidate_branches = 0
 
@@ -255,6 +263,32 @@ class ClosedLoopTests(unittest.TestCase):
         for name, header in headers.items():
             (data_dir / name).write_text(header)
         return root
+
+    def test_experience_metrics_are_loaded_from_nested_validation_artifact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result_dir = Path(tmp) / "candidate" / "run_0"
+            result_dir.mkdir(parents=True)
+            np.save(
+                result_dir / "experiment_data.npy",
+                {
+                    "KuaiRand-Pure": {
+                        "metrics": {
+                            "validation GAUC": [0.71],
+                            "validation nDCG@5": [0.63],
+                            "validation primary": [0.67],
+                        }
+                    }
+                },
+            )
+            node = _node("MODEL = 'candidate'", 0.67)
+            node.exp_results_dir = str(Path(tmp) / "candidate")
+
+            metrics = _node_validation_metrics(node)
+
+        self.assertEqual(
+            metrics,
+            {"GAUC": 0.71, "nDCG@5": 0.63, "primary": 0.67},
+        )
 
     def test_complete_loop_promotes_stage4_winner_then_reuses_it(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -284,6 +318,16 @@ class ClosedLoopTests(unittest.TestCase):
                 submission_exporter=submission_exporter,
             )
             result = runner.run()
+            memory_dir = root / "artifacts" / "research_loop"
+            latest_summary = json.loads(
+                (memory_dir / "round_summary.json").read_text()
+            )
+            archived_round_one = json.loads(
+                (memory_dir / "round_summaries" / "round_001.json").read_text()
+            )
+            prompt_summary = (
+                memory_dir / "round_summary.prompt.txt"
+            ).read_text()
 
         self.assertEqual(result["state"].current_round, 2)
         self.assertEqual(result["state"].no_improvement_rounds, 1)
@@ -297,6 +341,14 @@ class ClosedLoopTests(unittest.TestCase):
         self.assertNotIn("4_ablation_studies_1_round_two", FakeAgent.created_stage_names)
         self.assertIs(finalized["journal"], result["incumbent"].journal)
         self.assertTrue(result["submission"]["checked"])
+        self.assertEqual(latest_summary["round_number"], 2)
+        self.assertEqual(archived_round_one["round_number"], 1)
+        self.assertFalse(latest_summary["test_metrics_used"])
+        self.assertIn("validation-only", prompt_summary)
+        self.assertIn(
+            "Structured validation-only candidate experience",
+            FakeAgent.created_task_descs["3_creative_research_1_round_two"],
+        )
         self.assertEqual(
             exported["output_dir"],
             Path(manager.cfg.agent.final_model_dir).resolve(),
