@@ -36,7 +36,7 @@
       "best_primary": 0.6014695465564728,
       "best_gauc": 0.6671333909034729,
       "best_ndcg": 0.5358057022094727,
-      "architecture": "DeepFM + BPR pairwise loss",
+      "architecture": "embedding model \u00b7 BPR pairwise",
       "stage_reached": "stage_1_initial_implementation_1_preliminary",
       "run_started_utc": null,
       "run_finished_utc": null
@@ -56,7 +56,7 @@
       "best_primary": 0.6014695465564728,
       "best_gauc": 0.6671333909034729,
       "best_ndcg": 0.5358057022094727,
-      "architecture": "DeepFM + BPR pairwise loss",
+      "architecture": "embedding model \u00b7 BPR pairwise",
       "stage_reached": "stage_1_initial_implementation_1_preliminary",
       "run_started_utc": null,
       "run_finished_utc": null
@@ -76,7 +76,7 @@
       "best_primary": 0.6014695465564728,
       "best_gauc": 0.6671333909034729,
       "best_ndcg": 0.5358057022094727,
-      "architecture": "DeepFM + BPR pairwise loss",
+      "architecture": "embedding model \u00b7 BPR pairwise",
       "stage_reached": "stage_1_initial_implementation_1_preliminary",
       "run_started_utc": null,
       "run_finished_utc": null
@@ -96,7 +96,7 @@
       "best_primary": 0.6014695465564728,
       "best_gauc": 0.6671333909034729,
       "best_ndcg": 0.5358057022094727,
-      "architecture": "DeepFM + BPR pairwise loss",
+      "architecture": "embedding model \u00b7 BPR pairwise",
       "stage_reached": "stage_1_initial_implementation_1_preliminary",
       "run_started_utc": null,
       "run_finished_utc": null
@@ -136,7 +136,7 @@
       "best_primary": null,
       "best_gauc": null,
       "best_ndcg": null,
-      "architecture": "candidate model",
+      "architecture": "FM (tuned)",
       "stage_reached": "stage_2_baseline_tuning_1_first_attempt",
       "run_started_utc": null,
       "run_finished_utc": null
@@ -156,7 +156,7 @@
       "best_primary": 0.6014695465564728,
       "best_gauc": 0.6671333909034729,
       "best_ndcg": 0.5358057022094727,
-      "architecture": "candidate model",
+      "architecture": "FM (tuned)",
       "stage_reached": "stage_3_creative_research_1_first_attempt",
       "run_started_utc": null,
       "run_finished_utc": null
@@ -176,7 +176,7 @@
       "best_primary": 0.6014695465564728,
       "best_gauc": 0.6671333909034729,
       "best_ndcg": 0.5358057022094727,
-      "architecture": "candidate model",
+      "architecture": "FM (tuned)",
       "stage_reached": "stage_2_baseline_tuning_1_first_attempt",
       "run_started_utc": null,
       "run_finished_utc": null
@@ -196,7 +196,7 @@
       "best_primary": 0.6014695465564728,
       "best_gauc": 0.6671333909034729,
       "best_ndcg": 0.5358057022094727,
-      "architecture": "DeepFM + BPR pairwise loss",
+      "architecture": "embedding model \u00b7 BPR pairwise",
       "stage_reached": "stage_1_initial_implementation_1_preliminary",
       "run_started_utc": null,
       "run_finished_utc": null
@@ -216,7 +216,7 @@
       "best_primary": 0.6014695465564728,
       "best_gauc": 0.6671333909034729,
       "best_ndcg": 0.5358057022094727,
-      "architecture": "DeepFM + BPR pairwise loss",
+      "architecture": "embedding model \u00b7 BPR pairwise",
       "stage_reached": "stage_3_creative_research_2_Ranking Loss & Negative Sampling Improvements",
       "run_started_utc": null,
       "run_finished_utc": null
@@ -236,7 +236,7 @@
       "best_primary": 0.6014695465564728,
       "best_gauc": 0.6671333909034729,
       "best_ndcg": 0.5358057022094727,
-      "architecture": "candidate model",
+      "architecture": "FM (tuned)",
       "stage_reached": "stage_3_creative_research_1_first_attempt",
       "run_started_utc": null,
       "run_finished_utc": null
@@ -256,7 +256,7 @@
       "best_primary": 0.6014695465564728,
       "best_gauc": 0.6671333909034729,
       "best_ndcg": 0.5358057022094727,
-      "architecture": "DeepFM + BPR pairwise loss",
+      "architecture": "embedding model \u00b7 BPR pairwise",
       "stage_reached": "stage_1_initial_implementation_1_preliminary",
       "run_started_utc": null,
       "run_finished_utc": null
@@ -296,7 +296,7 @@
       "best_primary": null,
       "best_gauc": null,
       "best_ndcg": null,
-      "architecture": "candidate model",
+      "architecture": "FM (tuned) \u00b7 BCE",
       "stage_reached": "stage_3_creative_research_2_Baseline Validation & First Interpretable Ranking-Loss Branch",
       "run_started_utc": null,
       "run_finished_utc": null
@@ -316,7 +316,7 @@
       "best_primary": 0.6014695465564728,
       "best_gauc": 0.6671333909034729,
       "best_ndcg": 0.5358057022094727,
-      "architecture": "candidate model",
+      "architecture": "FM (tuned)",
       "stage_reached": "stage_3_creative_research_1_first_attempt",
       "run_started_utc": null,
       "run_finished_utc": null
@@ -336,7 +336,7 @@
       "best_primary": 0.6014695465564728,
       "best_gauc": 0.6671333909034729,
       "best_ndcg": 0.5358057022094727,
-      "architecture": "candidate model",
+      "architecture": "FM (tuned)",
       "stage_reached": "stage_3_creative_research_1_first_attempt",
       "run_started_utc": null,
       "run_finished_utc": null
@@ -356,7 +356,7 @@
       "best_primary": 0.6014695465564728,
       "best_gauc": 0.6671333909034729,
       "best_ndcg": 0.5358057022094727,
-      "architecture": "candidate model",
+      "architecture": "FM (tuned)",
       "stage_reached": "stage_3_creative_research_1_first_attempt",
       "run_started_utc": null,
       "run_finished_utc": null
@@ -376,7 +376,7 @@
       "best_primary": 0.6018216609954834,
       "best_gauc": 0.6675872206687927,
       "best_ndcg": 0.5357218384742737,
-      "architecture": "candidate model",
+      "architecture": "FM (tuned)",
       "stage_reached": "stage_2_baseline_tuning_2_Hyperparameter Sweep on Learning Rate and Regularization",
       "run_started_utc": null,
       "run_finished_utc": null
@@ -396,7 +396,7 @@
       "best_primary": 0.6053404211997986,
       "best_gauc": 0.6723816990852356,
       "best_ndcg": 0.53763347864151,
-      "architecture": "DeepFM",
+      "architecture": "embedding model",
       "stage_reached": "stage_3_creative_research_1_first_attempt",
       "run_started_utc": null,
       "run_finished_utc": null
@@ -449,7 +449,7 @@
       "best_primary": 0.6039015054702759,
       "best_gauc": 0.6708488464355469,
       "best_ndcg": 0.5368803143501282,
-      "architecture": "Wide&Deep",
+      "architecture": "Wide&Deep \u00b7 BCE",
       "stage_reached": "stage_4_ablation_studies_1_first_attempt",
       "run_started_utc": "2026-08-29T11:18:26.321374+00:00",
       "run_finished_utc": "2026-08-29T12:01:17.578913+00:00"
@@ -502,7 +502,7 @@
       "best_primary": 0.6048139333724976,
       "best_gauc": 0.6717143654823303,
       "best_ndcg": 0.5376752018928528,
-      "architecture": "Embedding + MLP interaction",
+      "architecture": "Embedding + MLP \u00b7 BCE",
       "stage_reached": "stage_4_ablation_studies_1_first_attempt",
       "run_started_utc": "2026-08-29T13:12:00.910208+00:00",
       "run_finished_utc": "2026-08-29T13:53:54.691867+00:00"
@@ -535,7 +535,7 @@
       "best_primary": 0.6041825413703918,
       "best_gauc": 0.67094486951828,
       "best_ndcg": 0.5368764400482178,
-      "architecture": "DeepFM + Wide&Deep",
+      "architecture": "DeepFM + Wide&Deep \u00b7 BCE",
       "stage_reached": "stage_4_ablation_studies_1_round_one",
       "run_started_utc": "2026-08-29T16:35:22.076113+00:00",
       "run_finished_utc": "2026-08-29T17:11:10.419605+00:00"
@@ -568,7 +568,7 @@
       "best_primary": 0.6016548275947571,
       "best_gauc": 0.6673658490180969,
       "best_ndcg": 0.5354001522064209,
-      "architecture": "candidate model",
+      "architecture": "embedding model \u00b7 BCE",
       "stage_reached": "stage_2_baseline_tuning_1_closed_loop",
       "run_started_utc": "2026-08-29T19:02:57.327542+00:00",
       "run_finished_utc": "2026-08-29T19:07:54.193747+00:00"
@@ -601,7 +601,7 @@
       "best_primary": 0.6016548275947571,
       "best_gauc": 0.6673658490180969,
       "best_ndcg": 0.5354001522064209,
-      "architecture": "candidate model",
+      "architecture": "embedding model \u00b7 BCE",
       "stage_reached": "stage_2_baseline_tuning_1_closed_loop",
       "run_started_utc": "2026-08-29T19:13:07.870332+00:00",
       "run_finished_utc": "2026-08-29T19:16:57.461430+00:00"
@@ -634,7 +634,7 @@
       "best_primary": 0.6016548275947571,
       "best_gauc": 0.6673658490180969,
       "best_ndcg": 0.5354001522064209,
-      "architecture": "candidate model",
+      "architecture": "embedding model \u00b7 BCE",
       "stage_reached": "stage_2_baseline_tuning_1_closed_loop",
       "run_started_utc": "2026-08-29T19:22:39.764981+00:00",
       "run_finished_utc": "2026-08-29T19:26:16.807775+00:00"
@@ -667,7 +667,7 @@
       "best_primary": 0.6040370464324951,
       "best_gauc": 0.6706790328025818,
       "best_ndcg": 0.5358706712722778,
-      "architecture": "candidate model",
+      "architecture": "embedding model \u00b7 BCE",
       "stage_reached": "stage_2_baseline_tuning_1_closed_loop",
       "run_started_utc": "2026-08-29T19:34:33.772834+00:00",
       "run_finished_utc": "2026-08-29T20:31:04.406892+00:00"
@@ -700,7 +700,7 @@
       "best_primary": 0.6035391092300415,
       "best_gauc": 0.6699042320251465,
       "best_ndcg": 0.5360453128814697,
-      "architecture": "candidate model",
+      "architecture": "embedding model \u00b7 BCE",
       "stage_reached": "stage_3_creative_research_1_round_one",
       "run_started_utc": "2026-08-29T21:03:45.047359+00:00",
       "run_finished_utc": "2026-08-29T21:22:48.529364+00:00"
@@ -733,7 +733,7 @@
       "best_primary": 0.6048800945281982,
       "best_gauc": 0.6719285249710083,
       "best_ndcg": 0.5376245379447937,
-      "architecture": "DeepFM + BPR pairwise loss",
+      "architecture": "embedding model \u00b7 BPR pairwise",
       "stage_reached": "stage_3_creative_research_1_round_one",
       "run_started_utc": "2026-08-29T21:33:29.775015+00:00",
       "run_finished_utc": "2026-08-29T22:01:39.154301+00:00"
@@ -753,7 +753,7 @@
       "best_primary": 0.6040444374084473,
       "best_gauc": 0.6707904934883118,
       "best_ndcg": 0.5359076857566833,
-      "architecture": "candidate model",
+      "architecture": "embedding model \u00b7 BCE",
       "stage_reached": "stage_3_creative_research_1_round_one",
       "run_started_utc": null,
       "run_finished_utc": null
@@ -786,7 +786,7 @@
       "best_primary": 0.6043888330459595,
       "best_gauc": 0.6710797548294067,
       "best_ndcg": 0.5373960137367249,
-      "architecture": "DIN target-attention + history",
+      "architecture": "DIN target-attention \u00b7 BPR pairwise + history",
       "stage_reached": "stage_4_ablation_studies_1_round_two_candidate_one",
       "run_started_utc": "2026-08-29T23:26:56.811265+00:00",
       "run_finished_utc": "2026-08-30T00:53:19.153223+00:00"
@@ -859,7 +859,7 @@
       "best_primary": 0.604017972946167,
       "best_gauc": 0.6704631447792053,
       "best_ndcg": 0.5370508432388306,
-      "architecture": "DeepFM",
+      "architecture": "embedding model \u00b7 BCE",
       "stage_reached": "stage_4_ablation_studies_1_round_one",
       "run_started_utc": "2026-08-30T07:30:20.311789+00:00",
       "run_finished_utc": "2026-08-30T07:57:26.457259+00:00"
@@ -876,11 +876,11 @@
       "executed_iters": null,
       "seed_evals": null,
       "gpu_peak_mib": null,
-      "best_primary": 0.6039507389068604,
-      "best_gauc": 0.6704295873641968,
-      "best_ndcg": 0.5371546149253845,
-      "architecture": "candidate model",
-      "stage_reached": "stage_3_creative_research_1_round_one",
+      "best_primary": 0.6046513319015503,
+      "best_gauc": 0.6714849472045898,
+      "best_ndcg": 0.5375015139579773,
+      "architecture": "Embedding + MLP \u00b7 BCE",
+      "stage_reached": "stage_4_ablation_studies_1_round_one",
       "run_started_utc": null,
       "run_finished_utc": null
     }

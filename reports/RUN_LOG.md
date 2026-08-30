@@ -1,7 +1,7 @@
 # KuaiRand Agent Run Log
 
 *ByteRush · TechJam — KuaiRand-Pure long_view ranking · primary = mean(GAUC, nDCG@5)*  
-*Auto-generated 2026-08-30 16:27 · 33 runs shown / 37 launched (4 sub-minute aborts hidden)*
+*Auto-generated 2026-08-30 16:44 · 16 rows / 29 scored of 37 launched (8 unscored/aborted hidden, 13 FM-level duplicates collapsed)*
 
 ## Reference scores (validation)
 
@@ -22,7 +22,7 @@ The bar to beat is **`fm_official`** — `random` is only a sanity check. `oracl
 | **Best validation primary** | **`0.6053`** (+0.0037 vs FM baseline · 1.5% of oracle headroom) (2026-08-29 16:09) |
 | Scored runs | 29 of 37 launched |
 | Total LLM tokens | 6.51M across ~1,600 calls |
-| Agent wall-clock | 5.9 h |
+| Agent wall-clock | 5.8 h |
 | GPU-active training | 96 min |
 
 > **Reality check:** measured against the real FM baseline (`0.6016`), the agent's best is only **+0.0037** — essentially matching the provided FM. Early runs reproduced FM at ~0.6014; later architecture changes (DeepFM, BPR, DIN attention) added <0.004. The '+0.12' figure from an earlier draft compared against `random` and was misleading.
@@ -33,39 +33,22 @@ Chronological. `Primary` = best validation node in that run. `vs prev` compares 
 
 | Start | Architecture / change | Dur | Train | Tokens | Calls | Iters | Seeds | Primary | vs base | vs prev |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 2026-08-28 01:49 | — | — | — | — | — | — | — | `0.6015` | −0.0001 | — |
-| 2026-08-28 01:55 | DeepFM + BPR pairwise loss | — | — | — | — | — | — | `0.6015` | −0.0001 | ±0 |
-| 2026-08-28 01:58 | DeepFM + BPR pairwise loss | — | — | — | — | — | — | `0.6015` | −0.0001 | ±0 |
-| 2026-08-28 02:06 | DeepFM + BPR pairwise loss | — | — | — | — | — | — | `0.6015` | −0.0001 | ±0 |
-| 2026-08-28 03:00 | DeepFM + BPR pairwise loss | — | — | — | — | — | — | `0.6015` | −0.0001 | ±0 |
-| 2026-08-28 21:58 | candidate model | — | — | — | — | — | — | `0.6015` | −0.0001 | ±0 |
-| 2026-08-28 22:13 | candidate model | — | — | — | — | — | — | `0.6015` | −0.0001 | ±0 |
-| 2026-08-28 22:28 | DeepFM + BPR pairwise loss | — | — | — | — | — | — | `0.6015` | −0.0001 | ±0 |
-| 2026-08-28 22:33 | DeepFM + BPR pairwise loss | — | — | — | — | — | — | `0.6015` | −0.0001 | ±0 |
-| 2026-08-28 22:57 | candidate model | — | — | — | — | — | — | `0.6015` | −0.0001 | ±0 |
-| 2026-08-29 01:42 | DeepFM + BPR pairwise loss | — | — | — | — | — | — | `0.6015` | −0.0001 | ±0 |
-| 2026-08-29 02:35 | candidate model | — | — | — | — | — | — | `0.6015` | −0.0001 | ±0 |
-| 2026-08-29 02:50 | candidate model | — | — | — | — | — | — | `0.6015` | −0.0001 | ±0 |
-| 2026-08-29 03:20 | candidate model | — | — | — | — | — | — | `0.6015` | −0.0001 | ±0 |
-| 2026-08-29 15:19 | candidate model | — | — | — | — | — | — | `0.6018` | +0.0002 | +0.0004 |
-| 2026-08-29 16:09 | DeepFM | — | — | — | — | — | — | `0.6053` | +0.0037 | +0.0035 |
-| 2026-08-29 19:10 | — · aborted | 0s | 0s | 0 | — | 0 | 0 | `—` | — | — |
-| 2026-08-29 19:18 | Wide&Deep | 43m | 3m | 652k | 234 | 15 | 12 | `0.6039` | +0.0023 | −0.0014 |
-| 2026-08-29 20:58 | — · aborted | 39s | 13s | 0 | — | 1 | 0 | `—` | — | — |
-| 2026-08-29 21:12 | Embedding + MLP interaction | 42m | 3m | 616k | 217 | 14 | 9 | `0.6048` | +0.0032 | +0.0009 |
-| 2026-08-30 00:35 | DeepFM + Wide&Deep | 36m | 11m | 1.10M | 289 | 23 | 30 | `0.6042` | +0.0026 | −0.0006 |
-| 2026-08-30 03:02 | candidate model | 5m | 44s | 66k | 15 | 3 | 0 | `0.6017` | +0.0001 | −0.0025 |
-| 2026-08-30 03:13 | candidate model | 4m | 28s | 48k | 13 | 2 | 0 | `0.6017` | +0.0001 | ±0 |
-| 2026-08-30 03:22 | candidate model | 4m | 27s | 48k | 15 | 2 | 0 | `0.6017` | +0.0001 | ±0 |
-| 2026-08-30 03:34 | candidate model | 57m | 9m | 1.12M | 281 | 28 | 9 | `0.6040` | +0.0024 | +0.0024 |
-| 2026-08-30 05:03 | candidate model | 19m | 2m | 478k | 59 | 16 | 0 | `0.6035` | +0.0019 | −0.0005 |
-| 2026-08-30 05:33 | DeepFM + BPR pairwise loss | 28m | 9m | 746k | 123 | 22 | 0 | `0.6049` | +0.0033 | +0.0013 |
-| 2026-08-30 06:02 | candidate model | — | — | — | — | — | — | `0.6040` | +0.0024 | −0.0008 |
-| 2026-08-30 07:26 | DIN target-attention + history | 86m | 51m | 931k | 178 | 25 | 21 | `0.6044` | +0.0028 | +0.0003 |
-| 2026-08-30 15:14 | — · aborted | 0s | 0s | 0 | — | 0 | 0 | `—` | — | — |
-| 2026-08-30 15:23 | — · aborted | 43s | 15s | 0 | — | 1 | 0 | `—` | — | — |
-| 2026-08-30 15:30 | DeepFM | 27m | 8m | 702k | 176 | 16 | 18 | `0.6040` | +0.0024 | −0.0004 |
-| 2026-08-30 16:17 | candidate model | — | — | — | — | — | — | `0.6040` | +0.0024 | −0.0001 |
+| 2026-08-28 01:49 | FM baseline level — 14 early runs collapsed | — | — | — | — | — | — | `0.6015` | −0.0001 | — |
+| 2026-08-29 15:19 | FM (tuned) | — | — | — | — | — | — | `0.6018` | +0.0002 | +0.0004 |
+| 2026-08-29 16:09 | embedding model | — | — | — | — | — | — | `0.6053` | +0.0037 | +0.0035 |
+| 2026-08-29 19:18 | Wide&Deep · BCE | 43m | 3m | 652k | 234 | 15 | 12 | `0.6039` | +0.0023 | −0.0014 |
+| 2026-08-29 21:12 | Embedding + MLP · BCE | 42m | 3m | 616k | 217 | 14 | 9 | `0.6048` | +0.0032 | +0.0009 |
+| 2026-08-30 00:35 | DeepFM + Wide&Deep · BCE | 36m | 11m | 1.10M | 289 | 23 | 30 | `0.6042` | +0.0026 | −0.0006 |
+| 2026-08-30 03:02 | embedding model · BCE | 5m | 44s | 66k | 15 | 3 | 0 | `0.6017` | +0.0001 | −0.0025 |
+| 2026-08-30 03:13 | embedding model · BCE | 4m | 28s | 48k | 13 | 2 | 0 | `0.6017` | +0.0001 | ±0 |
+| 2026-08-30 03:22 | embedding model · BCE | 4m | 27s | 48k | 15 | 2 | 0 | `0.6017` | +0.0001 | ±0 |
+| 2026-08-30 03:34 | embedding model · BCE | 57m | 9m | 1.12M | 281 | 28 | 9 | `0.6040` | +0.0024 | +0.0024 |
+| 2026-08-30 05:03 | embedding model · BCE | 19m | 2m | 478k | 59 | 16 | 0 | `0.6035` | +0.0019 | −0.0005 |
+| 2026-08-30 05:33 | embedding model · BPR pairwise | 28m | 9m | 746k | 123 | 22 | 0 | `0.6049` | +0.0033 | +0.0013 |
+| 2026-08-30 06:02 | embedding model · BCE | — | — | — | — | — | — | `0.6040` | +0.0024 | −0.0008 |
+| 2026-08-30 07:26 | DIN target-attention · BPR pairwise + history | 86m | 51m | 931k | 178 | 25 | 21 | `0.6044` | +0.0028 | +0.0003 |
+| 2026-08-30 15:30 | embedding model · BCE | 27m | 8m | 702k | 176 | 16 | 18 | `0.6040` | +0.0024 | −0.0004 |
+| 2026-08-30 16:17 | Embedding + MLP · BCE | — | — | — | — | — | — | `0.6047` | +0.0031 | +0.0006 |
 
 ## Model usage
 

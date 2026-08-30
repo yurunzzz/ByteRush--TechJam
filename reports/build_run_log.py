@@ -70,39 +70,62 @@ def best_metric(run: Path):
 
 
 def detect_architecture(run: Path):
-    """Classify what the agent's winning code actually does, from best_solution_*.py."""
-    sols = sorted(glob.glob(str(run / "logs/**/best_solution_*.py"), recursive=True))
+    """Classify what the agent's winning code actually does, from best_solution_*.py.
+
+    Disciplined: reads the CandidateModel base class and requires real `class X(`
+    definitions for DeepFM / Wide&Deep / TargetAttention (so words in comments or
+    the eval harness don't cause false positives). Loss is read from the training op.
+    """
+    sols = sorted(glob.glob(str(run / "**/best_solution_*.py"), recursive=True))
     if not sols:
         return None, None
     f = sols[-1]                                          # highest stage
-    stage = None
     ms = re.findall(r"stage_[0-9][^/]*", f)
-    if ms:
-        stage = ms[-1]
+    stage = ms[-1] if ms else None
     try:
-        code = open(f, encoding="utf-8", errors="ignore").read().lower()
+        code = open(f, encoding="utf-8", errors="ignore").read()
     except Exception:
         return None, stage
-    has_hist = "history" in code and ("_build_history" in code or "history_features" in code)
-    if "targetattention" in code or "din" in code and "attention" in code:
-        base = "DIN target-attention"
-    elif "bpr" in code or "pairwise" in code:
-        base = "DeepFM + BPR pairwise loss"
-    elif "class deepfm" in code and ("widedeep" in code or "wide_deep" in code or "wide & deep" in code):
-        base = "DeepFM + Wide&Deep"
-    elif "class deepfm" in code or "deepfm" in code:
-        base = "DeepFM"
-    elif "widedeep" in code or "wide & deep" in code:
-        base = "Wide&Deep"
-    elif "mlp interaction" in code or "mlp_interaction" in code:
-        base = "Embedding + MLP interaction"
-    elif "factorization" in code:
-        base = "Factorization Machine"
+    low = code.lower()
+
+    def defines(name):                                   # a real class definition, not a mention
+        return re.search(r"class\s+" + name + r"\s*\(", code, re.I) is not None
+
+    mbase = re.search(r"class\s+CandidateModel\s*\(([^)]*)\)", code)
+    base_cls = (mbase.group(1) if mbase else "").lower()
+    has_hist = ("_build_history" in low) or ("history_features" in low)
+
+    # core architecture
+    if defines("TargetAttention") or ("din" in low and "attention" in low):
+        core = "DIN target-attention"
+    elif defines("DeepFM") and (defines("WideDeep") or "wide & deep" in low):
+        core = "DeepFM + Wide&Deep"
+    elif defines("DeepFM"):
+        core = "DeepFM"
+    elif defines("WideDeep") or "wide & deep" in low:
+        core = "Wide&Deep"
+    elif ".fm" in base_cls or base_cls.strip() in ("fm", "baseline_module.fm"):
+        core = "FM (tuned)"                              # CandidateModel(baseline_module.FM)
+    elif "mlp" in low and "nn.linear" in low:
+        core = "Embedding + MLP"
+    elif "factorization" in low or re.search(r"class\s+FM\s*\(", code):
+        core = "FM"
     else:
-        base = "candidate model"
-    if has_hist and "history" not in base.lower():
-        base += " + history"
-    return base, stage
+        core = "embedding model"
+
+    # training loss (only annotate when it is a distinctive choice)
+    loss = None
+    if "bpr" in low or "pairwise" in low:
+        loss = "BPR pairwise"
+    elif "binary_cross_entropy" in low or "bcewithlogits" in low or "bce_loss" in low:
+        loss = "BCE"
+
+    label = core
+    if loss and loss.lower() not in core.lower():
+        label += f" · {loss}"
+    if has_hist:
+        label += " + history"
+    return label, stage
 
 
 def parse_dirtime(name: str):
@@ -200,9 +223,23 @@ def render_markdown(ledger: dict, min_seconds: float) -> str:
             prev = bp
 
     scored = [r for r in runs if r.get("best_primary") is not None]
-    # show any run that produced a metric OR has resource tracking; count the rest
-    shown = [r for r in runs if (r.get("best_primary") is not None) or (r.get("duration_s") is not None)]
-    dropped = len(runs) - len(shown)
+    # Collapse the run of early, untracked runs that merely reproduce FM (~0.6015)
+    # into a single representative row; keep everything else.
+    shown, fm_cluster, fm_rep = [], 0, None
+    for r in scored:
+        p = r["best_primary"]
+        at_fm = (r.get("duration_s") is None) and (abs(p - 0.6015) < 2.5e-4)
+        if at_fm:
+            fm_cluster += 1
+            if fm_rep is None:
+                fm_rep = r
+                shown.append(r)
+            continue
+        shown.append(r)
+    if fm_rep is not None:
+        fm_rep["_fm_cluster"] = fm_cluster
+    dropped = len(runs) - len(scored)
+    collapsed = fm_cluster - 1 if fm_cluster else 0
 
     tracked = [r for r in shown if r.get("duration_s")]
     tot_tokens = sum(r.get("llm_total_tokens") or 0 for r in tracked)
@@ -217,7 +254,8 @@ def render_markdown(ledger: dict, min_seconds: float) -> str:
     L.append("# KuaiRand Agent Run Log")
     L.append("")
     L.append(f"*ByteRush · TechJam — KuaiRand-Pure long_view ranking · primary = mean(GAUC, nDCG@5)*  ")
-    L.append(f"*Auto-generated {now} · {len(shown)} runs shown / {len(runs)} launched ({dropped} sub-minute aborts hidden)*")
+    L.append(f"*Auto-generated {now} · {len(shown)} rows / {len(scored)} scored of {len(runs)} launched "
+             f"({dropped} unscored/aborted hidden, {collapsed} FM-level duplicates collapsed)*")
     L.append("")
     L.append("## Reference scores (validation)")
     L.append("")
@@ -264,8 +302,8 @@ def render_markdown(ledger: dict, min_seconds: float) -> str:
     for r in shown:
         start = (r.get("start") or r["run"])[:16]
         arch = r.get("architecture") or "—"
-        if (r.get("best_primary") is None) and (r.get("executed_iters") or 0) <= 3 and (r.get("duration_s") or 0) < 60:
-            arch += " · aborted"
+        if r.get("_fm_cluster"):
+            arch = f"FM baseline level — {r['_fm_cluster']} early runs collapsed"
         prim = f"{r['best_primary']:.4f}" if r.get("best_primary") is not None else "—"
         row = [
             start, arch, fmt_secs(r.get("duration_s")), fmt_secs(r.get("training_s")),
