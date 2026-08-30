@@ -18,6 +18,8 @@ class CandidateRole:
     category: str
     objective: str
     required_evidence: str
+    allowed_model_families: tuple[str, ...] = ()
+    allowed_loss_families: tuple[str, ...] = ()
 
     def prompt(
         self,
@@ -27,6 +29,8 @@ class CandidateRole:
         retry_feedback: Sequence[str] = (),
         evidence_memory: str = "",
         factor_library_context: str = "",
+        parent_node_id: str = "",
+        parent_model_family: str = "fm",
     ) -> str:
         evidence_ids = ", ".join(CURATED_EVIDENCE)
         base_name = self.name.split("_alternative_", 1)[0]
@@ -48,6 +52,8 @@ class CandidateRole:
             ),
         }.get(base_name, "")
         technique_text = "\n".join(f"  - {item}" for item in techniques)
+        model_family_text = ", ".join(self.allowed_model_families) or parent_model_family
+        loss_family_text = ", ".join(self.allowed_loss_families) or "any allowed loss family"
         feedback_text = (
             "\nRole-specific feedback from rejected attempts:\n"
             + "\n".join(f"  - {item}" for item in retry_feedback[-3:])
@@ -77,13 +83,15 @@ class CandidateRole:
             f"Role-specific technique menu (prior, not a mandate):\n{technique_text}\n"
             "Choose the smallest coherent mechanism that tests the hypothesis. "
             "Do not copy the whole menu into one candidate.\n"
-            "This role is exclusive. Do not replace it with a different model family "
+            "This role is exclusive. Do not replace its required target model family "
             "and do not submit a CONFIG-only hyperparameter change. The candidate may "
             "be a coherent bundle: one central mechanism plus compatible supporting "
             "factors, objectives, or training changes. Guard every component separately."
             "\nRequired code output contract:\n"
             "- Define a literal RESEARCH_MANIFEST with candidate_id, role, group, "
-            "category, hypothesis, mechanism, mechanism_ids, modified_symbols, expected_metric, "
+            "category, model_family, research_family, loss_family, parent_node_id, "
+            "parent_model_family, input_schema_version, hypothesis, mechanism, "
+            "mechanism_ids, modified_symbols, expected_metric, "
             "tunable_parameters, ablation_components, combination_compatibility, "
             "change_scope, component_dependencies, and evidence.\n"
             "- Evidence is a list of mappings with source_type, reference, and supports. "
@@ -91,6 +99,12 @@ class CandidateRole:
             "- Use these exact literal manifest values (do not rename or omit them): "
             f"'role': {self.name!r}, 'group': {self.group!r}, "
             f"'category': {self.category!r}.\n"
+            f"- Use exactly 'parent_node_id': {parent_node_id!r}, "
+            f"'parent_model_family': {parent_model_family!r}, and "
+            "'input_schema_version': 2.\n"
+            f"- Use exactly 'research_family': {research_family_for_role(self)!r}.\n"
+            f"- model_family must be one of: {model_family_text}. "
+            f"loss_family must be one of: {loss_family_text}.\n"
             "- For every literal True ABLATION_COMPONENTS key, evidence supports "
             "must be a literal non-empty list containing that exact key. Valid forms "
             "are literature references from the catalog, 'validation:<stored-id>', "
@@ -140,6 +154,7 @@ DEFAULT_CANDIDATE_ROLES: tuple[CandidateRole, ...] = (
         "factor_model",
         "Create causal history factors and a matching interest encoder that actually consumes their embeddings.",
         "build_features must create real history fields and the guarded model path must consume them.",
+        allowed_loss_families=("pointwise_bce", "hybrid_bce_bpr"),
     ),
     CandidateRole(
         "affinity_interest",
@@ -147,6 +162,7 @@ DEFAULT_CANDIDATE_ROLES: tuple[CandidateRole, ...] = (
         "factor_model",
         "Create causal user-author/tag/type affinity factors and a matching gated or attention interest model.",
         "Declare raw-to-factor mappings and prove the guarded model path uses every added field.",
+        allowed_loss_families=("pointwise_bce", "hybrid_bce_bpr"),
     ),
     CandidateRole(
         "ranking_objective",
@@ -154,6 +170,7 @@ DEFAULT_CANDIDATE_ROLES: tuple[CandidateRole, ...] = (
         "training_objective",
         "Change optimization toward GAUC/nDCG with a controlled hybrid pointwise and pairwise/listwise loss.",
         "The loss path must be guarded as an ablation component and keep long_view as the primary target.",
+        allowed_loss_families=("hybrid_bce_bpr", "pairwise_bpr", "listwise_softmax"),
     ),
     CandidateRole(
         "auxiliary_objective",
@@ -161,6 +178,7 @@ DEFAULT_CANDIDATE_ROLES: tuple[CandidateRole, ...] = (
         "training_objective",
         "Use legal training-window auxiliary behavior or watch-time targets without exposing validation/test outcomes.",
         "The auxiliary head/loss and its weight must be explicit, guarded, and absent from inference inputs.",
+        allowed_loss_families=("multitask", "censored_watch_time"),
     ),
     CandidateRole(
         "context_interaction",
@@ -168,6 +186,7 @@ DEFAULT_CANDIDATE_ROLES: tuple[CandidateRole, ...] = (
         "factor_model",
         "Create static user/video and crossed context factors with a matching DeepFM/DCN/xDeepFM interaction block.",
         "The feature builder and guarded interaction path must both change and remain independently ablatable.",
+        allowed_loss_families=("pointwise_bce", "hybrid_bce_bpr"),
     ),
     CandidateRole(
         "temporal_interaction",
@@ -175,6 +194,7 @@ DEFAULT_CANDIDATE_ROLES: tuple[CandidateRole, ...] = (
         "factor_model",
         "Create causal time/recency factors with a matching interaction or robust temporal model.",
         "State cutoff behavior and prove the vectorized guarded model path consumes the temporal fields.",
+        allowed_loss_families=("pointwise_bce", "hybrid_bce_bpr"),
     ),
     CandidateRole(
         "incumbent_extension",
@@ -182,6 +202,7 @@ DEFAULT_CANDIDATE_ROLES: tuple[CandidateRole, ...] = (
         "evidence_synthesis",
         "Extend the incumbent along the strongest positive evidence. If no prior direction is convincingly positive, choose one coherent open theme that addresses the current validation weakness.",
         "Name the inherited and new components, or explain why open exploration is preferable; guard every new component independently.",
+        allowed_loss_families=("pointwise_bce", "hybrid_bce_bpr", "pairwise_bpr", "listwise_softmax", "multitask", "censored_watch_time"),
     ),
     CandidateRole(
         "cross_direction_synthesis",
@@ -189,8 +210,73 @@ DEFAULT_CANDIDATE_ROLES: tuple[CandidateRole, ...] = (
         "evidence_synthesis",
         "Combine mutually supportive mechanisms backed by prior validation, ablation memory, or established recommendation research.",
         "Name the evidence for the combination, declare dependencies, and guard every component independently.",
+        allowed_loss_families=("pointwise_bce", "hybrid_bce_bpr", "pairwise_bpr", "listwise_softmax", "multitask", "censored_watch_time"),
     ),
 )
+
+
+ALLOWED_MODEL_FAMILIES = frozenset(
+    {
+        "fm",
+        "mlp",
+        "wide_deep",
+        "deepfm",
+        "dcn",
+        "xdeepfm",
+        "ncf",
+        "din_lite",
+        "multitask_shared_bottom",
+        "hybrid",
+    }
+)
+ALLOWED_LOSS_FAMILIES = frozenset(
+    {
+        "pointwise_bce",
+        "hybrid_bce_bpr",
+        "pairwise_bpr",
+        "listwise_softmax",
+        "multitask",
+        "censored_watch_time",
+    }
+)
+ALLOWED_RESEARCH_FAMILIES = frozenset(
+    {
+        "architecture",
+        "history_interest",
+        "ranking_objective",
+        "auxiliary_objective",
+        "context_interaction",
+        "temporal_interaction",
+        "evidence_synthesis",
+    }
+)
+
+
+def bootstrap_candidate_roles(model_families: Sequence[str]) -> tuple[CandidateRole, ...]:
+    """Create Stage 1B roles with an exact, machine-checkable family target."""
+    roles = []
+    for family in model_families:
+        family = str(family)
+        if family not in ALLOWED_MODEL_FAMILIES or family == "fm":
+            continue
+        roles.append(
+            CandidateRole(
+                name=f"architecture_{family}",
+                group="architecture_exploration",
+                category="model_architecture",
+                objective=(
+                    f"Replace the FM scorer with one lightweight {family} model while "
+                    "keeping schema v2, validation-only evaluation, and primary unchanged."
+                ),
+                required_evidence=(
+                    "create_model and the model class must materially implement the declared "
+                    "family; cap bootstrap training at the prompt-provided epoch budget."
+                ),
+                allowed_model_families=(family,),
+                allowed_loss_families=("pointwise_bce",),
+            )
+        )
+    return tuple(roles)
 
 
 CURATED_EVIDENCE = {
@@ -254,6 +340,12 @@ REQUIRED_MANIFEST_FIELDS = (
     "role",
     "group",
     "category",
+    "model_family",
+    "research_family",
+    "loss_family",
+    "parent_node_id",
+    "parent_model_family",
+    "input_schema_version",
     "hypothesis",
     "mechanism",
     "mechanism_ids",
@@ -266,6 +358,33 @@ REQUIRED_MANIFEST_FIELDS = (
     "component_dependencies",
     "evidence",
 )
+
+
+def model_family_from_code(code: str, *, default: str = "fm") -> str:
+    manifest = literal_assignment(code, "RESEARCH_MANIFEST")
+    if isinstance(manifest, Mapping):
+        family = str(manifest.get("model_family", ""))
+        if family in ALLOWED_MODEL_FAMILIES:
+            return family
+    return default
+
+
+def research_family_for_role(role: CandidateRole) -> str:
+    if role.group == "architecture_exploration":
+        return "architecture"
+    if role.name.startswith("ranking_objective"):
+        return "ranking_objective"
+    if role.name.startswith("auxiliary_objective"):
+        return "auxiliary_objective"
+    if role.name.startswith("temporal_interaction"):
+        return "temporal_interaction"
+    if role.group in ALLOWED_RESEARCH_FAMILIES:
+        return role.group
+    if role.group == "objective_and_training":
+        return "ranking_objective"
+    if role.group == "context_interaction":
+        return "context_interaction"
+    return "evidence_synthesis"
 
 
 @dataclass(frozen=True)
@@ -804,6 +923,9 @@ def validate_candidate_contract(
     base_code: str,
     candidate_code: str,
     role: CandidateRole,
+    *,
+    expected_parent_id: str | None = None,
+    expected_parent_model_family: str | None = None,
 ) -> CandidateContractResult:
     reasons: list[str] = []
     manifest = literal_assignment(candidate_code, "RESEARCH_MANIFEST")
@@ -825,6 +947,53 @@ def validate_candidate_contract(
         if manifest.get("category") != role.category:
             reasons.append(
                 f"manifest category {manifest.get('category')!r} does not match {role.category!r}"
+            )
+        model_family = str(manifest.get("model_family", ""))
+        if model_family not in ALLOWED_MODEL_FAMILIES:
+            reasons.append(f"unsupported model_family: {model_family!r}")
+        if role.allowed_model_families and model_family not in role.allowed_model_families:
+            reasons.append(
+                f"model_family {model_family!r} violates role family constraint "
+                f"{role.allowed_model_families!r}"
+            )
+        parent_family = str(
+            expected_parent_model_family
+            or model_family_from_code(base_code)
+        )
+        if role.group != "architecture_exploration" and model_family != parent_family:
+            reasons.append(
+                "non-architecture candidate changed model family from "
+                f"{parent_family!r} to {model_family!r}"
+            )
+        manifest_parent_family = str(manifest.get("parent_model_family", ""))
+        if manifest_parent_family != parent_family:
+            reasons.append(
+                f"manifest parent_model_family {manifest_parent_family!r} does not "
+                f"match actual parent family {parent_family!r}"
+            )
+        if expected_parent_id is not None and manifest.get("parent_node_id") != expected_parent_id:
+            reasons.append(
+                f"manifest parent_node_id {manifest.get('parent_node_id')!r} does not "
+                f"match actual parent {expected_parent_id!r}"
+            )
+        if manifest.get("input_schema_version") != 2:
+            reasons.append("input_schema_version must be literal integer 2")
+        research_family = str(manifest.get("research_family", ""))
+        expected_research_family = research_family_for_role(role)
+        if research_family not in ALLOWED_RESEARCH_FAMILIES:
+            reasons.append(f"unsupported research_family: {research_family!r}")
+        elif research_family != expected_research_family:
+            reasons.append(
+                f"research_family {research_family!r} does not match role family "
+                f"{expected_research_family!r}"
+            )
+        loss_family = str(manifest.get("loss_family", ""))
+        if loss_family not in ALLOWED_LOSS_FAMILIES:
+            reasons.append(f"unsupported loss_family: {loss_family!r}")
+        elif role.allowed_loss_families and loss_family not in role.allowed_loss_families:
+            reasons.append(
+                f"loss_family {loss_family!r} violates role constraint "
+                f"{role.allowed_loss_families!r}"
             )
         mechanism_ids = manifest.get("mechanism_ids", [])
         if not isinstance(mechanism_ids, (list, tuple)) or not mechanism_ids:
@@ -919,6 +1088,11 @@ def validate_candidate_contract(
         reasons.append(
             "candidate changes only CONFIG or metadata; tuning is not a research branch"
         )
+    if role.group == "architecture_exploration":
+        base_model = function_dump(base_code, "create_model")
+        candidate_model = function_dump(candidate_code, "create_model")
+        if candidate_model is None or candidate_model == base_model:
+            reasons.append("architecture candidate does not materially change create_model")
 
     raw_factors = literal_assignment(candidate_code, "FEATURE_FACTORS")
     factors = (
@@ -1097,6 +1271,11 @@ def validate_candidate_contract(
 def candidate_semantic_signature(result: CandidateContractResult) -> str:
     """Fingerprint mechanisms rather than surface code or prose wording."""
     payload = {
+        "model_family": str(result.manifest.get("model_family", "")),
+        "research_family": str(result.manifest.get("research_family", "")),
+        "loss_family": str(result.manifest.get("loss_family", "")),
+        "parent_model_family": str(result.manifest.get("parent_model_family", "")),
+        "input_schema_version": result.manifest.get("input_schema_version"),
         "mechanism_ids": sorted(map(str, result.manifest.get("mechanism_ids", []))),
         "factors": sorted(str(item.get("name", "")) for item in result.feature_factors),
         "factor_library_ids": sorted(

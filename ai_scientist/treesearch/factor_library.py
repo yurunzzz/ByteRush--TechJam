@@ -15,6 +15,12 @@ class FactorCard:
     avoid_when: tuple[str, ...]
     data_cost: str
     leakage_rule: str
+    required_inputs: tuple[str, ...] = ()
+    optional_targets: tuple[str, ...] = ()
+    supported_model_families: tuple[str, ...] = ()
+    input_schema_version: int = 2
+    memory_cost: str = "low"
+    trusted_builder: str = "research_data.build_schema_v2"
 
 
 FACTOR_CARDS: tuple[FactorCard, ...] = (
@@ -26,6 +32,10 @@ FACTOR_CARDS: tuple[FactorCard, ...] = (
         ("most users have no usable history", "the candidate already has an equivalent history path"),
         "medium",
         "Use only interactions before the target; freeze outcome-derived state after train.",
+        required_inputs=("categorical_ids", "user_ids", "item_ids"),
+        supported_model_families=("din_lite", "deepfm", "dcn", "mlp", "hybrid"),
+        memory_cost="medium",
+        trusted_builder="research_data.attach_causal_history",
     ),
     FactorCard(
         "user_author_affinity",
@@ -89,6 +99,11 @@ FACTOR_CARDS: tuple[FactorCard, ...] = (
         ("the auxiliary label is missing or merely copies long_view",),
         "medium",
         "Read only the train window and never expose current-row outcomes at inference.",
+        required_inputs=("categorical_ids",),
+        optional_targets=("is_click", "is_like", "is_follow", "play_time_ms"),
+        supported_model_families=("multitask_shared_bottom", "deepfm", "dcn", "mlp", "hybrid"),
+        memory_cost="medium",
+        trusted_builder="research_data.load_train_auxiliary_targets",
     ),
 )
 

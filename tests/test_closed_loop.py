@@ -53,6 +53,7 @@ class FakeManager:
                         "max_research_rounds": 2,
                         "patience": 1,
                         "stage1_validation_iterations": 1,
+                        "stage1b_enabled": False,
                         "baseline_tuning_iterations": 2,
                         "stage2_num_seeds": 2,
                         "candidate_branches": 2,
@@ -122,6 +123,7 @@ class FakeAgent:
         self.stage_name = kwargs["stage_name"]
         self.tuning_base = kwargs["tuning_base_node"]
         self.research_base = kwargs["research_base_node"]
+        self.research_bases = list(kwargs.get("research_base_nodes") or [])
         self.stage3_base = kwargs["best_stage3_node"]
         self.candidate_contexts = list(kwargs.get("candidate_contexts") or [])
         self.created_stage_names.append(self.stage_name)
@@ -176,6 +178,11 @@ class FakeAgent:
                     "RESEARCH_MANIFEST = {"
                     f"'candidate_id': {role!r}, 'role': {role!r}, "
                     f"'group': {group!r}, 'category': {category!r}, "
+                    f"'model_family': {('fm')!r}, "
+                    f"'research_family': {('ranking_objective' if role.startswith('ranking_objective') else 'auxiliary_objective' if role.startswith('auxiliary_objective') else 'history_interest' if 'history' in group else 'context_interaction' if group == 'context_interaction' else 'evidence_synthesis')!r}, "
+                    f"'loss_family': {('hybrid_bce_bpr' if role.startswith('ranking_objective') else 'multitask' if role.startswith('auxiliary_objective') else 'pointwise_bce')!r}, "
+                    f"'parent_node_id': {self.research_base.id!r}, "
+                    "'parent_model_family': 'fm', 'input_schema_version': 2, "
                     "'hypothesis': 'role-specific mechanism improves ranking', "
                     "'mechanism': 'factor consumed by matching model path', "
                     f"'mechanism_ids': [{role!r}], "
@@ -426,7 +433,7 @@ class ClosedLoopTests(unittest.TestCase):
         self.assertIn("validation-only", prompt_summary)
         self.assertIn(
             "Structured validation-only candidate experience",
-            FakeAgent.created_task_descs["3_creative_research_1_round_two"],
+            FakeAgent.created_task_descs["3_creative_research_1_round_two_multi_parent"],
         )
         self.assertEqual(
             exported["output_dir"],
@@ -438,7 +445,7 @@ class ClosedLoopTests(unittest.TestCase):
         )
 
         round_two_journal = manager.journals[
-            "3_creative_research_1_round_two"
+            "3_creative_research_1_round_two_multi_parent"
         ]
         root_node = round_two_journal.nodes[0]
         siblings = [

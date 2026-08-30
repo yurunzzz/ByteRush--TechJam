@@ -68,9 +68,19 @@ class ResearchLoopSettings:
     max_research_rounds: int = 4
     patience: int = 2
     stage1_validation_iterations: int = 2
+    stage1b_enabled: bool = False
+    stage1b_model_families: list[str] = field(
+        default_factory=lambda: ["mlp", "wide_deep", "dcn"]
+    )
+    stage1b_generation_attempts: int = 6
+    stage1b_max_epochs: int = 5
+    frontier_max_size: int = 8
     baseline_tuning_iterations: int = 24
     stage2_num_seeds: int = 3
     candidate_branches: int = 8
+    stage3_incumbent_parent_slots: int = 2
+    stage3_frontier_parent_slots: int = 2
+    stage3_bootstrap_parent_slots: int = 1
     initial_candidate_roles: list[str] = field(default_factory=list)
     reserved_candidate_role: str = ""
     candidate_parallel_workers: int = 3

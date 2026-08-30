@@ -161,7 +161,9 @@ def build_factor_context(
         "- Tuple indices are 0=date, 1=user_id, 2=video_id, 3=author_id, 4=tab, 5=duration_ms, 6=long_view label.",
         "- CSV columns not listed in that tuple, including time_ms, are not automatically present in splits. Do not assume header names are row attributes.",
         "- For vectorized indexing, explicitly convert a split list with numpy or use list comprehensions; never apply a numpy index array directly to a Python list.",
-        "- build_features must preserve the incumbent return contract: encoded split -> (X int32 shape (N,F), y float32 shape (N,), users list), feature_dimension int, feature_state mapping.",
+        "- Trusted research_data.py exposes schema v2: split -> inputs/targets/users plus leakage-safe same-user pairs, causal history, and train-only auxiliary-label builders.",
+        "- LegacyFMAdapter converts schema v2 losslessly to the incumbent contract: encoded split -> (X int32 shape (N,F), y float32 shape (N,), users list), feature_dimension int, feature_state mapping.",
+        "- Existing FM-family candidates may keep build_features returning the legacy view. Structured candidates may consume schema v2 internally but must preserve the public build_features/checkpoint/export contract.",
         "- Prioritized unused factor directions:",
     ]
     lines.extend(f"  {index}. {name}: {description}" for index, (name, description) in enumerate(prioritized[:4], 1))

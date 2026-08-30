@@ -273,6 +273,29 @@ class ExperimentRecord:
     factor_selection_reason: str = ""
     factor_rejected_reasons: dict[str, str] = field(default_factory=dict)
     factor_cards: list[dict[str, Any]] = field(default_factory=list)
+    model_family: str = ""
+    research_family: str = ""
+    loss_family: str = ""
+    parent_node_id: str = ""
+    parent_model_family: str = ""
+
+
+@dataclass
+class FrontierRecord:
+    node_id: str
+    source_stage: str
+    round_number: int
+    score: float
+    metrics: dict[str, Optional[float]]
+    model_family: str
+    research_family: str
+    loss_family: str
+    parent_node_id: str
+    parent_model_family: str
+    fingerprint: str
+    semantic_signature: str
+    principal_change: str
+    role: str
 
 
 @dataclass
@@ -298,6 +321,7 @@ class ExperimentMemory:
     records: list[ExperimentRecord] = field(default_factory=list)
     ablation_evidence: list[AblationEvidence] = field(default_factory=list)
     failed_hypotheses: list[str] = field(default_factory=list)
+    frontier: list[FrontierRecord] = field(default_factory=list)
 
     def register_candidate(self, fingerprint: str) -> bool:
         if fingerprint in self.fingerprints:
@@ -309,6 +333,49 @@ class ExperimentMemory:
         self.records.append(record)
         if not record.promoted:
             self.failed_hypotheses.append(record.reason)
+
+    def add_frontier(self, record: FrontierRecord, *, limit: int = 8) -> None:
+        """Keep strong validation-successful nodes without collapsing diversity."""
+        equivalent = [
+            item
+            for item in self.frontier
+            if item.semantic_signature == record.semantic_signature
+        ]
+        if equivalent and max(item.score for item in equivalent) >= record.score:
+            return
+        self.frontier = [
+            item
+            for item in self.frontier
+            if item.node_id != record.node_id
+            and item.semantic_signature != record.semantic_signature
+        ]
+        self.frontier.append(record)
+        ranked = sorted(self.frontier, key=lambda item: item.score, reverse=True)
+        selected: list[FrontierRecord] = []
+        seen_nodes = set()
+
+        def take(key_name: str) -> None:
+            seen = set()
+            for item in ranked:
+                key = getattr(item, key_name)
+                if not key or key in seen or item.node_id in seen_nodes:
+                    continue
+                selected.append(item)
+                seen.add(key)
+                seen_nodes.add(item.node_id)
+                if len(selected) >= max(1, int(limit)):
+                    return
+
+        take("model_family")
+        if len(selected) < max(1, int(limit)):
+            take("research_family")
+        for item in ranked:
+            if len(selected) >= max(1, int(limit)):
+                break
+            if item.node_id not in seen_nodes:
+                selected.append(item)
+                seen_nodes.add(item.node_id)
+        self.frontier = selected
 
     def mark_stage4_confirmation(
         self, node_id: str, *, confirmed: bool, reason: str
@@ -556,6 +623,18 @@ class ExperimentMemory:
                 for item in ranked_ablations
             ],
             "recent_implementation_failures": self.failed_hypotheses[-4:],
+            "diverse_frontier": [
+                {
+                    "node_id": item.node_id,
+                    "source_stage": item.source_stage,
+                    "model_family": item.model_family,
+                    "research_family": item.research_family,
+                    "loss_family": item.loss_family,
+                    "score": item.score,
+                    "principal_change": item.principal_change,
+                }
+                for item in self.frontier[:limit]
+            ],
         }
         return json.dumps(payload, sort_keys=True, ensure_ascii=True)
 
@@ -568,6 +647,7 @@ class ExperimentMemory:
             "factor_library_evidence": self.factor_summary(),
             "discovered_factor_cards": self.discovered_factor_cards(),
             "failed_hypotheses": list(self.failed_hypotheses),
+            "diverse_frontier": [asdict(item) for item in self.frontier],
         }
 
 
@@ -576,9 +656,17 @@ class ResearchLoopConfig:
     max_research_rounds: int = 4
     patience: int = 2
     stage1_validation_iterations: int = 2
+    stage1b_enabled: bool = False
+    stage1b_model_families: tuple[str, ...] = ("mlp", "wide_deep", "dcn")
+    stage1b_generation_attempts: int = 6
+    stage1b_max_epochs: int = 5
+    frontier_max_size: int = 8
     baseline_tuning_iterations: int = 24
     stage2_num_seeds: int = 3
     candidate_branches: int = 8
+    stage3_incumbent_parent_slots: int = 2
+    stage3_frontier_parent_slots: int = 2
+    stage3_bootstrap_parent_slots: int = 1
     initial_candidate_roles: tuple[str, ...] = ()
     reserved_candidate_role: str = ""
     candidate_parallel_workers: int = 3
@@ -607,7 +695,7 @@ def research_loop_config_from_mapping(raw: Any) -> ResearchLoopConfig:
             if callable(getter)
             else getattr(raw, item.name, item.default)
         )
-        if item.name == "initial_candidate_roles":
+        if item.name in {"initial_candidate_roles", "stage1b_model_families"}:
             value = tuple(value or ())
         values[item.name] = value
     return ResearchLoopConfig(**values)
@@ -652,17 +740,22 @@ def estimate_max_experiment_runs(
     )
     maximum_search_iterations = (
         config.stage1_validation_iterations
+        + (config.stage1b_generation_attempts if config.stage1b_enabled else 0)
         + config.baseline_tuning_iterations
         + config.max_research_rounds * per_round_search
     )
     total = (
         config.stage1_validation_iterations
+        + (config.stage1b_generation_attempts if config.stage1b_enabled else 0)
         + config.baseline_tuning_iterations
         + stage2_seed_runs
         + config.max_research_rounds * per_research_round
     )
     return {
         "stage1_validation": config.stage1_validation_iterations,
+        "stage1b_diverse_roots": (
+            config.stage1b_generation_attempts if config.stage1b_enabled else 0
+        ),
         "stage2_tuning": config.baseline_tuning_iterations,
         "stage2_seed_evaluation": stage2_seed_runs,
         "per_research_round": per_research_round,
@@ -737,6 +830,11 @@ class ResearchLoopState:
         factor_selection_reason: str = "",
         factor_rejected_reasons: Optional[Mapping[str, str]] = None,
         factor_cards: Sequence[Mapping[str, Any]] = (),
+        model_family: str = "",
+        research_family: str = "",
+        loss_family: str = "",
+        parent_node_id: str = "",
+        parent_model_family: str = "",
     ) -> PromotionDecision:
         if not self.round_open:
             raise RuntimeError("start_round must be called before evaluating candidates")
@@ -811,6 +909,11 @@ class ResearchLoopState:
                 factor_selection_reason=factor_selection_reason,
                 factor_rejected_reasons=dict(factor_rejected_reasons or {}),
                 factor_cards=[dict(item) for item in factor_cards],
+                model_family=model_family,
+                research_family=research_family,
+                loss_family=loss_family,
+                parent_node_id=parent_node_id,
+                parent_model_family=parent_model_family,
             )
         )
         if decision.promoted and (
@@ -890,7 +993,7 @@ class ResearchLoopState:
             limit=limit,
         )
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "feedback_scope": "validation_only",
             "test_metrics_used": False,
             "round_number": round_number,
@@ -902,6 +1005,7 @@ class ResearchLoopState:
             },
             "candidates": [asdict(record) for record in records],
             "near_winners": [asdict(record) for record in near_winners],
+            "diverse_frontier": [asdict(record) for record in self.memory.frontier],
             "recent_failed_hypotheses": self.memory.failed_hypotheses[-6:],
             "fingerprint_count": len(self.memory.fingerprints),
         }
@@ -916,10 +1020,17 @@ class ResearchLoopState:
         """Build a concise validation-only experience brief for Stage 3."""
         previous_round = before_round - 1
         if previous_round < 1:
-            return (
+            prefix = (
                 "Structured candidate experience: no previous Stage 3 round; "
-                "start from the current incumbent."
+                "use the assigned Stage 1B/frontier parent without test feedback."
             )
+            if not self.memory.frontier:
+                return prefix
+            frontier = "; ".join(
+                f"{item.model_family}@{item.score:.6f}({item.source_stage})"
+                for item in self.memory.frontier[: self.config.experience_top_k]
+            )
+            return prefix + " Diverse validation frontier: " + frontier
         records = self.memory.records_for_round(previous_round)
         near_winners = self.memory.diverse_near_winners(
             round_number=previous_round,

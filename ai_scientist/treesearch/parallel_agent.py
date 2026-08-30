@@ -485,7 +485,9 @@ class MinimalAgent:
                     "Start from input/run_fm_experiment.py and its JSON configuration contract.",
                     "Stage 2 may tune only allowed FM hyperparameters; Stage 3 may make controlled model changes while preserving this evaluation contract.",
                     "Extend the supplied candidate at its existing extension points; call trusted source helpers directly instead of duplicating their data or evaluation logic.",
-                    "Preserve build_features(splits, feature_state=None), create_model(feature_dimension, config=None), save_candidate_checkpoint, load_candidate_checkpoint, and run_training.",
+                    "Preserve build_features(splits, feature_state=None), build_research_schema(splits, feature_state=None), create_model(feature_dimension, config=None), save_candidate_checkpoint, load_candidate_checkpoint, and run_training.",
+                    "Use trusted input/research_data.py schema v2 for structured inputs. Keep LegacyFMAdapter for unchanged FM behavior and final export compatibility.",
+                    "Use research_data.same_user_pair_indices for pairwise ranking, attach_causal_history for past-only histories, and load_train_auxiliary_targets for real train-window auxiliary supervision.",
                     "Any new factor vocabulary, bucket, normalization statistic, or historical aggregate must be fitted from train only, returned as JSON-serializable feature_state, and reused unchanged for validation/test.",
                     "The existing checkpoint path must save model weights, full config, feature_state, and feature_dimension; do not replace it with a weights-only checkpoint.",
                     "When AI_SCIENTIST_INFERENCE_ONLY=1, importing the candidate must define its model/feature/checkpoint functions without loading data, training, evaluating, or writing artifacts.",
@@ -1412,6 +1414,7 @@ class ParallelAgent:
         best_stage1_node=None,
         tuning_base_node=None,
         research_base_node=None,
+        research_base_nodes=None,
         max_search_workers=None,
         candidate_contexts=None,
     ):
@@ -1430,6 +1433,9 @@ class ParallelAgent:
             best_stage2_node  # to initialize plotting code (stage 3)
         )
         self.research_base_node = research_base_node
+        self.research_base_nodes = list(research_base_nodes or [])
+        if not self.research_base_nodes and research_base_node is not None:
+            self.research_base_nodes = [research_base_node]
         self.candidate_contexts = list(candidate_contexts or [])
         self.tuning_base_node = tuning_base_node or best_stage1_node
         self.is_hyperparam_tuning = _is_hyperparam_tuning_stage(
@@ -1500,13 +1506,16 @@ class ParallelAgent:
             )
             == 1
             and self.stage_name
-            and self.stage_name.startswith("3_")
+            and (
+                self.stage_name.startswith("3_")
+                or self.stage_name.startswith("1_diverse_roots_")
+            )
             and self.stage3_startup_stagger_seconds > 0
             and submitted < total
         ):
             delay = self.stage3_startup_stagger_seconds
             print(
-                f"[cyan]Staggering next Stage 3 worker start by {delay:.1f}s "
+                f"[cyan]Staggering next research worker start by {delay:.1f}s "
                 "on the single GPU[/cyan]"
             )
             time.sleep(delay)
@@ -2462,7 +2471,8 @@ class ParallelAgent:
             # leave-one-out run is recorded as failed and must never be turned
             # into an unconstrained LLM rewrite by the generic debug branch.
             has_fixed_research_parent = (
-                self.research_base_node is not None
+                bool(getattr(self, "research_base_nodes", []))
+                or self.research_base_node is not None
                 or bool(self.stage_name and self.stage_name.startswith("4_"))
             )
             if not has_fixed_research_parent and random.random() < search_cfg.debug_prob:
@@ -2516,6 +2526,13 @@ class ParallelAgent:
             # Stage 2 tunes FM; candidate-tuning agents use their explicit base.
             elif self.is_hyperparam_tuning:
                 nodes_to_process.append(self.tuning_base_node)
+                continue
+            elif getattr(self, "research_base_nodes", []):
+                nodes_to_process.append(
+                    self.research_base_nodes[
+                        len(nodes_to_process) % len(self.research_base_nodes)
+                    ]
+                )
                 continue
             elif self.research_base_node is not None:
                 nodes_to_process.append(self.research_base_node)
@@ -2635,7 +2652,7 @@ class ParallelAgent:
             )
             seed_eval = False
             worker_task_desc = self.task_desc
-            if self.research_base_node is not None and self.candidate_contexts:
+            if (getattr(self, "research_base_nodes", []) or self.research_base_node is not None) and self.candidate_contexts:
                 context = self.candidate_contexts[
                     task_index % len(self.candidate_contexts)
                 ]
@@ -2704,13 +2721,16 @@ class ParallelAgent:
                 traceback.print_exc()
                 if not (
                     self.stage_name
-                    and self.stage_name.startswith("3_")
+                    and (
+                        self.stage_name.startswith("3_")
+                        or self.stage_name.startswith("1_diverse_roots_")
+                    )
                     and isinstance(e, RuntimeError)
                     and "REPL child process failed to start execution" in str(e)
                 ):
                     raise
                 logger.warning(
-                    "Skipping one Stage 3 worker that failed REPL startup; "
+                    "Skipping one research worker that failed REPL startup; "
                     "other parallel candidates will continue."
                 )
             finally:

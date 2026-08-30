@@ -247,6 +247,29 @@ class CandidateTuningTests(unittest.TestCase):
 
         self.assertEqual(agent._select_parallel_nodes(), [incumbent])
 
+    def test_multi_parent_research_assigns_one_parent_per_parallel_branch(self):
+        fm_parent = _good_node("fm-parent")
+        dcn_parent = _good_node("dcn-parent")
+        agent = object.__new__(ParallelAgent)
+        agent.num_workers = 2
+        agent.journal = Journal(nodes=[fm_parent, dcn_parent])
+        agent.cfg = SimpleNamespace(
+            agent=SimpleNamespace(
+                search=SimpleNamespace(num_drafts=0, debug_prob=0.0, max_debug_depth=0)
+            )
+        )
+        agent.stage_name = "3_creative_research_1_round_multi_parent"
+        agent.best_stage3_node = None
+        agent.tuning_base_node = None
+        agent.is_hyperparam_tuning = False
+        agent.research_base_node = fm_parent
+        agent.research_base_nodes = [fm_parent, dcn_parent]
+
+        self.assertEqual(
+            agent._select_parallel_nodes(),
+            [fm_parent, dcn_parent],
+        )
+
     def _tuning_agent(self, base: Node) -> ParallelAgent:
         agent = object.__new__(ParallelAgent)
         agent.is_hyperparam_tuning = True

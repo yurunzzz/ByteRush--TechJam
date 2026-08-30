@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from itertools import combinations
 from pathlib import Path
 from statistics import mean
@@ -20,10 +20,14 @@ from rich import print
 
 from .candidate_contract import (
     CandidateRole,
+    bootstrap_candidate_roles,
     candidate_semantic_signature,
     component_guard_calls,
+    config_assignment,
     format_factor_change,
     literal_assignment,
+    model_family_from_code,
+    research_family_for_role,
     validate_candidate_contract,
     select_candidate_roles,
 )
@@ -39,6 +43,7 @@ from .parallel_agent import (
 )
 from .research_loop import (
     AblationEvidence,
+    FrontierRecord,
     PromotionPolicy,
     ResearchLoopConfig,
     ResearchLoopState,
@@ -61,6 +66,19 @@ class EvaluatedConfiguration:
     metric_means: dict[str, float] = field(default_factory=dict)
     role: Optional[CandidateRole] = None
     candidate_id: Optional[str] = None
+    model_family: str = "fm"
+    research_family: str = ""
+    loss_family: str = "pointwise_bce"
+    parent_node_id: str = ""
+    parent_model_family: str = "fm"
+
+
+@dataclass(frozen=True)
+class CandidateAssignment:
+    role: CandidateRole
+    parent: Node
+    parent_model_family: str
+    source: str
 
 
 def export_and_check_submission(
@@ -388,6 +406,9 @@ class ClosedLoopRunner:
         ).resolve()
         self.candidate_role_by_node_id: dict[str, CandidateRole] = {}
         self.candidate_origin_by_node_id: dict[str, tuple[Any, Journal]] = {}
+        self.candidate_parent_by_node_id: dict[str, Node] = {}
+        self.frontier_nodes_by_id: dict[str, Node] = {}
+        self.bootstrap_node_ids: set[str] = set()
         self.memory_dir = self.output_dir.parent / "research_loop"
         self.generated_fingerprints: set[str] = set()
         self.generated_semantic_signatures: set[str] = set()
@@ -438,6 +459,7 @@ class ClosedLoopRunner:
         *,
         tuning_base: Optional[Node] = None,
         research_base: Optional[Node] = None,
+        research_bases: Optional[Sequence[Node]] = None,
         stage3_base: Optional[Node] = None,
         task_context: str = "",
         num_workers: Optional[int] = None,
@@ -462,6 +484,7 @@ class ClosedLoopRunner:
             best_stage1_node=tuning_base if stage.name.startswith("2_") else None,
             tuning_base_node=tuning_base,
             research_base_node=research_base,
+            research_base_nodes=research_bases,
             max_search_workers=max_search_workers,
             candidate_contexts=candidate_contexts,
         )
@@ -612,9 +635,10 @@ class ClosedLoopRunner:
             raise RuntimeError("Stage 2 produced no configuration with three valid seeds")
         return winner
 
-    def _generate_candidates(
+    def _generate_candidates_single_parent_legacy(
         self, incumbent: Node, round_number: int
     ) -> list[Node]:
+        """Compatibility implementation retained for old checkpoints only."""
         roles = select_candidate_roles(
             self.state.memory.direction_summary(),
             round_number=round_number,
@@ -777,6 +801,362 @@ class ClosedLoopRunner:
                     if factor_change:
                         print(f"[cyan]Generated factors:\n{factor_change}[/cyan]")
         return [accepted[role.name] for role in roles if role.name in accepted]
+
+    def _manifest_metadata(self, node: Node) -> dict[str, str]:
+        manifest = literal_assignment(node.code, "RESEARCH_MANIFEST")
+        if not isinstance(manifest, dict):
+            return {
+                "model_family": model_family_from_code(node.code),
+                "research_family": "baseline",
+                "loss_family": "pointwise_bce",
+                "parent_node_id": "",
+                "parent_model_family": "",
+                "role": "",
+            }
+        return {
+            name: str(manifest.get(name, ""))
+            for name in (
+                "model_family",
+                "research_family",
+                "loss_family",
+                "parent_node_id",
+                "parent_model_family",
+                "role",
+            )
+        }
+
+    def _register_frontier(
+        self,
+        node: Node,
+        *,
+        source_stage: str,
+        round_number: int,
+        semantic_signature: str,
+    ) -> None:
+        score = _node_score(node)
+        if score is None:
+            return
+        metadata = self._manifest_metadata(node)
+        record = FrontierRecord(
+            node_id=node.id,
+            source_stage=source_stage,
+            round_number=round_number,
+            score=score,
+            metrics=_node_validation_metrics(node),
+            model_family=metadata["model_family"],
+            research_family=metadata["research_family"],
+            loss_family=metadata["loss_family"],
+            parent_node_id=metadata["parent_node_id"],
+            parent_model_family=metadata["parent_model_family"],
+            fingerprint=candidate_fingerprint(node.code),
+            semantic_signature=semantic_signature,
+            principal_change=_principal_change(node),
+            role=metadata["role"],
+        )
+        self.frontier_nodes_by_id[node.id] = node
+        self.state.memory.add_frontier(
+            record,
+            limit=self.config.frontier_max_size,
+        )
+
+    def _semantic_signature_for_node(self, node: Node) -> str:
+        manifest = literal_assignment(node.code, "RESEARCH_MANIFEST")
+        selection = literal_assignment(node.code, "FACTOR_SELECTION")
+        payload = {
+            "model_family": (manifest or {}).get("model_family") if isinstance(manifest, dict) else None,
+            "research_family": (manifest or {}).get("research_family") if isinstance(manifest, dict) else None,
+            "loss_family": (manifest or {}).get("loss_family") if isinstance(manifest, dict) else None,
+            "mechanism_ids": sorted((manifest or {}).get("mechanism_ids", [])) if isinstance(manifest, dict) else [],
+            "factor_ids": sorted((selection or {}).get("selected_factor_ids", [])) if isinstance(selection, dict) else [],
+        }
+        return json.dumps(payload, sort_keys=True, ensure_ascii=True)
+
+    def _generate_assigned_candidates(
+        self,
+        assignments: Sequence[CandidateAssignment],
+        *,
+        stage_name: str,
+        round_number: int,
+        max_attempts: int,
+        stage1b: bool = False,
+    ) -> list[Node]:
+        if not assignments:
+            return []
+        stage, journal = self._new_stage(
+            name=stage_name,
+            goals=(
+                "Build low-cost, schema-v2-compatible non-FM research roots. "
+                "Each root is evidence, not an automatic replacement for the FM baseline."
+                if stage1b
+                else self.manager.main_stage_goals[3]
+            ),
+            max_iterations=max_attempts,
+        )
+        parents_by_id: dict[str, Node] = {}
+        for assignment in assignments:
+            parents_by_id.setdefault(assignment.parent.id, _clone_root(assignment.parent))
+        for parent in parents_by_id.values():
+            journal.append(parent)
+        normalized = [
+            CandidateAssignment(
+                role=assignment.role,
+                parent=parents_by_id[assignment.parent.id],
+                parent_model_family=assignment.parent_model_family,
+                source=assignment.source,
+            )
+            for assignment in assignments
+        ]
+        base_context = build_factor_context(
+            self.manager.cfg.data_dir,
+            incumbent_code=normalized[0].parent.code,
+            round_number=max(1, round_number),
+            failed_hypotheses=self.state.memory.failed_hypotheses,
+        )
+        base_context += "\n\n" + self.state.experience_prompt(
+            before_round=max(1, round_number)
+        )
+        if stage1b:
+            base_context += (
+                "\nStage 1B bootstrap constraints:\n"
+                f"- Train at most {self.config.stage1b_max_epochs} epochs.\n"
+                "- Change exactly one model architecture family and keep pointwise BCE.\n"
+                "- A valid root need not beat FM; it enters the diverse frontier for later search.\n"
+            )
+        accepted: dict[str, Node] = {}
+        retry_feedback = {item.role.name: [] for item in normalized}
+        role_index = {
+            item.role.name: index for index, item in enumerate(normalized, 1)
+        }
+        seen_node_ids = set(parents_by_id)
+        attempts = 0
+
+        def prompt_for(item: CandidateAssignment, index: int) -> str:
+            return item.role.prompt(
+                index,
+                len(normalized),
+                retry_feedback=retry_feedback[item.role.name],
+                evidence_memory=(
+                    "Parent source: " + item.source + "\n"
+                    + self.state.memory.prompt_evidence(item.role.group)
+                ),
+                factor_library_context=factor_library_prompt(
+                    role_group=item.role.group,
+                    role_category=item.role.category,
+                    observed_evidence=self.state.memory.factor_summary(),
+                    discovered_cards=self.state.memory.discovered_factor_cards(),
+                ),
+                parent_node_id=item.parent.id,
+                parent_model_family=item.parent_model_family,
+            )
+
+        with self._agent(
+            stage,
+            journal,
+            research_base=normalized[0].parent,
+            research_bases=[item.parent for item in normalized],
+            task_context=base_context,
+            candidate_contexts=[
+                prompt_for(item, index)
+                for index, item in enumerate(normalized, 1)
+            ],
+        ) as agent:
+            while attempts < max_attempts:
+                pending = [
+                    item for item in normalized if item.role.name not in accepted
+                ]
+                if not pending:
+                    break
+                assigned = pending[: min(max_attempts - attempts, len(pending))]
+                agent.research_base_nodes = [item.parent for item in assigned]
+                agent.research_base_node = assigned[0].parent
+                agent.candidate_contexts = [
+                    prompt_for(item, role_index[item.role.name]) for item in assigned
+                ]
+                before = self._experiment_count(journal)
+                agent.step(self.exec_callback, max_nodes=len(assigned))
+                added = self._experiment_count(journal) - before
+                if added <= 0:
+                    break
+                attempts += added
+                self._notify(stage, journal)
+                new_nodes = [
+                    node for node in journal.nodes if node.id not in seen_node_ids
+                ]
+                for expected, node in zip(assigned, new_nodes):
+                    seen_node_ids.add(node.id)
+                    if _node_score(node) is None:
+                        retry_feedback[expected.role.name].append("execution failed")
+                        continue
+                    contract = validate_candidate_contract(
+                        expected.parent.code,
+                        node.code,
+                        expected.role,
+                        expected_parent_id=expected.parent.id,
+                        expected_parent_model_family=expected.parent_model_family,
+                    )
+                    if not contract.valid:
+                        reason = "; ".join(contract.reasons)
+                        retry_feedback[expected.role.name].append(reason)
+                        self.state.memory.failed_hypotheses.append(
+                            f"{expected.role.name}: {reason}"
+                        )
+                        print(f"[yellow]Rejected candidate: {reason}[/yellow]")
+                        continue
+                    if stage1b:
+                        config = config_assignment(node.code) or {}
+                        epochs = config.get("max_epochs", config.get("epochs"))
+                        if not isinstance(epochs, int) or epochs > self.config.stage1b_max_epochs:
+                            reason = (
+                                "Stage 1B CONFIG must use a literal max_epochs/epochs <= "
+                                f"{self.config.stage1b_max_epochs}"
+                            )
+                            retry_feedback[expected.role.name].append(reason)
+                            self.state.memory.failed_hypotheses.append(
+                                f"{expected.role.name}: {reason}"
+                            )
+                            continue
+                    signature = candidate_semantic_signature(contract)
+                    fingerprint = candidate_fingerprint(node.code)
+                    if signature in self.generated_semantic_signatures:
+                        retry_feedback[expected.role.name].append("semantic duplicate")
+                        continue
+                    if fingerprint in self.generated_fingerprints:
+                        retry_feedback[expected.role.name].append("code duplicate")
+                        continue
+                    self.generated_semantic_signatures.add(signature)
+                    self.generated_fingerprints.add(fingerprint)
+                    accepted[expected.role.name] = node
+                    self.candidate_role_by_node_id[node.id] = expected.role
+                    self.candidate_origin_by_node_id[node.id] = (stage, journal)
+                    self.candidate_parent_by_node_id[node.id] = expected.parent
+                    self._register_frontier(
+                        node,
+                        source_stage=stage.name,
+                        round_number=round_number,
+                        semantic_signature=signature,
+                    )
+                    if stage1b:
+                        self.bootstrap_node_ids.add(node.id)
+                    print(
+                        f"[green]Accepted {expected.role.name} from "
+                        f"{expected.source}/{expected.parent_model_family}: {node.id}[/green]"
+                    )
+        self._save_memory()
+        return [
+            accepted[item.role.name]
+            for item in normalized
+            if item.role.name in accepted
+        ]
+
+    def _run_stage1b(self, baseline: Node) -> list[Node]:
+        if not self.config.stage1b_enabled:
+            return []
+        roles = bootstrap_candidate_roles(self.config.stage1b_model_families)
+        assignments = [
+            CandidateAssignment(role, baseline, "fm", "stage1a_fm")
+            for role in roles
+        ]
+        return self._generate_assigned_candidates(
+            assignments,
+            stage_name="1_diverse_roots_2_schema_v2_bootstrap",
+            round_number=0,
+            max_attempts=self.config.stage1b_generation_attempts,
+            stage1b=True,
+        )
+
+    def _stage3_parent_pool(self) -> list[tuple[Node, str]]:
+        if self.incumbent is None:
+            raise RuntimeError("Stage 3 requires an incumbent")
+        pool: list[tuple[Node, str]] = []
+        pool.extend(
+            (self.incumbent.node, "incumbent")
+            for _ in range(max(0, self.config.stage3_incumbent_parent_slots))
+        )
+        used_frontier_nodes: set[str] = set()
+
+        def select_records(records, count):
+            selected = []
+            seen_families = set()
+            for record in sorted(records, key=lambda item: item.score, reverse=True):
+                node = self.frontier_nodes_by_id.get(record.node_id)
+                if (
+                    node is None
+                    or record.node_id in used_frontier_nodes
+                    or record.model_family in seen_families
+                ):
+                    continue
+                selected.append((node, record.source_stage))
+                seen_families.add(record.model_family)
+                used_frontier_nodes.add(record.node_id)
+                if len(selected) >= count:
+                    break
+            return selected
+
+        non_bootstrap = [
+            item for item in self.state.memory.frontier
+            if item.node_id not in self.bootstrap_node_ids
+        ]
+        pool.extend(
+            select_records(
+                non_bootstrap or self.state.memory.frontier,
+                max(0, self.config.stage3_frontier_parent_slots),
+            )
+        )
+        bootstrap = [
+            item for item in self.state.memory.frontier
+            if item.node_id in self.bootstrap_node_ids
+        ]
+        pool.extend(
+            select_records(
+                bootstrap,
+                max(0, self.config.stage3_bootstrap_parent_slots),
+            )
+        )
+        all_frontier = select_records(
+            self.state.memory.frontier,
+            self.config.candidate_branches,
+        )
+        fill_index = 0
+        while len(pool) < self.config.candidate_branches:
+            if all_frontier:
+                pool.append(all_frontier[fill_index % len(all_frontier)])
+                fill_index += 1
+            else:
+                pool.append((self.incumbent.node, "incumbent_fallback"))
+        return pool[: self.config.candidate_branches]
+
+    def _generate_candidates(self, incumbent: Node, round_number: int) -> list[Node]:
+        roles = select_candidate_roles(
+            self.state.memory.direction_summary(),
+            round_number=round_number,
+            branch_count=self.config.candidate_branches,
+            preferred_role_names=self.config.initial_candidate_roles,
+            reserved_role_name=self.config.reserved_candidate_role,
+        )
+        parents = self._stage3_parent_pool()
+        assignments = []
+        for role, (parent, source) in zip(roles, parents):
+            parent_family = model_family_from_code(parent.code)
+            constrained_role = replace(
+                role,
+                allowed_model_families=(parent_family,),
+            )
+            assignments.append(
+                CandidateAssignment(
+                    constrained_role,
+                    parent,
+                    parent_family,
+                    source,
+                )
+            )
+        return self._generate_assigned_candidates(
+            assignments,
+            stage_name=(
+                f"3_creative_research_1_round_{self._word(round_number)}_multi_parent"
+            ),
+            round_number=round_number,
+            max_attempts=self.config.stage3_generation_attempts,
+        )
 
     def _prepare_candidate_tuning(
         self,
@@ -998,7 +1378,15 @@ class ClosedLoopRunner:
         results = [
             confirmed.get(result.candidate_id, result) for result in merged
         ]
-        return sorted(results, key=lambda result: result.score, reverse=True)
+        results = sorted(results, key=lambda result: result.score, reverse=True)
+        for result in results:
+            self._register_frontier(
+                result.node,
+                source_stage=result.stage_name,
+                round_number=round_number,
+                semantic_signature=self._semantic_signature_for_node(result.node),
+            )
+        return results
 
     def _run_stage4(
         self,
@@ -1264,6 +1652,14 @@ class ClosedLoopRunner:
         (self.memory_dir / "state.json").write_text(
             json.dumps(payload, indent=2, sort_keys=True) + "\n"
         )
+        (self.memory_dir / "diverse_frontier.json").write_text(
+            json.dumps(
+                [asdict(item) for item in self.state.memory.frontier],
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        )
 
     def _save_round_summary(self, round_number: int) -> None:
         summary = self.state.round_summary(round_number)
@@ -1311,6 +1707,7 @@ class ClosedLoopRunner:
         print(f"[cyan]Closed-loop maximum execution budget: {budget}[/cyan]")
 
         baseline = self._run_stage1()
+        self._run_stage1b(baseline)
         self.incumbent = self._run_stage2(baseline)
         self.state.set_incumbent(
             self.incumbent.node.id,
@@ -1356,6 +1753,11 @@ class ClosedLoopRunner:
                     factor_selection_reason=factor_selection_reason,
                     factor_rejected_reasons=factor_rejected_reasons,
                     factor_cards=factor_cards,
+                    model_family=self._manifest_metadata(result.node)["model_family"],
+                    research_family=self._manifest_metadata(result.node)["research_family"],
+                    loss_family=self._manifest_metadata(result.node)["loss_family"],
+                    parent_node_id=self._manifest_metadata(result.node)["parent_node_id"],
+                    parent_model_family=self._manifest_metadata(result.node)["parent_model_family"],
                 )
                 print(
                     f"[cyan]Candidate {candidate_id}: "

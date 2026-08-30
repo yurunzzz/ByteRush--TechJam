@@ -34,8 +34,8 @@ agent:
   stages:
     stage1_max_iters: 2
     stage2_max_iters: 2
-    stage3_max_iters: 8
-    stage4_max_iters: 3
+    stage3_max_iters: 30
+    stage4_max_iters: 15
   steps: 1
   k_fold_validation: 1
   multi_seed_eval:
@@ -45,27 +45,44 @@ agent:
     max_research_rounds: 2
     patience: 2
     stage1_validation_iterations: 2
+    # Stage 1A remains the official FM baseline. Stage 1B creates cheap,
+    # schema-v2-compatible non-FM roots; they enter the frontier even when
+    # they do not beat FM in this short bootstrap run.
+    stage1b_enabled: true
+    stage1b_model_families:
+      - mlp
+      - wide_deep
+      - dcn
+    stage1b_generation_attempts: 6
+    stage1b_max_epochs: 5
+    frontier_max_size: 8
     baseline_tuning_iterations: 2
     stage2_num_seeds: 2
     # Match the proven dbcab71 run while retaining evidence-guided selection.
-    candidate_branches: 3
-    # Two manually anchored themes plus one adaptive winner-extension/open slot.
+    candidate_branches: 5
+    # Two champion branches, two validation-successful frontier branches, and
+    # one Stage-1B architecture root form each multi-parent Stage-3 portfolio.
+    stage3_incumbent_parent_slots: 2
+    stage3_frontier_parent_slots: 2
+    stage3_bootstrap_parent_slots: 1
     initial_candidate_roles:
       - causal_history_interest
       - ranking_objective
+      - auxiliary_objective
+      - context_interaction
       - incumbent_extension
     reserved_candidate_role: incumbent_extension
     candidate_parallel_workers: 2
     # The stricter candidate contract needs two spare attempts beyond dbcab71.
     # Three first attempts plus two contract/debug retries.
-    stage3_generation_attempts: 5
+    stage3_generation_attempts: 30
     # Reuse the generation score for 3 -> 2 elimination. Top 2 get one
     # targeted correction; the fixed Top 1 gets most of the parameter budget.
-    candidate_tuning_top_k: 2
+    candidate_tuning_top_k: 3
     candidate_tuning_iterations: 1
-    candidate_refinement_top_k: 1
+    candidate_refinement_top_k: 2
     candidate_refinement_iterations: 4
-    candidate_finalist_top_k: 1
+    candidate_finalist_top_k: 2
     finalist_top_k: 1
     # One screening seed is enough before ablation; final confirmation uses two.
     finalist_num_seeds: 1
@@ -88,7 +105,7 @@ agent:
     min_primary_gain: 0.002
     num_seeds: 1
     min_successful_seeds: 1
-    max_components: 2
+    max_components: 15
   final_model_dir: artifacts/comparison_current/final_model
   expose_prediction: false
   data_preview: false

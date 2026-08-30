@@ -30,6 +30,7 @@ sys.path.insert(0, str(input_dir))
 import baseline as baseline_module  # noqa: E402
 import data as data_module  # noqa: E402
 import evaluate as evaluate_module  # noqa: E402
+import research_data as research_data_module  # noqa: E402
 
 # Stage 2 search space: keep CandidateModel unchanged and tune these values.
 CONFIG = {
@@ -61,13 +62,23 @@ def component_enabled(name: str) -> bool:
     return bool(ABLATION_COMPONENTS[name]) and ABLATION_TARGET != name
 
 
+def build_research_schema(splits, feature_state=None):
+    """Expose schema v2 while keeping the official encoder authoritative."""
+    return research_data_module.build_schema_v2(
+        splits,
+        data_module=data_module,
+        feature_state=feature_state,
+    )
+
+
 def build_features(splits, feature_state=None):
-    """Use the trusted source encoder and expose its frozen-state contract."""
-    return data_module.encode(
+    """Return the lossless legacy FM view of trusted research schema v2."""
+    schema, feature_dimension, fitted_state = build_research_schema(
         splits,
         feature_state=feature_state,
-        return_state=True,
     )
+    encoded = research_data_module.LegacyFMAdapter.to_legacy(schema)
+    return encoded, feature_dimension, fitted_state
 
 
 # Stage 3 extension point. X is a dense integer ID array of shape (batch, 5),

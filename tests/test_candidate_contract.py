@@ -2,6 +2,7 @@ import unittest
 
 from ai_scientist.treesearch.candidate_contract import (
     DEFAULT_CANDIDATE_ROLES,
+    bootstrap_candidate_roles,
     candidate_semantic_signature,
     config_assignment,
     format_factor_change,
@@ -33,6 +34,12 @@ RESEARCH_MANIFEST = {{
     'role': {role_name!r},
     'group': 'history_interest',
     'category': 'factor_model',
+    'model_family': 'fm',
+    'research_family': 'history_interest',
+    'loss_family': 'pointwise_bce',
+    'parent_node_id': '',
+    'parent_model_family': 'fm',
+    'input_schema_version': 2,
     'hypothesis': 'past author affinity improves user-level ranking',
     'mechanism': 'causal profile consumed by target attention',
     'mechanism_ids': ['causal_history_profile', 'din_target_attention'],
@@ -94,6 +101,12 @@ RESEARCH_MANIFEST = {{
     'role': {role.name!r},
     'group': {role.group!r},
     'category': {role.category!r},
+    'model_family': 'fm',
+    'research_family': {('ranking_objective' if role.name == 'ranking_objective' else 'auxiliary_objective')!r},
+    'loss_family': {('hybrid_bce_bpr' if role.name == 'ranking_objective' else 'multitask')!r},
+    'parent_node_id': '',
+    'parent_model_family': 'fm',
+    'input_schema_version': 2,
     'hypothesis': 'align training with the ranking task',
     'mechanism': 'a guarded objective with valid training inputs',
     'mechanism_ids': [{component!r}],
@@ -136,6 +149,75 @@ def create_model(feature_dimension, config=None):
 
 
 class CandidateContractTests(unittest.TestCase):
+    def test_stage1b_model_family_and_parent_are_hard_constraints(self):
+        role = bootstrap_candidate_roles(["wide_deep"])[0]
+        candidate = """
+CONFIG = {'learning_rate': 0.001, 'epochs': 5}
+RESEARCH_MANIFEST = {
+    'candidate_id': 'wide_deep_root',
+    'role': 'architecture_wide_deep',
+    'group': 'architecture_exploration',
+    'category': 'model_architecture',
+    'model_family': 'wide_deep',
+    'research_family': 'architecture',
+    'loss_family': 'pointwise_bce',
+    'parent_node_id': 'fm-root',
+    'parent_model_family': 'fm',
+    'input_schema_version': 2,
+    'hypothesis': 'wide and deep paths improve ranking',
+    'mechanism': 'joint memorization and generalization',
+    'mechanism_ids': ['wide_deep_parallel_paths'],
+    'modified_symbols': ['CandidateModel', 'create_model'],
+    'expected_metric': ['GAUC', 'nDCG@5'],
+    'tunable_parameters': ['hidden_dim'],
+    'ablation_components': ['wide_deep_block'],
+    'combination_compatibility': 'single architecture block',
+    'change_scope': 'model only',
+    'component_dependencies': {},
+    'evidence': [{'source_type': 'literature', 'reference': 'wide_deep_2016', 'supports': ['wide_deep_block']}],
+}
+FACTOR_SELECTION = {
+    'considered_factor_ids': ['user_item_context_cross'],
+    'selected_factor_ids': [],
+    'selection_reason': 'isolate architecture in the bootstrap',
+    'rejected_reasons': {'user_item_context_cross': 'defer factors to Stage 3'},
+    'created_factor_cards': [],
+}
+ABLATION_COMPONENTS = {'wide_deep_block': True}
+def component_enabled(name):
+    return ABLATION_COMPONENTS[name]
+def build_features(splits, feature_state=None):
+    return splits, feature_state
+def create_model(feature_dimension, config=None):
+    if component_enabled('wide_deep_block'):
+        return ('wide_deep', feature_dimension)
+    return ('fm', feature_dimension)
+"""
+        valid = validate_candidate_contract(
+            BASE,
+            candidate,
+            role,
+            expected_parent_id="fm-root",
+            expected_parent_model_family="fm",
+        )
+        wrong_family = validate_candidate_contract(
+            BASE,
+            candidate.replace("'model_family': 'wide_deep'", "'model_family': 'dcn'"),
+            role,
+            expected_parent_id="fm-root",
+            expected_parent_model_family="fm",
+        )
+        wrong_parent = validate_candidate_contract(
+            BASE,
+            candidate,
+            role,
+            expected_parent_id="another-root",
+            expected_parent_model_family="fm",
+        )
+        self.assertTrue(valid.valid, valid.reasons)
+        self.assertFalse(wrong_family.valid)
+        self.assertFalse(wrong_parent.valid)
+
     def test_factor_and_model_bundle_passes_contract(self):
         role = DEFAULT_CANDIDATE_ROLES[0]
         result = validate_candidate_contract(BASE, history_candidate(), role)
