@@ -102,6 +102,24 @@ class ResearchLoopStateTests(unittest.TestCase):
 
         self.assertEqual(merged.experience_top_k, 5)
 
+    def test_strict_config_schema_accepts_stage3_elimination_and_topics(self):
+        schema = OmegaConf.structured(ResearchLoopSettings)
+        merged = OmegaConf.merge(
+            schema,
+            {
+                "candidate_tuning_top_k": 2,
+                "initial_candidate_roles": [
+                    "causal_history_interest",
+                    "ranking_objective",
+                    "incumbent_extension",
+                ],
+                "reserved_candidate_role": "incumbent_extension",
+            },
+        )
+
+        self.assertEqual(merged.candidate_tuning_top_k, 2)
+        self.assertEqual(merged.initial_candidate_roles[-1], "incumbent_extension")
+
     def test_default_patience_matches_official_convergence_rule(self):
         self.assertEqual(ResearchLoopConfig().patience, 2)
 
@@ -135,9 +153,9 @@ class ResearchLoopStateTests(unittest.TestCase):
         )
 
         self.assertEqual(budget["stage2_seed_evaluation"], 9)
-        self.assertEqual(budget["per_research_round"], 210)
-        self.assertEqual(budget["maximum_search_iterations"], 562)
-        self.assertEqual(budget["maximum_total"], 875)
+        self.assertEqual(budget["per_research_round"], 162)
+        self.assertEqual(budget["maximum_search_iterations"], 370)
+        self.assertEqual(budget["maximum_total"], 683)
 
     def test_partial_mapping_keeps_production_defaults(self):
         config = research_loop_config_from_mapping(
@@ -323,6 +341,47 @@ class ResearchLoopStateTests(unittest.TestCase):
         self.assertIn("delta_GAUC=+0.004000", prompt)
         self.assertIn("delta_nDCG@5=-0.002000", prompt)
         self.assertNotIn("0.999", prompt)
+
+    def test_factor_memory_keeps_model_context_and_custom_description(self):
+        state = ResearchLoopState()
+        state.set_incumbent(
+            "baseline",
+            0.700,
+            metrics={"GAUC": 0.720, "nDCG@5": 0.680, "primary": 0.700},
+        )
+        state.start_round()
+        state.evaluate_candidate(
+            node_id="factor-candidate",
+            fingerprint=candidate_fingerprint("factor-candidate"),
+            score=0.704,
+            seed_scores=[0.704, 0.704, 0.704],
+            metrics={"GAUC": 0.723, "nDCG@5": 0.685, "primary": 0.704},
+            principal_change="gated history diversity tower",
+            role="causal_history_interest",
+            category="history_interest",
+            factor_ids=["custom_history_diversity"],
+            factor_selection_reason="active users show repetitive histories",
+            factor_cards=[
+                {
+                    "factor_id": "custom_history_diversity",
+                    "semantics": "past-only diversity of recent interests",
+                    "helps_when": ["active histories are repetitive"],
+                    "model_fit": ["gated history tower"],
+                    "avoid_when": ["history is empty"],
+                    "data_cost": "low",
+                    "leakage_rule": "past rows only",
+                }
+            ],
+        )
+
+        summary = state.memory.factor_summary()["custom_history_diversity"]
+
+        self.assertEqual(summary["model_roles"], ["causal_history_interest"])
+        self.assertAlmostEqual(summary["mean_gain"], 0.004)
+        self.assertEqual(
+            summary["self_description"]["semantics"],
+            "past-only diversity of recent interests",
+        )
 
     def test_near_winner_feedback_is_diverse_and_excludes_confirmed_winner(self):
         state = ResearchLoopState(

@@ -28,6 +28,7 @@ from .candidate_contract import (
     select_candidate_roles,
 )
 from .factor_context import build_factor_context
+from .factor_library import factor_library_prompt
 from .finalize import freeze_stage4_winner
 from .journal import Journal, Node
 from .parallel_agent import (
@@ -204,6 +205,45 @@ def _principal_change(node: Node) -> str:
     return f"{component_text}: {narrative}"
 
 
+def _factor_selection(
+    node: Node,
+) -> tuple[list[str], list[str], str, dict[str, str], list[dict[str, Any]]]:
+    selection = literal_assignment(node.code, "FACTOR_SELECTION")
+    if not isinstance(selection, dict):
+        return [], [], "factor library was not inspected", {}, []
+    considered = selection.get("considered_factor_ids", [])
+    considered_factor_ids = (
+        [str(item) for item in considered]
+        if isinstance(considered, (list, tuple))
+        else []
+    )
+    selected = selection.get("selected_factor_ids", [])
+    factor_ids = (
+        [str(item) for item in selected]
+        if isinstance(selected, (list, tuple))
+        else []
+    )
+    created = selection.get("created_factor_cards", [])
+    rejected = selection.get("rejected_reasons", {})
+    rejected_reasons = (
+        {str(key): str(value) for key, value in rejected.items()}
+        if isinstance(rejected, dict)
+        else {}
+    )
+    factor_cards = (
+        [dict(item) for item in created if isinstance(item, dict)]
+        if isinstance(created, (list, tuple))
+        else []
+    )
+    return (
+        considered_factor_ids,
+        factor_ids,
+        str(selection.get("selection_reason", "")).strip(),
+        rejected_reasons,
+        factor_cards,
+    )
+
+
 def _node_metrics(node: Node) -> dict[str, float]:
     """Expose finite trusted validation metrics to Stage 4 evidence logic."""
     return {
@@ -347,6 +387,7 @@ class ClosedLoopRunner:
             _cfg_get(manager.cfg.agent, "final_model_dir", "artifacts/final_model")
         ).resolve()
         self.candidate_role_by_node_id: dict[str, CandidateRole] = {}
+        self.candidate_origin_by_node_id: dict[str, tuple[Any, Journal]] = {}
         self.memory_dir = self.output_dir.parent / "research_loop"
         self.generated_fingerprints: set[str] = set()
         self.generated_semantic_signatures: set[str] = set()
@@ -510,9 +551,17 @@ class ClosedLoopRunner:
         agent: Any,
         stage: Any,
         journal: Journal,
+        *,
+        num_seeds: Optional[int] = None,
     ) -> Optional[EvaluatedConfiguration]:
         finalists = _ranked_nodes(journal, self.config.finalist_top_k)
-        results = self._evaluate_nodes(agent, stage, journal, finalists)
+        results = self._evaluate_nodes(
+            agent,
+            stage,
+            journal,
+            finalists,
+            num_seeds=num_seeds,
+        )
         return max(results, key=lambda result: result.score) if results else None
 
     def _run_stage1(self) -> Node:
@@ -553,7 +602,12 @@ class ClosedLoopRunner:
                 self.config.baseline_tuning_iterations,
                 inherited_nodes=1,
             )
-            winner = self._evaluate_top_k(agent, stage, journal)
+            winner = self._evaluate_top_k(
+                agent,
+                stage,
+                journal,
+                num_seeds=self.config.stage2_num_seeds,
+            )
         if winner is None:
             raise RuntimeError("Stage 2 produced no configuration with three valid seeds")
         return winner
@@ -565,6 +619,8 @@ class ClosedLoopRunner:
             self.state.memory.direction_summary(),
             round_number=round_number,
             branch_count=self.config.candidate_branches,
+            preferred_role_names=self.config.initial_candidate_roles,
+            reserved_role_name=self.config.reserved_candidate_role,
         )
         role_by_name = {role.name: role for role in roles}
         word = self._word(round_number)
@@ -611,6 +667,12 @@ class ClosedLoopRunner:
                 len(roles),
                 retry_feedback=retry_feedback[role.name],
                 evidence_memory=evidence_memory,
+                factor_library_context=factor_library_prompt(
+                    role_group=role.group,
+                    role_category=role.category,
+                    observed_evidence=self.state.memory.factor_summary(),
+                    discovered_cards=self.state.memory.discovered_factor_cards(),
+                ),
             )
 
         with self._agent(
@@ -706,6 +768,7 @@ class ClosedLoopRunner:
                     self.generated_semantic_signatures.add(semantic_signature)
                     accepted[role.name] = node
                     self.candidate_role_by_node_id[node.id] = role
+                    self.candidate_origin_by_node_id[node.id] = (stage, journal)
                     print(
                         f"[green]Accepted {role.group}/{role.name} candidate "
                         f"{node.id}[/green]"
@@ -726,7 +789,7 @@ class ClosedLoopRunner:
         role: CandidateRole,
         candidate_id: str,
     ) -> tuple[Any, Journal, Node, int, CandidateRole, str]:
-        substage = 2 if phase == "coarse" else 3
+        substage = 2 if phase == "targeted" else 3
         stage, journal = self._new_stage(
             name=(
                 f"3_candidate_tuning_{substage}_{phase}_round_"
@@ -736,9 +799,13 @@ class ClosedLoopRunner:
                 "Keep this candidate architecture, feature builder, loss, and "
                 "split fixed; tune one complete CONFIG per node. "
                 + (
-                    "Cover the plausible range broadly."
-                    if phase == "coarse"
-                    else "Refine near the strongest coarse configuration."
+                    "Make one evidence-based correction to the most sensitive new parameter."
+                    if phase == "targeted"
+                    else (
+                        "Concentrate on candidate-specific parameters such as factor fusion, "
+                        "auxiliary-loss weight, temperature, or regularization. Inherit Stage 2 "
+                        "backbone parameters unless the training trace shows a concrete problem."
+                    )
                 )
             ),
             max_iterations=budget,
@@ -783,6 +850,7 @@ class ClosedLoopRunner:
             stage_name=stage.name,
             score=score,
             seed_scores=[],
+            metrics=_node_validation_metrics(best[0]),
             metric_means=_node_metrics(best[0]),
             role=role,
             candidate_id=candidate_id,
@@ -828,31 +896,56 @@ class ClosedLoopRunner:
         candidates: Sequence[Node],
         round_number: int,
     ) -> list[EvaluatedConfiguration]:
-        coarse_jobs = []
-        for branch_number, candidate in enumerate(candidates, 1):
+        screened: list[EvaluatedConfiguration] = []
+        for candidate in candidates:
             role = self.candidate_role_by_node_id.get(candidate.id)
-            if role is None:
+            origin = self.candidate_origin_by_node_id.get(candidate.id)
+            score = _node_score(candidate)
+            if role is None or origin is None or score is None:
                 continue
-            coarse_jobs.append(
-                self._prepare_candidate_tuning(
-                    candidate,
-                    round_number,
-                    branch_number,
-                    phase="coarse",
-                    budget=self.config.candidate_tuning_iterations,
+            stage, journal = origin
+            screened.append(
+                EvaluatedConfiguration(
+                    node=candidate,
+                    journal=journal,
+                    stage_name=stage.name,
+                    score=score,
+                    seed_scores=[],
+                    metrics=_node_validation_metrics(candidate),
+                    metric_means=_node_metrics(candidate),
                     role=role,
                     candidate_id=candidate.id,
                 )
             )
-        coarse_results = [
-            result
-            for result in self._execute_tuning_jobs(coarse_jobs)
-            if result is not None
-        ]
-        if not coarse_results:
+        if not screened:
             return []
-        coarse_results.sort(key=lambda result: result.score, reverse=True)
-        refinement_bases = coarse_results[
+        screened.sort(key=lambda result: result.score, reverse=True)
+
+        targeted_bases = screened[: self.config.candidate_tuning_top_k]
+        targeted_jobs = [
+            self._prepare_candidate_tuning(
+                result.node,
+                round_number,
+                branch_number,
+                phase="targeted",
+                budget=self.config.candidate_tuning_iterations,
+                role=result.role,
+                candidate_id=result.candidate_id,
+            )
+            for branch_number, result in enumerate(targeted_bases, 1)
+            if result.role is not None and result.candidate_id is not None
+        ]
+        targeted = {
+            result.candidate_id: result
+            for result in self._execute_tuning_jobs(targeted_jobs)
+            if result is not None and result.candidate_id is not None
+        }
+        after_targeted = [
+            targeted.get(result.candidate_id, result) for result in screened
+        ]
+        after_targeted.sort(key=lambda result: result.score, reverse=True)
+
+        refinement_bases = after_targeted[
             : self.config.candidate_refinement_top_k
         ]
         refinement_jobs = [
@@ -860,7 +953,7 @@ class ClosedLoopRunner:
                 result.node,
                 round_number,
                 branch_number,
-                phase="refinement",
+                phase="top1",
                 budget=self.config.candidate_refinement_iterations,
                 role=result.role,
                 candidate_id=result.candidate_id,
@@ -873,11 +966,13 @@ class ClosedLoopRunner:
             for result in self._execute_tuning_jobs(refinement_jobs)
             if result is not None and result.candidate_id is not None
         }
-        merged = [refined.get(result.candidate_id, result) for result in coarse_results]
+        merged = [
+            refined.get(result.candidate_id, result) for result in after_targeted
+        ]
         merged.sort(key=lambda result: result.score, reverse=True)
         finalists = merged[: self.config.candidate_finalist_top_k]
 
-        evaluated: list[EvaluatedConfiguration] = []
+        confirmed: dict[str, EvaluatedConfiguration] = {}
         for result in finalists:
             stage = next(
                 stage for stage in self.manager.stages
@@ -897,8 +992,13 @@ class ClosedLoopRunner:
                     role=result.role,
                     candidate_id=result.candidate_id,
                 )
-            evaluated.extend(repeated)
-        return sorted(evaluated, key=lambda result: result.score, reverse=True)
+            if repeated and result.candidate_id is not None:
+                confirmed[result.candidate_id] = repeated[0]
+
+        results = [
+            confirmed.get(result.candidate_id, result) for result in merged
+        ]
+        return sorted(results, key=lambda result: result.score, reverse=True)
 
     def _run_stage4(
         self,
@@ -1133,11 +1233,11 @@ class ClosedLoopRunner:
             self.incumbent,
             round_number=max(self.state.current_round, 1),
             candidate_number=1,
-            stage_name="4_final_incumbent_confirmation_1_five_seed",
+            stage_name="4_final_incumbent_confirmation_1_configured_seeds",
         )
         if confirmed is None or len(confirmed.seed_scores) != required:
             raise RuntimeError(
-                "final incumbent did not complete the required five-seed confirmation"
+                "final incumbent did not complete the configured seed confirmation"
             )
         self.incumbent = confirmed
         self.state.set_incumbent(
@@ -1231,6 +1331,13 @@ class ClosedLoopRunner:
             for result in tuned_results:
                 candidate_id = result.candidate_id or result.node.id
                 role = result.role
+                (
+                    considered_factor_ids,
+                    factor_ids,
+                    factor_selection_reason,
+                    factor_rejected_reasons,
+                    factor_cards,
+                ) = _factor_selection(result.node)
                 decision = self.state.evaluate_candidate(
                     node_id=candidate_id,
                     fingerprint=candidate_fingerprint(result.node.code),
@@ -1244,6 +1351,11 @@ class ClosedLoopRunner:
                     ),
                     role=role.name if role else "",
                     category=role.group if role else "",
+                    factor_ids=factor_ids,
+                    considered_factor_ids=considered_factor_ids,
+                    factor_selection_reason=factor_selection_reason,
+                    factor_rejected_reasons=factor_rejected_reasons,
+                    factor_cards=factor_cards,
                 )
                 print(
                     f"[cyan]Candidate {candidate_id}: "

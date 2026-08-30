@@ -8,6 +8,8 @@ import math
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
+from .factor_library import FACTOR_IDS
+
 
 @dataclass(frozen=True)
 class CandidateRole:
@@ -24,6 +26,7 @@ class CandidateRole:
         *,
         retry_feedback: Sequence[str] = (),
         evidence_memory: str = "",
+        factor_library_context: str = "",
     ) -> str:
         evidence_ids = ", ".join(CURATED_EVIDENCE)
         base_name = self.name.split("_alternative_", 1)[0]
@@ -54,6 +57,15 @@ class CandidateRole:
         memory_text = (
             f"\nRelevant validation/ablation memory:\n{evidence_memory.strip()}\n"
             if evidence_memory.strip()
+            else ""
+        )
+        factor_text = (
+            "\nAutonomous factor library (small metadata cards, not extra training data):\n"
+            + factor_library_context.strip()
+            + "\nInspect the cards even if the central mechanism is not a feature model. "
+            "Select zero, one, or at most two factors only when they plausibly help this "
+            "candidate. Selecting none is valid when the rationale is explicit.\n"
+            if factor_library_context.strip()
             else ""
         )
         return (
@@ -92,8 +104,18 @@ class CandidateRole:
             "- Every enabled ABLATION_COMPONENTS entry must be called literally through "
             "component_enabled(name) in the code path it controls.\n"
             "- A factor/model role must define literal FEATURE_FACTORS entries with "
-            "name, raw_fields, transform, output_fields, and state_policy; build_features "
+            "library_id, name, raw_fields, transform, output_fields, and state_policy; build_features "
             "must create the fields and a guarded model path must consume them.\n"
+            "- Every candidate must define a literal FACTOR_SELECTION mapping with "
+            "considered_factor_ids, selected_factor_ids, selection_reason, rejected_reasons, "
+            "and created_factor_cards. "
+            "Consider at least one library card. selected_factor_ids may be empty, but may contain "
+            "at most two known IDs and must be a subset of considered_factor_ids. Every selected "
+            "ID must have a matching FEATURE_FACTORS library_id and real executable use.\n"
+            "- If no existing card describes a useful factor, created_factor_cards may define at "
+            "most two new cards. Each needs factor_id beginning with 'custom_', semantics, "
+            "helps_when, model_fit, avoid_when, data_cost, and leakage_rule. A custom card is a "
+            "small self-description, not permission to add external data.\n"
             "- Every FEATURE_FACTORS output_fields string must also appear literally "
             "inside the build_features function body, for example "
             "features['history_author_ids']; a module constant or manifest-only name "
@@ -105,6 +127,7 @@ class CandidateRole:
             "placement. Return only the concise plan and complete code required by the "
             "global response format."
             + role_contract
+            + factor_text
             + memory_text
             + feedback_text
         )
@@ -157,8 +180,8 @@ DEFAULT_CANDIDATE_ROLES: tuple[CandidateRole, ...] = (
         "incumbent_extension",
         "evidence_combination",
         "evidence_synthesis",
-        "Extend the incumbent with a coherent set of mechanisms supported by its validation and ablation evidence.",
-        "Name the inherited and new components, justify dependencies, and guard every new component independently.",
+        "Extend the incumbent along the strongest positive evidence. If no prior direction is convincingly positive, choose one coherent open theme that addresses the current validation weakness.",
+        "Name the inherited and new components, or explain why open exploration is preferable; guard every new component independently.",
     ),
     CandidateRole(
         "cross_direction_synthesis",
@@ -217,6 +240,7 @@ TECHNIQUE_CATALOG = {
     "incumbent_extension": (
         "Extend the incumbent with one central evidence-backed mechanism and any factors/objectives it functionally requires.",
         "Prefer components with positive stored ablation evidence; do not re-add a component previously classified harmful unchanged.",
+        "When prior evidence is weak or flat, use this slot for one new, well-motivated theme rather than forcing an incumbent extension.",
     ),
     "cross_direction_synthesis": (
         "Combine components only when curated literature, stored validation evidence, or a direct dependency supports the pairing.",
@@ -250,6 +274,7 @@ class CandidateContractResult:
     reasons: tuple[str, ...]
     manifest: Mapping[str, Any]
     feature_factors: tuple[Mapping[str, Any], ...]
+    factor_selection: Mapping[str, Any]
 
 
 @dataclass(frozen=True)
@@ -901,10 +926,113 @@ def validate_candidate_contract(
         if isinstance(raw_factors, (list, tuple))
         else ()
     )
-    if role.category in {"factor_data", "factor_model"}:
+    factor_selection = literal_assignment(candidate_code, "FACTOR_SELECTION")
+    considered_factor_ids: list[str] = []
+    selected_factor_ids: list[str] = []
+    if not isinstance(factor_selection, Mapping):
+        factor_selection = {}
+        reasons.append("missing literal FACTOR_SELECTION")
+    else:
+        missing_selection_fields = {
+            "considered_factor_ids",
+            "selected_factor_ids",
+            "selection_reason",
+            "rejected_reasons",
+            "created_factor_cards",
+        } - set(factor_selection)
+        if missing_selection_fields:
+            reasons.append(
+                "FACTOR_SELECTION missing: "
+                + ", ".join(sorted(missing_selection_fields))
+            )
+        considered = factor_selection.get("considered_factor_ids", [])
+        selected = factor_selection.get("selected_factor_ids", [])
+        if not isinstance(considered, (list, tuple)) or not considered:
+            reasons.append("considered_factor_ids must be a non-empty sequence")
+        else:
+            considered_factor_ids = [str(item) for item in considered]
+        if not isinstance(selected, (list, tuple)):
+            reasons.append("selected_factor_ids must be a sequence")
+        else:
+            selected_factor_ids = [str(item) for item in selected]
+        created_cards = factor_selection.get("created_factor_cards", [])
+        created_factor_ids: set[str] = set()
+        if not isinstance(created_cards, (list, tuple)):
+            reasons.append("created_factor_cards must be a sequence")
+        elif len(created_cards) > 2:
+            reasons.append("created_factor_cards may contain at most two cards")
+        else:
+            required_card_fields = {
+                "factor_id",
+                "semantics",
+                "helps_when",
+                "model_fit",
+                "avoid_when",
+                "data_cost",
+                "leakage_rule",
+            }
+            for index, card in enumerate(created_cards, 1):
+                if not isinstance(card, Mapping):
+                    reasons.append(f"created_factor_cards[{index}] must be a mapping")
+                    continue
+                missing = required_card_fields - set(card)
+                if missing:
+                    reasons.append(
+                        f"created_factor_cards[{index}] missing: "
+                        + ", ".join(sorted(missing))
+                    )
+                factor_id = str(card.get("factor_id", ""))
+                if (
+                    not factor_id.startswith("custom_")
+                    or any(
+                        character not in "abcdefghijklmnopqrstuvwxyz0123456789_"
+                        for character in factor_id
+                    )
+                ):
+                    reasons.append(
+                        f"created_factor_cards[{index}] factor_id must be custom_ snake_case"
+                    )
+                elif factor_id in FACTOR_IDS or factor_id in created_factor_ids:
+                    reasons.append(
+                        f"created_factor_cards[{index}] factor_id is duplicate"
+                    )
+                else:
+                    created_factor_ids.add(factor_id)
+        known_factor_ids = FACTOR_IDS | created_factor_ids
+        unknown = (set(considered_factor_ids) | set(selected_factor_ids)) - known_factor_ids
+        if unknown:
+            reasons.append("unknown factor library IDs: " + ", ".join(sorted(unknown)))
+        if len(selected_factor_ids) > 2:
+            reasons.append("selected_factor_ids may contain at most two factors")
+        if not set(selected_factor_ids).issubset(considered_factor_ids):
+            reasons.append("selected_factor_ids must be a subset of considered_factor_ids")
+        if not str(factor_selection.get("selection_reason", "")).strip():
+            reasons.append("FACTOR_SELECTION must explain selection_reason")
+        rejected = factor_selection.get("rejected_reasons")
+        if not isinstance(rejected, Mapping):
+            reasons.append("FACTOR_SELECTION rejected_reasons must be a mapping")
+        else:
+            missing_rejections = (
+                set(considered_factor_ids)
+                - set(selected_factor_ids)
+                - {str(item) for item in rejected}
+            )
+            if missing_rejections:
+                reasons.append(
+                    "considered but unselected factors need rejected_reasons: "
+                    + ", ".join(sorted(missing_rejections))
+                )
+
+    needs_factor_code = role.category in {"factor_data", "factor_model"} or bool(
+        selected_factor_ids
+    )
+    if role.category in {"factor_data", "factor_model"} and not selected_factor_ids:
+        reasons.append("factor candidate must select at least one library factor")
+    if needs_factor_code:
         if not factors:
             reasons.append("factor candidate has no literal FEATURE_FACTORS entries")
         required_factor_fields = {
+            "library_id",
             "name",
             "raw_fields",
             "transform",
@@ -918,6 +1046,15 @@ def validate_candidate_contract(
                     f"FEATURE_FACTORS[{index}] missing: "
                     + ", ".join(sorted(missing))
                 )
+        declared_library_ids = {
+            str(factor.get("library_id", "")) for factor in factors
+        }
+        missing_selected = set(selected_factor_ids) - declared_library_ids
+        if missing_selected:
+            reasons.append(
+                "selected factors missing matching FEATURE_FACTORS library_id: "
+                + ", ".join(sorted(missing_selected))
+            )
         base_builder = function_dump(base_code, "build_features")
         candidate_builder = function_dump(candidate_code, "build_features")
         if candidate_builder is None or candidate_builder == base_builder:
@@ -953,6 +1090,7 @@ def validate_candidate_contract(
         reasons=tuple(reasons),
         manifest=manifest,
         feature_factors=factors,
+        factor_selection=factor_selection,
     )
 
 
@@ -961,6 +1099,9 @@ def candidate_semantic_signature(result: CandidateContractResult) -> str:
     payload = {
         "mechanism_ids": sorted(map(str, result.manifest.get("mechanism_ids", []))),
         "factors": sorted(str(item.get("name", "")) for item in result.feature_factors),
+        "factor_library_ids": sorted(
+            map(str, result.factor_selection.get("selected_factor_ids", []))
+        ),
     }
     return json.dumps(payload, sort_keys=True, ensure_ascii=True)
 
@@ -982,9 +1123,26 @@ def select_candidate_roles(
     *,
     round_number: int,
     branch_count: int,
+    preferred_role_names: Sequence[str] = (),
+    reserved_role_name: str = "",
 ) -> tuple[CandidateRole, ...]:
     """Allocate fixed tree capacity to evidence-weighted, still-diverse roles."""
     count = max(1, int(branch_count))
+    if round_number <= 1 and preferred_role_names:
+        roles_by_name = {role.name: role for role in DEFAULT_CANDIDATE_ROLES}
+        selected = []
+        for name in preferred_role_names:
+            role = roles_by_name.get(str(name))
+            if role is not None and role not in selected:
+                selected.append(role)
+            if len(selected) >= count:
+                break
+        for role in DEFAULT_CANDIDATE_ROLES:
+            if len(selected) >= count:
+                break
+            if role not in selected:
+                selected.append(role)
+        return tuple(selected)
     if round_number <= 1 or not direction_summary:
         return DEFAULT_CANDIDATE_ROLES[:count]
 
@@ -1050,4 +1208,14 @@ def select_candidate_roles(
                     required_evidence=base.required_evidence,
                 )
             )
+    selected = selected[:count]
+    reserved = next(
+        (role for role in DEFAULT_CANDIDATE_ROLES if role.name == reserved_role_name),
+        None,
+    )
+    if reserved is not None and reserved not in selected:
+        if selected:
+            selected[-1] = reserved
+        else:
+            selected.append(reserved)
     return tuple(selected)

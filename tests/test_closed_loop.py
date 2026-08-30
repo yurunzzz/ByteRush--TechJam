@@ -54,20 +54,22 @@ class FakeManager:
                         "patience": 1,
                         "stage1_validation_iterations": 1,
                         "baseline_tuning_iterations": 2,
+                        "stage2_num_seeds": 2,
                         "candidate_branches": 2,
                         "candidate_parallel_workers": 2,
                         "stage3_generation_attempts": 2,
-                        "candidate_tuning_iterations": 2,
-                        "candidate_refinement_top_k": 2,
+                        "candidate_tuning_top_k": 2,
+                        "candidate_tuning_iterations": 1,
+                        "candidate_refinement_top_k": 1,
                         "candidate_refinement_iterations": 2,
-                        "candidate_finalist_top_k": 2,
-                        "finalist_top_k": 2,
-                        "finalist_num_seeds": 3,
-                        "final_confirmation_num_seeds": 5,
-                        "ablation_candidate_top_k": 2,
-                        "ablation_synergy_pairs": 1,
+                        "candidate_finalist_top_k": 1,
+                        "finalist_top_k": 1,
+                        "finalist_num_seeds": 1,
+                        "final_confirmation_num_seeds": 2,
+                        "ablation_candidate_top_k": 1,
+                        "ablation_synergy_pairs": 0,
                         "min_primary_gain": 0.002,
-                        "required_seed_wins": 2,
+                        "required_seed_wins": 1,
                     },
                     "ablation": {"max_components": 1},
                     "final_model_dir": str(output_dir),
@@ -185,7 +187,13 @@ class FakeAgent:
                     f"'change_scope': 'candidate', 'component_dependencies': {{{model_component!r}: [{factor_component!r}]}}, "
                     "'evidence': ["
                     f"{{'source_type': 'dependency', 'reference': 'dependency:model_needs_factor', 'supports': [{factor_component!r}, {model_component!r}]}}]}}\n"
+                    "FACTOR_SELECTION = {"
+                    "'considered_factor_ids': ['causal_recent_history'], "
+                    "'selected_factor_ids': ['causal_recent_history'], "
+                    "'selection_reason': 'the role benefits from a causal compact factor', "
+                    "'rejected_reasons': {}, 'created_factor_cards': []}\n"
                     "FEATURE_FACTORS = [{"
+                    "'library_id': 'causal_recent_history', "
                     f"'name': {output_field!r}, 'raw_fields': ['user_id', 'video_id'], "
                     f"'transform': 'causal role transform', 'output_fields': [{output_field!r}], "
                     "'state_policy': 'train_only_frozen'}]\n"
@@ -391,7 +399,7 @@ class ClosedLoopTests(unittest.TestCase):
 
         self.assertEqual(result["state"].current_round, 2)
         self.assertEqual(result["state"].no_improvement_rounds, 1)
-        self.assertAlmostEqual(result["incumbent"].score, 0.6105)
+        self.assertAlmostEqual(result["incumbent"].score, 0.6095)
         self.assertIn("'factor_causal_history_interest': False", result["incumbent"].node.code)
         self.assertEqual(manager.checkpoint_calls, 2)
         self.assertTrue(
@@ -410,7 +418,7 @@ class ClosedLoopTests(unittest.TestCase):
             )
         )
         self.assertIs(finalized["journal"], result["incumbent"].journal)
-        self.assertEqual(finalized["required_seeds"], 5)
+        self.assertEqual(finalized["required_seeds"], 2)
         self.assertTrue(result["submission"]["checked"])
         self.assertEqual(latest_summary["round_number"], 2)
         self.assertEqual(archived_round_one["round_number"], 1)
@@ -460,7 +468,7 @@ class ClosedLoopTests(unittest.TestCase):
         self.assertIs(result, sentinel)
         runner_type.assert_called_once()
 
-    def test_baseline_gets_five_seed_confirmation_when_no_candidate_improves(self):
+    def test_baseline_gets_configured_seed_confirmation_when_no_candidate_improves(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             manager = FakeManager(
@@ -487,11 +495,11 @@ class ClosedLoopTests(unittest.TestCase):
             result = runner.run()
 
         self.assertEqual(result["state"].current_round, 1)
-        self.assertEqual(len(result["incumbent"].seed_scores), 5)
-        self.assertEqual(len(result["state"].incumbent_seed_scores), 5)
-        self.assertEqual(finalized["required_seeds"], 5)
-        self.assertIn(
-            "4_final_incumbent_confirmation_1_five_seed",
+        self.assertEqual(len(result["incumbent"].seed_scores), 2)
+        self.assertEqual(len(result["state"].incumbent_seed_scores), 2)
+        self.assertEqual(finalized["required_seeds"], 2)
+        self.assertNotIn(
+            "4_final_incumbent_confirmation_1_configured_seeds",
             NoImprovementFakeAgent.created_stage_names,
         )
 

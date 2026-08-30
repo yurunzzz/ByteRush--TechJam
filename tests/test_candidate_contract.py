@@ -10,6 +10,7 @@ from ai_scientist.treesearch.candidate_contract import (
     validate_candidate_contract,
     validate_tuning_contract,
 )
+from ai_scientist.treesearch.factor_library import factor_library_prompt
 
 
 BASE = """
@@ -47,7 +48,15 @@ RESEARCH_MANIFEST = {{
         {{'source_type': 'dependency', 'reference': 'dependency:din_needs_history', 'supports': [{component!r}]}},
     ],
 }}
+FACTOR_SELECTION = {{
+    'considered_factor_ids': ['causal_recent_history', 'user_author_affinity'],
+    'selected_factor_ids': ['causal_recent_history'],
+    'selection_reason': 'causal recent history directly supports target attention',
+    'rejected_reasons': {{'user_author_affinity': 'narrower than the chosen history profile'}},
+    'created_factor_cards': [],
+}}
 FEATURE_FACTORS = [{{
+    'library_id': 'causal_recent_history',
     'name': 'author_history_match',
     'raw_fields': ['user_id', 'author_id', 'time_ms'],
     'transform': 'past-only recent author affinity',
@@ -99,6 +108,16 @@ RESEARCH_MANIFEST = {{
         {{'source_type': 'literature', 'reference': {reference!r}, 'supports': [{component!r}]}},
     ],
 }}
+FACTOR_SELECTION = {{
+    'considered_factor_ids': ['auxiliary_behavior_signal', 'temporal_recency_context'],
+    'selected_factor_ids': [],
+    'selection_reason': 'the controlled objective should isolate loss behavior without new inputs',
+    'rejected_reasons': {{
+        'auxiliary_behavior_signal': 'would confound the objective comparison',
+        'temporal_recency_context': 'not required by this loss hypothesis',
+    }},
+    'created_factor_cards': [],
+}}
 ABLATION_COMPONENTS = {{{component!r}: True}}
 def component_enabled(name):
     return ABLATION_COMPONENTS[name]
@@ -142,6 +161,65 @@ class CandidateContractTests(unittest.TestCase):
         self.assertIn("supports must be a literal non-empty list", prompt)
         self.assertIn("inside the build_features function body", prompt)
         self.assertIn("features['history_author_ids']", prompt)
+        self.assertIn("FACTOR_SELECTION", prompt)
+
+    def test_factor_library_is_considered_without_forcing_selection(self):
+        role = DEFAULT_CANDIDATE_ROLES[2]
+        prompt = role.prompt(
+            1,
+            3,
+            factor_library_context=factor_library_prompt(
+                role_group=role.group,
+                role_category=role.category,
+            ),
+        )
+        code = objective_candidate(
+            role,
+            step_body="""
+        x_tensor = x
+        user_ids = x_tensor[:, 0]
+        for user_id in torch.unique(user_ids):
+            same_user = user_ids == user_id
+""",
+        )
+
+        result = validate_candidate_contract(BASE, code, role)
+
+        self.assertIn("auxiliary_behavior_signal", prompt)
+        self.assertTrue(result.valid, result.reasons)
+        self.assertEqual(result.factor_selection["selected_factor_ids"], [])
+
+    def test_agent_can_create_and_use_a_missing_factor_card(self):
+        role = DEFAULT_CANDIDATE_ROLES[0]
+        code = history_candidate().replace(
+            "['causal_recent_history', 'user_author_affinity']",
+            "['custom_history_diversity']",
+        ).replace(
+            "['causal_recent_history']",
+            "['custom_history_diversity']",
+        ).replace(
+            "'created_factor_cards': []",
+            "'created_factor_cards': [{"
+            "'factor_id': 'custom_history_diversity', "
+            "'semantics': 'past-only diversity of recent interests', "
+            "'helps_when': ['recent history is repetitive'], "
+            "'model_fit': ['gated interest encoder'], "
+            "'avoid_when': ['history is empty'], "
+            "'data_cost': 'low', "
+            "'leakage_rule': 'use only rows before the target'"
+            "}]",
+        ).replace(
+            "'library_id': 'causal_recent_history'",
+            "'library_id': 'custom_history_diversity'",
+        )
+
+        result = validate_candidate_contract(BASE, code, role)
+
+        self.assertTrue(result.valid, result.reasons)
+        self.assertEqual(
+            result.factor_selection["selected_factor_ids"],
+            ["custom_history_diversity"],
+        )
     def test_objective_prompts_state_data_semantics(self):
         ranking_prompt = DEFAULT_CANDIDATE_ROLES[2].prompt(
             3, len(DEFAULT_CANDIDATE_ROLES)
@@ -329,6 +407,23 @@ def run_training():
         self.assertEqual(len(roles), 8)
         self.assertEqual({role.group for role in roles}, set(summary))
         self.assertEqual(len({role.name for role in roles}), 8)
+
+    def test_dynamic_portfolio_reserves_adaptive_slot(self):
+        summary = {
+            "history_interest": {"trials": 1, "mean_gain": 0.004},
+            "objective_and_training": {"trials": 1, "mean_gain": 0.003},
+            "context_interaction": {"trials": 1, "mean_gain": 0.002},
+            "evidence_combination": {"trials": 1, "mean_gain": -0.001},
+        }
+
+        roles = select_candidate_roles(
+            summary,
+            round_number=2,
+            branch_count=3,
+            reserved_role_name="incumbent_extension",
+        )
+
+        self.assertIn("incumbent_extension", [role.name for role in roles])
 
 
 if __name__ == "__main__":

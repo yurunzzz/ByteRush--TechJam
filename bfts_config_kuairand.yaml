@@ -28,8 +28,8 @@ debug:
 
 agent:
   type: parallel
-  num_workers: 3
-  max_workers_per_gpu: 3
+  num_workers: 2
+  max_workers_per_gpu: 2
   max_stage: 4
   stages:
     stage1_max_iters: 2
@@ -46,37 +46,48 @@ agent:
     patience: 2
     stage1_validation_iterations: 2
     baseline_tuning_iterations: 2
+    stage2_num_seeds: 2
     # Match the proven dbcab71 run while retaining evidence-guided selection.
     candidate_branches: 3
-    candidate_parallel_workers: 3
+    # Two manually anchored themes plus one adaptive winner-extension/open slot.
+    initial_candidate_roles:
+      - causal_history_interest
+      - ranking_objective
+      - incumbent_extension
+    reserved_candidate_role: incumbent_extension
+    candidate_parallel_workers: 2
     # The stricter candidate contract needs two spare attempts beyond dbcab71.
-    stage3_generation_attempts: 8
-    # Give every branch two trials, then spend two extra trials only on Top 1.
-    candidate_tuning_iterations: 2
+    # Three first attempts plus two contract/debug retries.
+    stage3_generation_attempts: 5
+    # Reuse the generation score for 3 -> 2 elimination. Top 2 get one
+    # targeted correction; the fixed Top 1 gets most of the parameter budget.
+    candidate_tuning_top_k: 2
+    candidate_tuning_iterations: 1
     candidate_refinement_top_k: 1
-    candidate_refinement_iterations: 2
+    candidate_refinement_iterations: 4
     candidate_finalist_top_k: 1
     finalist_top_k: 1
-    finalist_num_seeds: 3
+    # One screening seed is enough before ablation; final confirmation uses two.
+    finalist_num_seeds: 1
     # Feed the strongest diverse validation-only non-winners into the next
     # Stage 3 round as transferable lessons, never as automatic promotions.
     experience_top_k: 3
     # Preserve parallel Stage 3 execution while avoiding simultaneous
     # PyTorch/CUDA initialization spikes on the single competition GPU.
     stage3_startup_stagger_seconds: 8
-    final_confirmation_num_seeds: 3
+    final_confirmation_num_seeds: 2
     ablation_candidate_top_k: 1
-    ablation_synergy_pairs: 1
+    ablation_synergy_pairs: 0
     min_primary_gain: 0.002
-    required_seed_wins: 2
+    required_seed_wins: 1
   # Stage 4 entry requires both a promotable Stage 3 gain and a literal
   # ABLATION_COMPONENTS manifest in the winning code. Stage 4 runs controlled
-  # leave-one-component-out ablations and three-seed validation before freezing.
+  # leave-one-component-out ablations, then two-seed final confirmation before freezing.
   ablation:
     mode: registered_component_leave_one_out
     min_primary_gain: 0.002
-    num_seeds: 3
-    min_successful_seeds: 3
+    num_seeds: 1
+    min_successful_seeds: 1
     max_components: 2
   final_model_dir: artifacts/comparison_current/final_model
   expose_prediction: false

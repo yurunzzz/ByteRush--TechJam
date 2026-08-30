@@ -69,9 +69,13 @@ class ResearchLoopSettings:
     patience: int = 2
     stage1_validation_iterations: int = 2
     baseline_tuning_iterations: int = 24
+    stage2_num_seeds: int = 3
     candidate_branches: int = 8
+    initial_candidate_roles: list[str] = field(default_factory=list)
+    reserved_candidate_role: str = ""
     candidate_parallel_workers: int = 3
     stage3_generation_attempts: int = 16
+    candidate_tuning_top_k: int = 2
     candidate_tuning_iterations: int = 8
     candidate_refinement_top_k: int = 3
     candidate_refinement_iterations: int = 12

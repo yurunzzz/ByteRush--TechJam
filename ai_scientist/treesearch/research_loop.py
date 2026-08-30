@@ -268,6 +268,11 @@ class ExperimentRecord:
     role: str = ""
     category: str = ""
     improvement: float = 0.0
+    factor_ids: list[str] = field(default_factory=list)
+    considered_factor_ids: list[str] = field(default_factory=list)
+    factor_selection_reason: str = ""
+    factor_rejected_reasons: dict[str, str] = field(default_factory=dict)
+    factor_cards: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -360,6 +365,88 @@ class ExperimentMemory:
     def record_ablation(self, evidence: AblationEvidence) -> None:
         self.ablation_evidence.append(evidence)
 
+    def factor_summary(self) -> dict[str, dict[str, Any]]:
+        """Summarize where each selected library factor helped or failed."""
+        summary: dict[str, dict[str, Any]] = {}
+        for record in self.records:
+            for factor_id in record.considered_factor_ids:
+                item = summary.setdefault(
+                    factor_id,
+                    {
+                        "trials": 0,
+                        "considerations": 0,
+                        "promotions": 0,
+                        "mean_gain": 0.0,
+                        "mean_delta_GAUC": 0.0,
+                        "mean_delta_nDCG@5": 0.0,
+                        "GAUC_observations": 0,
+                        "nDCG@5_observations": 0,
+                        "model_roles": [],
+                        "recent_conditions": [],
+                        "recent_rejections": [],
+                    },
+                )
+                item["considerations"] += 1
+                if factor_id not in record.factor_ids:
+                    rejection = record.factor_rejected_reasons.get(factor_id)
+                    if rejection:
+                        item["recent_rejections"].append(rejection[:180])
+                        item["recent_rejections"] = item["recent_rejections"][-3:]
+                    continue
+                item["trials"] += 1
+                item["promotions"] += int(record.promoted)
+                item["mean_gain"] += record.improvement
+                for metric_name, count_name in (
+                    ("GAUC", "GAUC_observations"),
+                    ("nDCG@5", "nDCG@5_observations"),
+                ):
+                    value = record.metric_deltas.get(metric_name)
+                    if value is None:
+                        continue
+                    item[f"mean_delta_{metric_name}"] += float(value)
+                    item[count_name] += 1
+                if record.role and record.role not in item["model_roles"]:
+                    item["model_roles"].append(record.role)
+                item["recent_conditions"].append(
+                    {
+                        "model_role": record.role,
+                        "candidate_context": record.principal_change[:180],
+                        "selection_reason": record.factor_selection_reason[:180],
+                        "gain": round(record.improvement, 8),
+                        "promoted": record.promoted,
+                    }
+                )
+                item["recent_conditions"] = item["recent_conditions"][-3:]
+        for item in summary.values():
+            trials = int(item["trials"])
+            if trials:
+                item["mean_gain"] /= trials
+            else:
+                item["mean_gain"] = None
+            for metric_name, count_name in (
+                ("GAUC", "GAUC_observations"),
+                ("nDCG@5", "nDCG@5_observations"),
+            ):
+                observations = int(item[count_name])
+                if observations:
+                    item[f"mean_delta_{metric_name}"] /= observations
+                else:
+                    item[f"mean_delta_{metric_name}"] = None
+        discovered = self.discovered_factor_cards()
+        for factor_id, item in summary.items():
+            if factor_id in discovered:
+                item["self_description"] = discovered[factor_id]
+        return summary
+
+    def discovered_factor_cards(self) -> dict[str, dict[str, Any]]:
+        cards: dict[str, dict[str, Any]] = {}
+        for record in self.records:
+            for card in record.factor_cards:
+                factor_id = str(card.get("factor_id", ""))
+                if factor_id.startswith("custom_"):
+                    cards[factor_id] = dict(card)
+        return cards
+
     def direction_summary(self) -> dict[str, dict[str, float]]:
         """Aggregate validation evidence without letting it replace promotion."""
         summary: dict[str, dict[str, float]] = {}
@@ -446,6 +533,7 @@ class ExperimentMemory:
         )[:limit]
         payload = {
             "direction_summary": self.direction_summary(),
+            "factor_library_evidence": self.factor_summary(),
             "cross_branch_validation": [
                 {
                     "category": item.category,
@@ -477,6 +565,8 @@ class ExperimentMemory:
             "records": [asdict(record) for record in self.records],
             "ablation_evidence": [asdict(item) for item in self.ablation_evidence],
             "direction_summary": self.direction_summary(),
+            "factor_library_evidence": self.factor_summary(),
+            "discovered_factor_cards": self.discovered_factor_cards(),
             "failed_hypotheses": list(self.failed_hypotheses),
         }
 
@@ -487,9 +577,13 @@ class ResearchLoopConfig:
     patience: int = 2
     stage1_validation_iterations: int = 2
     baseline_tuning_iterations: int = 24
+    stage2_num_seeds: int = 3
     candidate_branches: int = 8
+    initial_candidate_roles: tuple[str, ...] = ()
+    reserved_candidate_role: str = ""
     candidate_parallel_workers: int = 3
     stage3_generation_attempts: int = 16
+    candidate_tuning_top_k: int = 2
     candidate_tuning_iterations: int = 8
     candidate_refinement_top_k: int = 3
     candidate_refinement_iterations: int = 12
@@ -508,11 +602,14 @@ def research_loop_config_from_mapping(raw: Any) -> ResearchLoopConfig:
     values = {}
     for item in fields(ResearchLoopConfig):
         getter = getattr(raw, "get", None)
-        values[item.name] = (
+        value = (
             getter(item.name, item.default)
             if callable(getter)
             else getattr(raw, item.name, item.default)
         )
+        if item.name == "initial_candidate_roles":
+            value = tuple(value or ())
+        values[item.name] = value
     return ResearchLoopConfig(**values)
 
 
@@ -522,7 +619,7 @@ def estimate_max_experiment_runs(
     stage4_max_components: int,
 ) -> dict[str, int]:
     """Return the explicit worst-case execution budget for one full run."""
-    stage2_seed_runs = config.finalist_top_k * config.finalist_num_seeds
+    stage2_seed_runs = config.finalist_top_k * config.stage2_num_seeds
     candidate_seed_runs = config.candidate_finalist_top_k * config.finalist_num_seeds
     candidate_refinement_runs = (
         config.candidate_refinement_top_k * config.candidate_refinement_iterations
@@ -540,7 +637,7 @@ def estimate_max_experiment_runs(
     )
     per_research_round = (
         config.stage3_generation_attempts
-        + config.candidate_branches * config.candidate_tuning_iterations
+        + config.candidate_tuning_top_k * config.candidate_tuning_iterations
         + candidate_refinement_runs
         + candidate_seed_runs
         + stage4_ablation_runs
@@ -549,7 +646,7 @@ def estimate_max_experiment_runs(
     )
     per_round_search = (
         config.stage3_generation_attempts
-        + config.candidate_branches * config.candidate_tuning_iterations
+        + config.candidate_tuning_top_k * config.candidate_tuning_iterations
         + candidate_refinement_runs
         + stage4_ablation_runs
     )
@@ -635,6 +732,11 @@ class ResearchLoopState:
         components: Sequence[str] = (),
         role: str = "",
         category: str = "",
+        factor_ids: Sequence[str] = (),
+        considered_factor_ids: Sequence[str] = (),
+        factor_selection_reason: str = "",
+        factor_rejected_reasons: Optional[Mapping[str, str]] = None,
+        factor_cards: Sequence[Mapping[str, Any]] = (),
     ) -> PromotionDecision:
         if not self.round_open:
             raise RuntimeError("start_round must be called before evaluating candidates")
@@ -704,6 +806,11 @@ class ResearchLoopState:
                 role=role,
                 category=category,
                 improvement=decision.improvement,
+                factor_ids=list(factor_ids),
+                considered_factor_ids=list(considered_factor_ids or factor_ids),
+                factor_selection_reason=factor_selection_reason,
+                factor_rejected_reasons=dict(factor_rejected_reasons or {}),
+                factor_cards=[dict(item) for item in factor_cards],
             )
         )
         if decision.promoted and (
