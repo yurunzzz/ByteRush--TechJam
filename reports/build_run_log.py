@@ -65,8 +65,39 @@ def best_metric(run: Path):
             if best is None or v > best[0]:
                 seg = txt[max(0, m.start() - 220): m.start() + 60]
                 g, n = P_GAUC.search(seg), P_NDCG.search(seg)
-                best = (v, float(g.group(1)) if g else None, float(n.group(1)) if n else None)
+                nid = re.search(r"experiment_([0-9a-f]{8,})", hf)
+                best = (v, float(g.group(1)) if g else None, float(n.group(1)) if n else None,
+                        nid.group(1) if nid else None, hf)
     return best
+
+
+def best_stage(run: Path, node_id, hist_path):
+    """Which BFTS stage the run's best result came from.
+
+    Exact when the peak node is a saved best_solution (or its history path names a
+    real stage_N); otherwise approximate — the deepest selected stage in the run.
+    Returns (stage_int|None, exact:bool).
+    """
+    # node_id -> stage from saved best_solution files (highest stage wins)
+    node_stage = {}
+    for p in glob.glob(str(run / "**/stage_*/best_solution_*.py"), recursive=True):
+        ms = re.search(r"stage_([1-4])", p)
+        mn = re.search(r"best_solution_([0-9a-f]{8,})\.py", p)
+        if ms and mn:
+            node_stage[mn.group(1)] = max(int(ms.group(1)), node_stage.get(mn.group(1), 0))
+    if node_id and node_id in node_stage:
+        return node_stage[node_id], True
+    if hist_path:
+        m = re.search(r"/stage_([1-4])", hist_path)          # node sits directly under a stage dir
+        if m:
+            return int(m.group(1)), True
+    if node_stage:                                            # peak is an intermediate node
+        return max(node_stage.values()), False
+    if hist_path:
+        m = re.search(r"0-kuairand_stage([1-4])", hist_path)  # early-run exp name
+        if m:
+            return int(m.group(1)), False
+    return None, False
 
 
 def detect_architecture(run: Path):
@@ -144,6 +175,7 @@ def extract_run(run: Path) -> dict:
         "llm_total_tokens": None, "llm_calls": None, "models": {},
         "executed_iters": None, "seed_evals": None, "gpu_peak_mib": None,
         "best_primary": None, "best_gauc": None, "best_ndcg": None,
+        "best_stage": None, "best_stage_exact": None,
         "architecture": None, "stage_reached": None,
         "run_started_utc": None, "run_finished_utc": None,
     }
@@ -166,7 +198,9 @@ def extract_run(run: Path) -> dict:
             d["error"] = str(e)
     bm = best_metric(run)
     if bm:
-        d["best_primary"], d["best_gauc"], d["best_ndcg"] = bm
+        d["best_primary"], d["best_gauc"], d["best_ndcg"], nid, hpath = bm
+        st, exact = best_stage(run, nid, hpath)
+        d["best_stage"], d["best_stage_exact"] = st, exact
     d["architecture"], d["stage_reached"] = detect_architecture(run)
     return d
 
@@ -293,10 +327,11 @@ def render_markdown(ledger: dict, min_seconds: float) -> str:
 
     L.append("## Per-run ledger")
     L.append("")
-    L.append("Chronological. `Primary` = best validation node in that run. `vs prev` compares to the previous scored run. "
-             "Shipped submissions use a more conservative 3-seed mean.")
+    L.append("Chronological. `Primary` = best validation node in that run. `Stage` = which BFTS stage that node "
+             "came from (`S3` exact; `~S3` approximate — peak was an intermediate node, so the deepest selected "
+             "stage is shown). `vs prev` compares to the previous scored run. Shipped submissions use a 3-seed mean.")
     L.append("")
-    hdr = ["Start", "Architecture / change", "Dur", "Train", "Tokens", "Calls", "Iters", "Seeds", "Primary", "vs base", "vs prev"]
+    hdr = ["Start", "Architecture / change", "Dur", "Train", "Tokens", "Calls", "Iters", "Seeds", "Primary", "Stage", "vs base", "vs prev"]
     L.append("| " + " | ".join(hdr) + " |")
     L.append("|" + "|".join(["---"] * len(hdr)) + "|")
     for r in shown:
@@ -305,13 +340,15 @@ def render_markdown(ledger: dict, min_seconds: float) -> str:
         if r.get("_fm_cluster"):
             arch = f"FM baseline level — {r['_fm_cluster']} early runs collapsed"
         prim = f"{r['best_primary']:.4f}" if r.get("best_primary") is not None else "—"
+        st = r.get("best_stage")
+        stage_cell = "—" if st is None else (f"S{st}" if r.get("best_stage_exact") else f"~S{st}")
         row = [
             start, arch, fmt_secs(r.get("duration_s")), fmt_secs(r.get("training_s")),
             fmt_tokens(r.get("llm_total_tokens")),
             str(r.get("llm_calls") or "—"),
             str(r.get("executed_iters") if r.get("executed_iters") is not None else "—"),
             str(r.get("seed_evals") if r.get("seed_evals") is not None else "—"),
-            f"`{prim}`", fmt_delta(r.get("_vs_base")), fmt_delta(r.get("_vs_prev")),
+            f"`{prim}`", stage_cell, fmt_delta(r.get("_vs_base")), fmt_delta(r.get("_vs_prev")),
         ]
         L.append("| " + " | ".join(row) + " |")
     L.append("")
