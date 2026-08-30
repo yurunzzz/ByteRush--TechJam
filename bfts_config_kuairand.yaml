@@ -34,26 +34,28 @@ agent:
   stages:
     stage1_max_iters: 2
     stage2_max_iters: 2
-    stage3_max_iters: 12
-    stage4_max_iters: 8
+    stage3_max_iters: 8
+    stage4_max_iters: 3
   steps: 1
   k_fold_validation: 1
   multi_seed_eval:
-    num_seeds: 1
+    num_seeds: 3
   research_loop:
     enabled: true
-    # Two rounds expose the Stage 4 -> next Stage 3 feedback path without
-    # turning the first comparison run into an overnight search.
     max_research_rounds: 2
     patience: 2
     stage1_validation_iterations: 2
     baseline_tuning_iterations: 2
+    # Match the proven dbcab71 run while retaining evidence-guided selection.
     candidate_branches: 3
     candidate_parallel_workers: 3
-    # At most 6 generation runs + 3 branches * 2 tuning runs = 12 Stage 3
-    # search runs, matching the teammate pipeline's Stage 3 budget.
-    stage3_generation_attempts: 6
+    # The stricter candidate contract needs two spare attempts beyond dbcab71.
+    stage3_generation_attempts: 8
+    # Give every branch two trials, then spend two extra trials only on Top 1.
     candidate_tuning_iterations: 2
+    candidate_refinement_top_k: 1
+    candidate_refinement_iterations: 2
+    candidate_finalist_top_k: 1
     finalist_top_k: 1
     finalist_num_seeds: 3
     # Feed the strongest diverse validation-only non-winners into the next
@@ -62,6 +64,9 @@ agent:
     # Preserve parallel Stage 3 execution while avoiding simultaneous
     # PyTorch/CUDA initialization spikes on the single competition GPU.
     stage3_startup_stagger_seconds: 8
+    final_confirmation_num_seeds: 3
+    ablation_candidate_top_k: 1
+    ablation_synergy_pairs: 1
     min_primary_gain: 0.002
     required_seed_wins: 2
   # Stage 4 entry requires both a promotable Stage 3 gain and a literal
@@ -72,8 +77,8 @@ agent:
     min_primary_gain: 0.002
     num_seeds: 3
     min_successful_seeds: 3
-    max_components: 6
-  final_model_dir: artifacts/final_model
+    max_components: 2
+  final_model_dir: artifacts/comparison_current/final_model
   expose_prediction: false
   data_preview: false
   code:

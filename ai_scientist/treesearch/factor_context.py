@@ -156,6 +156,12 @@ def build_factor_context(
         f"- Basic video columns: {', '.join(headers['video_basic'])}",
         f"- Current literal FIELDS: {', '.join(encoded_fields) or 'defined inside the candidate builder'}",
         f"- Current registered components: {', '.join(components) or 'none'}",
+        "- Exact runtime split type: dict[str, list[tuple]]. It is not a pandas DataFrame and has no sort_values/groupby methods.",
+        "- Each official raw tuple is exactly (date:int, user_id:str, video_id:str, author_id:str, tab:str, duration_ms:float, long_view:int).",
+        "- Tuple indices are 0=date, 1=user_id, 2=video_id, 3=author_id, 4=tab, 5=duration_ms, 6=long_view label.",
+        "- CSV columns not listed in that tuple, including time_ms, are not automatically present in splits. Do not assume header names are row attributes.",
+        "- For vectorized indexing, explicitly convert a split list with numpy or use list comprehensions; never apply a numpy index array directly to a Python list.",
+        "- build_features must preserve the incumbent return contract: encoded split -> (X int32 shape (N,F), y float32 shape (N,), users list), feature_dimension int, feature_state mapping.",
         "- Prioritized unused factor directions:",
     ]
     lines.extend(f"  {index}. {name}: {description}" for index, (name, description) in enumerate(prioritized[:4], 1))

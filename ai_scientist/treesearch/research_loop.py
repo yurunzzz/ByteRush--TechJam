@@ -265,12 +265,33 @@ class ExperimentRecord:
     principal_change: str = "unspecified controlled change"
     components: list[str] = field(default_factory=list)
     stage4_confirmed: Optional[bool] = None
+    role: str = ""
+    category: str = ""
+    improvement: float = 0.0
+
+
+@dataclass
+class AblationEvidence:
+    round_number: int
+    candidate_id: str
+    component: str
+    category: str
+    full_score: float
+    ablated_score: float
+    primary_contribution: float
+    seed_wins: int
+    verdict: str
+    gauc_contribution: Optional[float] = None
+    ndcg5_contribution: Optional[float] = None
+    interaction_with: list[str] = field(default_factory=list)
+    synergy: Optional[float] = None
 
 
 @dataclass
 class ExperimentMemory:
     fingerprints: set[str] = field(default_factory=set)
     records: list[ExperimentRecord] = field(default_factory=list)
+    ablation_evidence: list[AblationEvidence] = field(default_factory=list)
     failed_hypotheses: list[str] = field(default_factory=list)
 
     def register_candidate(self, fingerprint: str) -> bool:
@@ -316,7 +337,7 @@ class ExperimentMemory:
             record
             for record in self.records
             if record.score is not None
-            and record.stage4_confirmed is not True
+            and record.stage4_confirmed is None
             and "duplicate code/config/feature fingerprint" not in record.reason
             and (round_number is None or record.round_number == round_number)
         ]
@@ -336,28 +357,150 @@ class ExperimentMemory:
                 break
         return selected
 
+    def record_ablation(self, evidence: AblationEvidence) -> None:
+        self.ablation_evidence.append(evidence)
+
+    def direction_summary(self) -> dict[str, dict[str, float]]:
+        """Aggregate validation evidence without letting it replace promotion."""
+        summary: dict[str, dict[str, float]] = {}
+        for record in self.records:
+            if not record.category:
+                continue
+            item = summary.setdefault(
+                record.category,
+                {
+                    "trials": 0.0,
+                    "promotions": 0.0,
+                    "mean_gain": 0.0,
+                    "ablation_trials": 0.0,
+                    "ablation_gain": 0.0,
+                },
+            )
+            item["trials"] += 1.0
+            item["promotions"] += float(record.promoted)
+            item["mean_gain"] += record.improvement
+        for evidence in self.ablation_evidence:
+            if evidence.category:
+                item = summary.setdefault(
+                    evidence.category,
+                    {
+                        "trials": 0.0,
+                        "promotions": 0.0,
+                        "mean_gain": 0.0,
+                        "ablation_trials": 0.0,
+                        "ablation_gain": 0.0,
+                    },
+                )
+                item["ablation_trials"] += 1.0
+                item["ablation_gain"] += evidence.primary_contribution
+        for item in summary.values():
+            if item["trials"]:
+                item["mean_gain"] /= item["trials"]
+            if item["ablation_trials"]:
+                item["ablation_gain"] /= item["ablation_trials"]
+        return summary
+
+    def prompt_evidence(self, category: str, *, limit: int = 6) -> str:
+        """Return compact environment-grounded feedback for one candidate role."""
+        records = [item for item in self.records if item.category == category][-limit:]
+        ablations = [
+            item for item in self.ablation_evidence if item.category == category
+        ][-limit:]
+        payload = {
+            "recent_validation": [
+                {
+                    "role": item.role,
+                    "improvement": round(item.improvement, 8),
+                    "promoted": item.promoted,
+                    "reason": item.reason,
+                }
+                for item in records
+            ],
+            "recent_ablation": [
+                {
+                    "component": item.component,
+                    "primary_contribution": round(item.primary_contribution, 8),
+                    "verdict": item.verdict,
+                    "interaction_with": item.interaction_with,
+                    "synergy": item.synergy,
+                }
+                for item in ablations
+            ],
+        }
+        return json.dumps(payload, sort_keys=True, ensure_ascii=True)
+
+    def portfolio_lessons(self, *, limit: int = 6) -> str:
+        """Compress cross-branch outcomes without replaying raw logs."""
+        ranked_records = sorted(
+            self.records,
+            key=lambda item: item.improvement,
+            reverse=True,
+        )
+        most_informative = ranked_records[:limit]
+        if len(ranked_records) > limit:
+            most_informative += ranked_records[-min(2, limit):]
+        ranked_ablations = sorted(
+            self.ablation_evidence,
+            key=lambda item: abs(item.primary_contribution),
+            reverse=True,
+        )[:limit]
+        payload = {
+            "direction_summary": self.direction_summary(),
+            "cross_branch_validation": [
+                {
+                    "category": item.category,
+                    "role": item.role,
+                    "improvement": round(item.improvement, 8),
+                    "promoted": item.promoted,
+                    "reason": item.reason,
+                }
+                for item in most_informative
+            ],
+            "component_and_synergy_lessons": [
+                {
+                    "category": item.category,
+                    "component": item.component,
+                    "primary_contribution": round(item.primary_contribution, 8),
+                    "verdict": item.verdict,
+                    "interaction_with": item.interaction_with,
+                    "synergy": item.synergy,
+                }
+                for item in ranked_ablations
+            ],
+            "recent_implementation_failures": self.failed_hypotheses[-4:],
+        }
+        return json.dumps(payload, sort_keys=True, ensure_ascii=True)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "fingerprints": sorted(self.fingerprints),
             "records": [asdict(record) for record in self.records],
+            "ablation_evidence": [asdict(item) for item in self.ablation_evidence],
+            "direction_summary": self.direction_summary(),
             "failed_hypotheses": list(self.failed_hypotheses),
         }
 
 
 @dataclass(frozen=True)
 class ResearchLoopConfig:
-    max_research_rounds: int = 3
-    patience: int = 3
+    max_research_rounds: int = 4
+    patience: int = 2
     stage1_validation_iterations: int = 2
-    baseline_tuning_iterations: int = 20
-    candidate_branches: int = 3
-    candidate_parallel_workers: int = 1
-    stage3_generation_attempts: int = 12
-    candidate_tuning_iterations: int = 12
+    baseline_tuning_iterations: int = 24
+    candidate_branches: int = 8
+    candidate_parallel_workers: int = 3
+    stage3_generation_attempts: int = 16
+    candidate_tuning_iterations: int = 8
+    candidate_refinement_top_k: int = 3
+    candidate_refinement_iterations: int = 12
+    candidate_finalist_top_k: int = 2
     finalist_top_k: int = 3
     finalist_num_seeds: int = 3
     experience_top_k: int = 3
     stage3_startup_stagger_seconds: float = 0.0
+    final_confirmation_num_seeds: int = 5
+    ablation_candidate_top_k: int = 2
+    ablation_synergy_pairs: int = 3
 
 
 def research_loop_config_from_mapping(raw: Any) -> ResearchLoopConfig:
@@ -380,25 +523,34 @@ def estimate_max_experiment_runs(
 ) -> dict[str, int]:
     """Return the explicit worst-case execution budget for one full run."""
     stage2_seed_runs = config.finalist_top_k * config.finalist_num_seeds
-    candidate_seed_runs = (
-        config.candidate_branches
-        * config.finalist_top_k
+    candidate_seed_runs = config.candidate_finalist_top_k * config.finalist_num_seeds
+    candidate_refinement_runs = (
+        config.candidate_refinement_top_k * config.candidate_refinement_iterations
+    )
+    stage4_variants = stage4_max_components + config.ablation_synergy_pairs
+    stage4_ablation_runs = config.ablation_candidate_top_k * stage4_variants
+    stage4_seed_runs = (
+        config.ablation_candidate_top_k
+        * (stage4_variants + 1)
         * config.finalist_num_seeds
     )
-    stage4_ablation_runs = stage4_max_components
-    stage4_seed_runs = (
-        stage4_max_components + 1
-    ) * config.finalist_num_seeds
+    final_confirmation_runs = (
+        config.ablation_candidate_top_k
+        * config.final_confirmation_num_seeds
+    )
     per_research_round = (
         config.stage3_generation_attempts
         + config.candidate_branches * config.candidate_tuning_iterations
+        + candidate_refinement_runs
         + candidate_seed_runs
         + stage4_ablation_runs
         + stage4_seed_runs
+        + final_confirmation_runs
     )
     per_round_search = (
         config.stage3_generation_attempts
         + config.candidate_branches * config.candidate_tuning_iterations
+        + candidate_refinement_runs
         + stage4_ablation_runs
     )
     maximum_search_iterations = (
@@ -417,6 +569,7 @@ def estimate_max_experiment_runs(
         "stage2_tuning": config.baseline_tuning_iterations,
         "stage2_seed_evaluation": stage2_seed_runs,
         "per_research_round": per_research_round,
+        "final_confirmation_per_round": final_confirmation_runs,
         "maximum_search_iterations": maximum_search_iterations,
         "maximum_total": total,
     }
@@ -435,6 +588,7 @@ class ResearchLoopState:
     incumbent_metrics: dict[str, Optional[float]] = field(default_factory=dict)
     pending_candidate_id: Optional[str] = None
     pending_candidate_score: Optional[float] = None
+    eligible_candidate_ids: set[str] = field(default_factory=set)
     round_open: bool = False
     round_improved: bool = False
 
@@ -453,6 +607,7 @@ class ResearchLoopState:
         )
         self.pending_candidate_id = None
         self.pending_candidate_score = None
+        self.eligible_candidate_ids.clear()
 
     def start_round(self) -> int:
         if self.round_open:
@@ -462,6 +617,7 @@ class ResearchLoopState:
         self.current_round += 1
         self.pending_candidate_id = None
         self.pending_candidate_score = None
+        self.eligible_candidate_ids.clear()
         self.round_open = True
         self.round_improved = False
         return self.current_round
@@ -477,6 +633,8 @@ class ResearchLoopState:
         seed_metrics: Sequence[Mapping[str, Optional[float]]] = (),
         principal_change: str = "unspecified controlled change",
         components: Sequence[str] = (),
+        role: str = "",
+        category: str = "",
     ) -> PromotionDecision:
         if not self.round_open:
             raise RuntimeError("start_round must be called before evaluating candidates")
@@ -543,6 +701,9 @@ class ResearchLoopState:
                 seed_wins=decision.seed_wins,
                 principal_change=principal_change,
                 components=list(components),
+                role=role,
+                category=category,
+                improvement=decision.improvement,
             )
         )
         if decision.promoted and (
@@ -555,6 +716,8 @@ class ResearchLoopState:
         ):
             self.pending_candidate_id = node_id
             self.pending_candidate_score = decision.candidate_mean
+        if decision.promoted:
+            self.eligible_candidate_ids.add(node_id)
         return decision
 
     def accept_pending_candidate(
@@ -568,11 +731,19 @@ class ResearchLoopState:
     ) -> PromotionDecision:
         if not self.round_open:
             raise RuntimeError("there is no open research round")
-        if node_id != self.pending_candidate_id:
-            raise ValueError("only the promoted candidate can replace the incumbent")
+        if node_id not in self.eligible_candidate_ids:
+            raise ValueError("only a promoted Stage 3 candidate can replace the incumbent")
         if self.incumbent_score is None:
             raise RuntimeError("incumbent must exist before final confirmation")
-        decision = self.policy.evaluate(
+        confirmation_policy = PromotionPolicy(
+            min_improvement=self.policy.min_improvement,
+            required_seeds=self.config.final_confirmation_num_seeds,
+            required_seed_wins=math.ceil(
+                self.config.final_confirmation_num_seeds / 2
+            ),
+            maximize=self.policy.maximize,
+        )
+        decision = confirmation_policy.evaluate(
             candidate_score=score,
             incumbent_score=self.incumbent_score,
             candidate_seed_scores=seed_scores,
@@ -584,6 +755,7 @@ class ResearchLoopState:
             )
             self.pending_candidate_id = None
             self.pending_candidate_score = None
+            self.eligible_candidate_ids.discard(node_id)
             return decision
         self.memory.mark_stage4_confirmation(
             node_id, confirmed=True, reason=decision.reason

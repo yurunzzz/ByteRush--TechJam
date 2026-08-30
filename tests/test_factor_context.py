@@ -37,6 +37,12 @@ class FactorContextTests(unittest.TestCase):
         self.assertIn("outcome-derived history at the end of train", context)
         self.assertIn("forbidden inputs", context)
         self.assertIn("video_features_statistic_pure.csv as unsafe", context)
+        self.assertIn("dict[str, list[tuple]]", context)
+        self.assertIn("0=date, 1=user_id", context)
+        self.assertIn("5=duration_ms, 6=long_view label", context)
+        self.assertIn("not automatically present in splits", context)
+        self.assertIn("never apply a numpy index array directly to a Python list", context)
+        self.assertIn("X int32 shape (N,F)", context)
 
 
 if __name__ == "__main__":

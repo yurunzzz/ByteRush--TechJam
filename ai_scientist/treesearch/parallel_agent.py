@@ -10,6 +10,12 @@ from queue import Queue
 import logging
 import humanize
 from .backend import FunctionSpec, compile_prompt_to_md, query
+from .candidate_contract import (
+    config_assignment,
+    literal_assignment,
+    restore_dynamic_config_fields,
+    validate_tuning_contract,
+)
 from .interpreter import ExecutionResult
 from .journal import Journal, Node
 from .utils import data_preview
@@ -598,6 +604,16 @@ class MinimalAgent:
 
     @property
     def _prompt_resp_fmt(self):
+        if _is_kuairand_task(self.task_desc):
+            return {
+                "Response format": (
+                    "Return a concise 4-7 sentence implementation plan stating the "
+                    "hypothesis, exact data flow, changed model/loss path, and protected "
+                    "invariants. Then return exactly one complete markdown Python code "
+                    "block. Do not expose private chain-of-thought, add headings, omit "
+                    "unchanged code, or include a second alternative."
+                )
+            }
         return {
             "Response format": (
                 "Your response should be a brief outline/sketch of your proposed solution in natural language (7-10 sentences), "
@@ -804,10 +820,15 @@ class MinimalAgent:
                 [
                     "This is tuning of one fixed candidate, not a new research idea.",
                     "Change only literal values inside CONFIG. Preserve the supplied feature, model, training, evaluation, ablation, checkpoint, and inference implementations.",
+                    "Implement exactly one complete CONFIG proposal from the tuning idea; do not run an internal grid, random search, or Optuna study inside this node.",
+                    "Copy the full parent program and change no symbol outside CONFIG or the required research metadata.",
+                    "Keep CONFIG['seed'] runtime-controlled by AI_SCIENTIST_SEED; never replace its expression with a fixed integer.",
                 ]
             )
         prompt["Instructions"] |= self._prompt_hyperparam_tuning_resp_fmt
         plan, code = self.plan_and_code_query(prompt)
+        if _is_kuairand_task(self.task_desc):
+            code = restore_dynamic_config_fields(parent_node.code, code)
         return Node(
             plan="Hyperparam tuning name: " + hyperparam_idea.name + ".\n" + plan,
             code=code,
@@ -1392,6 +1413,7 @@ class ParallelAgent:
         tuning_base_node=None,
         research_base_node=None,
         max_search_workers=None,
+        candidate_contexts=None,
     ):
         super().__init__()
         self.task_desc = task_desc
@@ -1408,6 +1430,7 @@ class ParallelAgent:
             best_stage2_node  # to initialize plotting code (stage 3)
         )
         self.research_base_node = research_base_node
+        self.candidate_contexts = list(candidate_contexts or [])
         self.tuning_base_node = tuning_base_node or best_stage1_node
         self.is_hyperparam_tuning = _is_hyperparam_tuning_stage(
             stage_name, tuning_base_node
@@ -1464,12 +1487,18 @@ class ParallelAgent:
         }
         self._hyperparam_tuning_state = {  # store hyperparam tuning ideas
             "tried_hyperparams": set(),
+            "tried_configurations": [],
         }
 
     def _maybe_stagger_stage3_start(self, submitted: int, total: int) -> None:
         """Stagger child initialization without serializing experiment runtime."""
         if (
-            self.num_gpus == 1
+            getattr(
+                self,
+                "num_gpus",
+                getattr(self.gpu_manager, "num_gpus", 0),
+            )
+            == 1
             and self.stage_name
             and self.stage_name.startswith("3_")
             and self.stage3_startup_stagger_seconds > 0
@@ -1567,7 +1596,6 @@ class ParallelAgent:
 
         # Submit parallel jobs for different seeds
         seed_nodes = []
-        futures = []
         use_stage_default = num_seeds is None
         if use_stage_default:
             num_seeds = int(self.cfg.agent.multi_seed_eval.num_seeds)
@@ -1575,92 +1603,86 @@ class ParallelAgent:
                 ablation_cfg = self.cfg.agent.get("ablation", {})
                 num_seeds = int(ablation_cfg.get("num_seeds", num_seeds))
         num_seeds = int(num_seeds)
-        for seed in range(num_seeds):
-            node_data = copy.deepcopy(base_node_data)
-            gpu_id = None
-            process_id = None
-            if self.gpu_manager is not None:
-                try:
-                    process_id = f"seed_{seed}_worker"
+        # Run more seeds than GPU slots in batches. This avoids silently sending
+        # overflow seeds to CPU while preserving all requested independent seeds.
+        batch_size = max(1, self.num_workers)
+        for batch_start in range(0, num_seeds, batch_size):
+            futures = []
+            for seed in range(batch_start, min(num_seeds, batch_start + batch_size)):
+                node_data = copy.deepcopy(base_node_data)
+                gpu_id = None
+                process_id = f"seed_{seed}_worker"
+                if self.gpu_manager is not None:
                     gpu_id = self.gpu_manager.acquire_gpu(process_id)
                     logger.info(f"Assigned GPU {gpu_id} to seed {seed}")
-                except RuntimeError as e:
-                    logger.warning(
-                        f"Could not acquire GPU for seed {seed}: {e}. Running on CPU"
-                    )
 
-            # Add seed after any future import. Prepending executable statements
-            # makes valid files containing ``from __future__`` fail with a
-            # SyntaxError. The environment variable also lets experiment
-            # templates that use explicit constructor seeds consume this value.
-            seed_code = (
-                f"\n# Set random seed\nimport os\nimport random\nimport numpy as np\n"
-                f"seed = {seed}\nos.environ['AI_SCIENTIST_SEED'] = str(seed)\n"
-                "random.seed(seed)\nnp.random.seed(seed)\n"
-                "try:\n"
-                "    import torch\n"
-                "    torch.manual_seed(seed)\n"
-                "    if torch.cuda.is_available():\n"
-                "        torch.cuda.manual_seed_all(seed)\n"
-                "except ImportError:\n"
-                "    pass\n\n"
-            )
-            future_line = "from __future__ import annotations\n"
-            if future_line in node_code:
-                insert_at = node_code.index(future_line) + len(future_line)
-                node_data["code"] = node_code[:insert_at] + seed_code + node_code[insert_at:]
-            else:
-                node_data["code"] = seed_code + node_code
-
-            new_ablation_idea = None
-            new_hyperparam_idea = None
-            best_stage1_plot_code = None
-            best_stage2_plot_code = None
-            best_stage3_plot_code = None
-            seed_eval = True
-            memory_summary = ""
-            print("[yellow]Starting multi-seed eval...[/yellow]")
-            futures.append(
-                (
-                    self.executor.submit(
-                        self._process_node_wrapper,
-                        node_data,
-                        self.task_desc,
-                        self.cfg,
-                        gpu_id,
-                        memory_summary,
-                        self.evaluation_metrics,
-                        self.stage_name,
-                        new_ablation_idea,
-                        new_hyperparam_idea,
-                        best_stage1_plot_code,
-                        best_stage2_plot_code,
-                        best_stage3_plot_code,
-                        seed_eval,
-                    ),
-                    process_id,
+                # Insert seed initialization after a future import when present.
+                seed_code = (
+                    f"\n# Set random seed\nimport os\nimport random\nimport numpy as np\n"
+                    f"seed = {seed}\nos.environ['AI_SCIENTIST_SEED'] = str(seed)\n"
+                    "random.seed(seed)\nnp.random.seed(seed)\n"
+                    "try:\n"
+                    "    import torch\n"
+                    "    torch.manual_seed(seed)\n"
+                    "    if torch.cuda.is_available():\n"
+                    "        torch.cuda.manual_seed_all(seed)\n"
+                    "except ImportError:\n"
+                    "    pass\n\n"
                 )
-            )
-            self._maybe_stagger_stage3_start(len(futures), num_seeds)
+                future_line = "from __future__ import annotations\n"
+                if future_line in node_code:
+                    insert_at = node_code.index(future_line) + len(future_line)
+                    node_data["code"] = (
+                        node_code[:insert_at]
+                        + seed_code
+                        + node_code[insert_at:]
+                    )
+                else:
+                    node_data["code"] = seed_code + node_code
 
-        for future, process_id in futures:
-            try:
-                result_data = future.result(timeout=self.timeout)
-                result_node = Node.from_dict(result_data, self.journal)
-                print(f"Parent node id: {result_node.parent.id}")
-                print(f"Sanity check: actual parent node id: {node.id}")
-                # Add node to journal's list and assign its step number
-                self.journal.append(result_node)
-                seed_nodes.append(self.journal.get_node_by_id(result_node.id))
-                print("Added result node to journal")
-            except Exception as e:
-                logger.error(f"Error in multi-seed evaluation: {str(e)}")
-            finally:
-                if (
-                    self.gpu_manager is not None
-                    and process_id in self.gpu_manager.gpu_assignments
-                ):
-                    self.gpu_manager.release_gpu(process_id)
+                print("[yellow]Starting multi-seed eval...[/yellow]")
+                futures.append(
+                    (
+                        self.executor.submit(
+                            self._process_node_wrapper,
+                            node_data,
+                            self.task_desc,
+                            self.cfg,
+                            gpu_id,
+                            "",
+                            self.evaluation_metrics,
+                            self.stage_name,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            True,
+                        ),
+                        process_id,
+                    )
+                )
+                self._maybe_stagger_stage3_start(
+                    batch_start + len(futures), num_seeds
+                )
+
+            for future, process_id in futures:
+                try:
+                    result_data = future.result(timeout=self.timeout)
+                    result_node = Node.from_dict(result_data, self.journal)
+                    print(f"Parent node id: {result_node.parent.id}")
+                    print(f"Sanity check: actual parent node id: {node.id}")
+                    self.journal.append(result_node)
+                    seed_nodes.append(self.journal.get_node_by_id(result_node.id))
+                    print("Added result node to journal")
+                except Exception as e:
+                    logger.error(f"Error in multi-seed evaluation: {str(e)}")
+                finally:
+                    if (
+                        self.gpu_manager is not None
+                        and process_id in self.gpu_manager.gpu_assignments
+                    ):
+                        self.gpu_manager.release_gpu(process_id)
 
         return seed_nodes
 
@@ -2229,6 +2251,9 @@ class ParallelAgent:
         Stage 2 tunes FM; explicit tuning agents tune one fixed Stage 3 candidate.
         """
         tried = list(self._hyperparam_tuning_state["tried_hyperparams"])
+        tried_configs = list(
+            self._hyperparam_tuning_state["tried_configurations"]
+        )
         tuning_scope = (
             "the fixed FM baseline"
             if self.stage_name and self.stage_name.startswith("2_")
@@ -2238,27 +2263,37 @@ class ParallelAgent:
         hyperparam_tuning_prompt = {
             "Introduction": (
                 f"You are tuning {tuning_scope}. "
-                "Based on the current implementation and previous hyperparameter tuning attempts (if any), "
-                "propose ONE new hyperparameter tuning idea to see if it improves the performance."
-                "You should first check if simply training longer (more epochs) improves the performance."
-                "Then try tuning common hyperparameters such as learning rate, batch size, etc."
-                "Only propose algorithm-specific and/or model-specific hyperparameters after you have tried the above."
+                "Propose ONE complete CONFIG for the next sequential experiment. "
+                "Use the scored history to choose either a broad coarse-search point or "
+                "a local refinement point, as requested by the current stage."
             ),
             "Base code you are working on": wrap_code(self.tuning_base_node.code),
             "Previous Hyperparam Tuning Attempts": {
                 "Has been tried": tried if tried else "Nothing has been tried yet.",
+                "Executed configurations and validation scores": (
+                    json.dumps(
+                        tried_configs,
+                        sort_keys=True,
+                        ensure_ascii=True,
+                        default=str,
+                    )
+                    if tried_configs
+                    else "Nothing has been executed yet."
+                ),
             },
             "Instructions": {
                 "Requirements": [
-                    "1. Identify ONE specific hyperparameter to tune",
-                    "2. Ensure the hyperparameter is different from previous attempts",
+                    "1. Give the complete values to change inside CONFIG",
+                    "2. Do not repeat any previously executed complete CONFIG",
                     "3. Preserve the model architecture, feature builder, loss, and data split",
                     "4. Return one complete runnable configuration, not an internal sweep",
+                    "5. Related parameters may move together when their interaction is clear; this is still one configuration",
+                    "6. Keep epochs at or below 12 and rely on early stopping",
                 ]
             },
             "Response format": (
-                "Your response should start with 'HYPERPARAM NAME: <hyperparam name>' on the first line to represent the name of the hyperparameter."
-                "The second line should start with 'DESCRIPTION: <description>', a brief description of what hyperparameter is being tuned and why (3-5 sentences). "
+                "Your response should start with 'HYPERPARAM NAME: config_<short unique id>' on the first line. "
+                "The second line should start with 'DESCRIPTION: <description>' and list the exact CONFIG values plus why this point is informative (2-4 sentences). "
             ),
         }
 
@@ -2555,7 +2590,7 @@ class ParallelAgent:
 
         print("Submitting tasks to process pool")
         futures = []
-        for node_data in node_data_list:
+        for task_index, node_data in enumerate(node_data_list):
             gpu_id = None
             if self.gpu_manager is not None:
                 try:
@@ -2599,11 +2634,18 @@ class ParallelAgent:
                 self.best_stage3_node.plot_code if self.best_stage3_node else None
             )
             seed_eval = False
+            worker_task_desc = self.task_desc
+            if self.research_base_node is not None and self.candidate_contexts:
+                context = self.candidate_contexts[
+                    task_index % len(self.candidate_contexts)
+                ]
+                worker_task_desc += "\n\n" + context
+
             futures.append(
                 self.executor.submit(
                     self._process_node_wrapper,
                     node_data,
-                    self.task_desc,
+                    worker_task_desc,
                     self.cfg,
                     gpu_id,
                     memory_summary,
@@ -2637,6 +2679,7 @@ class ParallelAgent:
                 # Journal acts as a database to look up a parent node,
                 # and add the result node as a child.
                 result_node = Node.from_dict(result_data, self.journal)
+                self._validate_tuning_result(result_node)
                 print("[red]Investigating if result node has metric[/red]", flush=True)
                 print(result_node.metric)
                 # Update hyperparam tuning state if in Stage 2
@@ -2740,9 +2783,39 @@ class ParallelAgent:
 
         if not result_node.is_buggy:
             self._hyperparam_tuning_state["tried_hyperparams"].add(hyperparam_name)
+            config = config_assignment(result_node.code)
+            score = None
+            try:
+                score = result_node.metric.get_mean_value()
+            except (AttributeError, TypeError, ValueError):
+                pass
+            self._hyperparam_tuning_state["tried_configurations"].append(
+                {"config": config, "validation_primary": score}
+            )
             logger.info(f"Hyperparam tuning {hyperparam_name} ran successfully")
         else:
             logger.warning(f"Hyperparam tuning {hyperparam_name} failed")
+
+    def _validate_tuning_result(self, result_node: Node) -> None:
+        if not self.is_hyperparam_tuning or result_node.parent is None:
+            return
+        previous = [
+            item.get("config", {})
+            for item in self._hyperparam_tuning_state["tried_configurations"]
+            if isinstance(item, dict)
+        ]
+        contract = validate_tuning_contract(
+            result_node.parent.code,
+            result_node.code,
+            tried_configs=previous,
+        )
+        if contract.valid:
+            return
+        reason = "Invalid tuning node: " + "; ".join(contract.reasons)
+        result_node.is_buggy = True
+        result_node.metric = WorstMetricValue()
+        result_node.analysis = reason
+        logger.warning(reason)
 
     def _update_ablation_state(self, result_node: Node):
         """Update ablation tracking state based on execution results.

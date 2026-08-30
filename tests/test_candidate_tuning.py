@@ -1,7 +1,10 @@
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from ai_scientist.treesearch.journal import Journal, Node
+from ai_scientist.treesearch.candidate_contract import config_assignment
+from ai_scientist.treesearch.backend import compile_prompt_to_md
 from ai_scientist.treesearch.parallel_agent import (
     GPUManager,
     HyperparamTuningIdea,
@@ -35,6 +38,54 @@ class CandidateTuningTests(unittest.TestCase):
         self.assertEqual(manager.acquire_gpu("worker-4"), 0)
         self.assertEqual(manager.gpu_loads[0], 3)
 
+    def test_five_seed_evaluation_runs_in_gpu_sized_batches(self):
+        class ImmediateFuture:
+            def __init__(self, value):
+                self.value = value
+
+            def result(self, timeout=None):
+                return self.value
+
+        class ImmediateExecutor:
+            def submit(self, fn, *args):
+                return ImmediateFuture(fn(*args))
+
+        parent = _good_node("MODEL = 'candidate'\n")
+        journal = Journal(nodes=[parent])
+        manager = GPUManager(num_gpus=1, max_workers_per_gpu=3)
+        concurrent_assignments = []
+        acquire_gpu = manager.acquire_gpu
+
+        def tracked_acquire(process_id):
+            gpu_id = acquire_gpu(process_id)
+            concurrent_assignments.append(len(manager.gpu_assignments))
+            return gpu_id
+
+        manager.acquire_gpu = tracked_acquire
+        agent = object.__new__(ParallelAgent)
+        agent.cfg = SimpleNamespace()
+        agent.stage_name = "final_confirmation"
+        agent.num_workers = 3
+        agent.gpu_manager = manager
+        agent.executor = ImmediateExecutor()
+        agent.timeout = 1
+        agent.task_desc = "KuaiRand"
+        agent.evaluation_metrics = None
+        agent.journal = journal
+
+        def process_with_parent(node_data, *args):
+            result = _good_node(node_data["code"], score=0.61)
+            result.parent = parent
+            return result.to_dict()
+
+        agent._process_node_wrapper = process_with_parent
+
+        seeds = agent._run_multi_seed_evaluation(parent, num_seeds=5)
+
+        self.assertEqual(len(seeds), 5)
+        self.assertEqual(max(concurrent_assignments), 3)
+        self.assertEqual(manager.gpu_loads, {0: 0})
+
     def test_stage2_remains_a_tuning_stage(self):
         self.assertTrue(_is_hyperparam_tuning_stage("2_baseline_tuning_1_first", None))
 
@@ -66,6 +117,69 @@ class CandidateTuningTests(unittest.TestCase):
         self.assertIn("build_features(splits, feature_state=None)", guideline)
         self.assertIn("AI_SCIENTIST_INFERENCE_ONLY=1", guideline)
         self.assertEqual(result.code, parent.code)
+
+    def test_kuairand_tuning_node_restores_runtime_seed(self):
+        parent_code = (
+            "import os\n"
+            "CONFIG = {'seed': int(os.environ.get('AI_SCIENTIST_SEED', '0')), "
+            "'learning_rate': 0.001, 'max_epochs': 40}\n"
+        )
+        proposed = parent_code.replace(
+            "int(os.environ.get('AI_SCIENTIST_SEED', '0'))",
+            "0",
+        ).replace("'max_epochs': 40", "'max_epochs': 12")
+        parent = _good_node(parent_code)
+        agent = object.__new__(MinimalAgent)
+        agent.task_desc = "KuaiRand-Pure validation primary and nDCG@5"
+        agent.plan_and_code_query = lambda prompt: ("plan", proposed)
+
+        result = agent._generate_hyperparam_tuning_node(
+            parent,
+            HyperparamTuningIdea("epochs", "tune CONFIG"),
+        )
+        config = config_assignment(result.code)
+
+        self.assertIn("__ast_expression__", config["seed"])
+        self.assertEqual(config["max_epochs"], 12)
+
+    def test_scored_config_history_compiles_for_next_tuning_idea(self):
+        base = _good_node("CONFIG = {'learning_rate': 0.001}\n")
+        agent = object.__new__(ParallelAgent)
+        agent.stage_name = "2_baseline_tuning_1_closed_loop"
+        agent.tuning_base_node = base
+        agent._hyperparam_tuning_state = {
+            "tried_hyperparams": {"config_baseline_001"},
+            "tried_configurations": [
+                {
+                    "config": {
+                        "seed": {"__ast_expression__": "runtime seed"},
+                        "learning_rate": 0.001,
+                    },
+                    "validation_primary": 0.6016,
+                }
+            ],
+        }
+        agent.cfg = SimpleNamespace(
+            agent=SimpleNamespace(
+                code=SimpleNamespace(model="test-model", temp=0.0)
+            )
+        )
+
+        def compile_then_answer(system_message, **kwargs):
+            compiled = compile_prompt_to_md(system_message)
+            self.assertIn("validation_primary", compiled)
+            return (
+                "HYPERPARAM NAME: config_baseline_002\n"
+                "DESCRIPTION: change learning_rate to 0.0005"
+            )
+
+        with patch(
+            "ai_scientist.treesearch.parallel_agent.query",
+            side_effect=compile_then_answer,
+        ):
+            idea = agent._generate_hyperparam_tuning_idea()
+
+        self.assertEqual(idea.name, "config_baseline_002")
 
     def test_explicit_candidate_becomes_the_tuning_parent(self):
         candidate = _good_node("candidate-code")

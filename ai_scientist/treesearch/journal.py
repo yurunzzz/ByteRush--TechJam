@@ -20,6 +20,81 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+
+_SUMMARY_MAX_SUCCESS_NODES = 12
+_SUMMARY_MAX_FAILURE_NODES = 6
+_SUMMARY_BEST_SUCCESS_NODES = 4
+_SUMMARY_PLAN_CHAR_LIMIT = 700
+_SUMMARY_ANALYSIS_CHAR_LIMIT = 1200
+_SUMMARY_CODE_CHAR_LIMIT = 1200
+_SUMMARY_SUCCESS_CHAR_BUDGET = 38000
+_SUMMARY_FAILURE_CHAR_BUDGET = 14000
+
+
+def _trim_summary_text(value: Any, limit: int) -> str:
+    """Keep both the conclusion and context while enforcing an exact char limit."""
+    text = "" if value is None else str(value)
+    if len(text) <= limit:
+        return text
+    if limit < 80:
+        return text[:limit]
+
+    marker = "\n ... [middle content omitted] ... \n"
+    remaining = limit - len(marker)
+    head = remaining // 2
+    tail = remaining - head
+    return f"{text[:head]}{marker}{text[-tail:]}"
+
+
+def _select_summary_nodes(
+    nodes: list[Node],
+    limit: int,
+    best_count: int = 0,
+) -> list[Node]:
+    """Retain metric leaders and recent evidence without replaying the full tree."""
+    if len(nodes) <= limit:
+        return list(nodes)
+
+    selected: list[Node] = []
+    selected_ids: set[str] = set()
+
+    if best_count:
+        ranked = [node for node in nodes if node.metric is not None]
+        try:
+            ranked.sort(key=lambda node: node.metric, reverse=True)
+        except (AssertionError, TypeError, ValueError):
+            ranked = []
+        for node in ranked[:best_count]:
+            selected.append(node)
+            selected_ids.add(node.id)
+
+    for node in reversed(nodes):
+        if node.id in selected_ids:
+            continue
+        selected.append(node)
+        selected_ids.add(node.id)
+        if len(selected) >= limit:
+            break
+
+    return selected
+
+
+def _pack_summary_entries(entries: list[str], total_count: int, budget: int) -> str:
+    header = f"Selected up to {len(entries)} of {total_count} journal nodes.\n"
+    parts = [header]
+    used = len(header)
+    for entry in entries:
+        separator = "\n-------------------------------\n"
+        remaining = budget - used - len(separator)
+        if remaining <= 0:
+            break
+        packed_entry = _trim_summary_text(entry, remaining)
+        parts.extend((separator, packed_entry))
+        used += len(separator) + len(packed_entry)
+        if len(packed_entry) < len(entry):
+            break
+    return "".join(parts)
+
 node_selection_spec = FunctionSpec(
     name="select_best_implementation",
     description="Select the best implementation based on comprehensive analysis",
@@ -516,22 +591,61 @@ class Journal:
             "Failed Experiments": "",
         }
 
-        for node in self.good_nodes:
-            exp_info = f"Design: {node.plan}\n  "
-            exp_info += f"Results: {node.analysis}\n"
+        good_nodes = self.good_nodes
+        buggy_nodes = self.buggy_nodes
+        selected_good_nodes = _select_summary_nodes(
+            good_nodes,
+            _SUMMARY_MAX_SUCCESS_NODES,
+            best_count=_SUMMARY_BEST_SUCCESS_NODES,
+        )
+        selected_buggy_nodes = _select_summary_nodes(
+            buggy_nodes,
+            _SUMMARY_MAX_FAILURE_NODES,
+        )
+
+        successful_entries = []
+        for node in selected_good_nodes:
+            exp_info = f"Node: {node.id} (step {node.step})\n"
+            exp_info += f"Design: {_trim_summary_text(node.plan, _SUMMARY_PLAN_CHAR_LIMIT)}\n"
+            exp_info += (
+                "Results: "
+                f"{_trim_summary_text(node.analysis, _SUMMARY_ANALYSIS_CHAR_LIMIT)}\n"
+            )
             exp_info += f"Metric: {str(node.metric)}\n"
             if include_code:
-                exp_info += f"Code: {node.code}\n"
-            prompt["Successful Experiments"] += exp_info
+                exp_info += (
+                    f"Code: {_trim_summary_text(node.code, _SUMMARY_CODE_CHAR_LIMIT)}\n"
+                )
+            successful_entries.append(exp_info)
 
-        for node in self.buggy_nodes:
-            failure_info = f"Design: {node.plan}\n  "
-            failure_info += f"Error Analysis: {node.analysis}\n"
+        failed_entries = []
+        for node in selected_buggy_nodes:
+            failure_info = f"Node: {node.id} (step {node.step})\n"
+            failure_info += (
+                f"Design: {_trim_summary_text(node.plan, _SUMMARY_PLAN_CHAR_LIMIT)}\n"
+            )
+            failure_info += (
+                "Error Analysis: "
+                f"{_trim_summary_text(node.analysis, _SUMMARY_ANALYSIS_CHAR_LIMIT)}\n"
+            )
             failure_info += f"Error Type: {node.exc_type if hasattr(node, 'exc_type') else 'Unknown'}\n"
             failure_info += f"Debug Depth: {node.debug_depth}\n"
             if include_code:
-                failure_info += f"Code: {node.code}\n"
-            prompt["Failed Experiments"] += failure_info
+                failure_info += (
+                    f"Code: {_trim_summary_text(node.code, _SUMMARY_CODE_CHAR_LIMIT)}\n"
+                )
+            failed_entries.append(failure_info)
+
+        prompt["Successful Experiments"] = _pack_summary_entries(
+            successful_entries,
+            total_count=len(good_nodes),
+            budget=_SUMMARY_SUCCESS_CHAR_BUDGET,
+        )
+        prompt["Failed Experiments"] = _pack_summary_entries(
+            failed_entries,
+            total_count=len(buggy_nodes),
+            budget=_SUMMARY_FAILURE_CHAR_BUDGET,
+        )
 
         summary = query(
             system_message=prompt,

@@ -58,8 +58,14 @@ class FakeManager:
                         "candidate_parallel_workers": 2,
                         "stage3_generation_attempts": 2,
                         "candidate_tuning_iterations": 2,
+                        "candidate_refinement_top_k": 2,
+                        "candidate_refinement_iterations": 2,
+                        "candidate_finalist_top_k": 2,
                         "finalist_top_k": 2,
                         "finalist_num_seeds": 3,
+                        "final_confirmation_num_seeds": 5,
+                        "ablation_candidate_top_k": 2,
+                        "ablation_synergy_pairs": 1,
                         "min_primary_gain": 0.002,
                         "required_seed_wins": 2,
                     },
@@ -115,6 +121,7 @@ class FakeAgent:
         self.tuning_base = kwargs["tuning_base_node"]
         self.research_base = kwargs["research_base_node"]
         self.stage3_base = kwargs["best_stage3_node"]
+        self.candidate_contexts = list(kwargs.get("candidate_contexts") or [])
         self.created_stage_names.append(self.stage_name)
         self.created_task_descs[self.stage_name] = kwargs["task_desc"]
 
@@ -155,10 +162,44 @@ class FakeAgent:
                     score = base_score - 0.001 - index * 0.001
                 else:
                     score = base_score + 0.004 - index * 0.001
-                component = f"factor_{self.stage_name}_{index}"
+                context = self.candidate_contexts[index]
+                role = re.search(r"Candidate role \d+/\d+: ([^\n]+)", context).group(1)
+                group = re.search(r"Major research group: ([^\n]+)", context).group(1)
+                category = re.search(r"Research category: ([^\n]+)", context).group(1)
+                factor_component = f"factor_{role}"
+                model_component = f"model_{role}"
+                output_field = f"feature_{role}"
                 code = (
-                    f"ABLATION_COMPONENTS = {{{component!r}: True}}\n"
-                    f"MODEL = 'candidate_{index}'\n"
+                    "CONFIG = {'learning_rate': 0.001, 'epochs': 6}\n"
+                    "RESEARCH_MANIFEST = {"
+                    f"'candidate_id': {role!r}, 'role': {role!r}, "
+                    f"'group': {group!r}, 'category': {category!r}, "
+                    "'hypothesis': 'role-specific mechanism improves ranking', "
+                    "'mechanism': 'factor consumed by matching model path', "
+                    f"'mechanism_ids': [{role!r}], "
+                    "'modified_symbols': ['build_features', 'create_model'], "
+                    "'expected_metric': ['GAUC', 'nDCG@5'], "
+                    "'tunable_parameters': ['learning_rate'], "
+                    f"'ablation_components': [{factor_component!r}, {model_component!r}], "
+                    "'combination_compatibility': 'model consumes factor', "
+                    f"'change_scope': 'candidate', 'component_dependencies': {{{model_component!r}: [{factor_component!r}]}}, "
+                    "'evidence': ["
+                    f"{{'source_type': 'dependency', 'reference': 'dependency:model_needs_factor', 'supports': [{factor_component!r}, {model_component!r}]}}]}}\n"
+                    "FEATURE_FACTORS = [{"
+                    f"'name': {output_field!r}, 'raw_fields': ['user_id', 'video_id'], "
+                    f"'transform': 'causal role transform', 'output_fields': [{output_field!r}], "
+                    "'state_policy': 'train_only_frozen'}]\n"
+                    f"ABLATION_COMPONENTS = {{{factor_component!r}: True, {model_component!r}: True}}\n"
+                    "def component_enabled(name):\n"
+                    "    return ABLATION_COMPONENTS[name]\n"
+                    "def build_features(splits, feature_state=None):\n"
+                    f"    if component_enabled({factor_component!r}):\n"
+                    f"        output_field = {output_field!r}\n"
+                    "    return splits, feature_state\n"
+                    "def create_model(feature_dimension, config=None):\n"
+                    f"    if component_enabled({model_component!r}):\n"
+                    f"        return ('candidate_{index}', feature_dimension)\n"
+                    "    return ('fm', feature_dimension)\n"
                 )
                 self.journal.append(
                     _node(code, score, parent=self.research_base)
@@ -168,7 +209,7 @@ class FakeAgent:
         if self.stage_name.startswith("3_candidate_tuning"):
             base_score = self.tuning_base.metric.get_mean_value()
             second_round = "round_two" in self.stage_name
-            increment = 0.0005 if second_round else 0.001
+            increment = 0.0 if second_round else 0.001
             for index in range(count):
                 score = base_score + increment * (index + 1)
                 self.journal.append(
@@ -204,9 +245,12 @@ class FakeAgent:
         raise AssertionError(f"unexpected stage {self.stage_name}")
 
     def _run_multi_seed_evaluation(self, node, num_seeds=None):
-        offsets = (-0.0001, 0.0, 0.0001)
+        count = int(num_seeds)
+        offsets = [
+            (index - (count - 1) / 2) * 0.0001 for index in range(count)
+        ]
         results = []
-        for offset in offsets[: int(num_seeds)]:
+        for offset in offsets:
             seed = _node(
                 node.code,
                 node.metric.get_mean_value() + offset,
@@ -240,6 +284,22 @@ class ConcurrentFakeAgent(FakeAgent):
         finally:
             with self.lock:
                 type(self).active_candidate_branches -= 1
+
+
+class NoImprovementFakeAgent(FakeAgent):
+    def step(self, exec_callback, max_nodes=None):
+        before = len(self.journal.nodes)
+        super().step(exec_callback, max_nodes=max_nodes)
+        if not self.stage_name.startswith("3_creative"):
+            return
+
+        base_score = self.research_base.metric.get_mean_value()
+        for index, node in enumerate(self.journal.nodes[before:]):
+            node.metric = MetricValue(
+                value=base_score - 0.004 - index * 0.001,
+                maximize=True,
+                name="validation primary",
+            )
 
 
 class ClosedLoopTests(unittest.TestCase):
@@ -331,15 +391,26 @@ class ClosedLoopTests(unittest.TestCase):
 
         self.assertEqual(result["state"].current_round, 2)
         self.assertEqual(result["state"].no_improvement_rounds, 1)
-        self.assertAlmostEqual(result["incumbent"].score, 0.6085)
-        self.assertIn("'factor_3_creative_research_1_round_one_0': False", result["incumbent"].node.code)
+        self.assertAlmostEqual(result["incumbent"].score, 0.6105)
+        self.assertIn("'factor_causal_history_interest': False", result["incumbent"].node.code)
         self.assertEqual(manager.checkpoint_calls, 2)
-        self.assertIn("4_ablation_studies_1_round_one", FakeAgent.created_stage_names)
+        self.assertTrue(
+            any(
+                name.startswith("4_ablation_studies_1_round_one")
+                for name in FakeAgent.created_stage_names
+            )
+        )
         self.assertGreaterEqual(
             ConcurrentFakeAgent.max_active_candidate_branches, 2
         )
-        self.assertNotIn("4_ablation_studies_1_round_two", FakeAgent.created_stage_names)
+        self.assertFalse(
+            any(
+                name.startswith("4_ablation_studies_1_round_two")
+                for name in FakeAgent.created_stage_names
+            )
+        )
         self.assertIs(finalized["journal"], result["incumbent"].journal)
+        self.assertEqual(finalized["required_seeds"], 5)
         self.assertTrue(result["submission"]["checked"])
         self.assertEqual(latest_summary["round_number"], 2)
         self.assertEqual(archived_round_one["round_number"], 1)
@@ -367,7 +438,7 @@ class ClosedLoopTests(unittest.TestCase):
         ]
         self.assertEqual(len(siblings), 2)
         self.assertIn(
-            "'factor_3_creative_research_1_round_one_0': False",
+            "'factor_causal_history_interest': False",
             root_node.code,
         )
 
@@ -388,6 +459,41 @@ class ClosedLoopTests(unittest.TestCase):
 
         self.assertIs(result, sentinel)
         runner_type.assert_called_once()
+
+    def test_baseline_gets_five_seed_confirmation_when_no_candidate_improves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manager = FakeManager(
+                self._data_dir(root / "starter"),
+                root / "artifacts" / "final_model",
+            )
+            finalized = {}
+
+            def finalizer(journal, **kwargs):
+                finalized["journal"] = journal
+                finalized.update(kwargs)
+                return {"source_stage": kwargs["source_stage"]}
+
+            runner = ClosedLoopRunner(
+                manager,
+                exec_callback=lambda *args: None,
+                agent_factory=NoImprovementFakeAgent,
+                finalizer=finalizer,
+                submission_exporter=lambda **kwargs: {
+                    "path": "submission.csv",
+                    "checked": True,
+                },
+            )
+            result = runner.run()
+
+        self.assertEqual(result["state"].current_round, 1)
+        self.assertEqual(len(result["incumbent"].seed_scores), 5)
+        self.assertEqual(len(result["state"].incumbent_seed_scores), 5)
+        self.assertEqual(finalized["required_seeds"], 5)
+        self.assertIn(
+            "4_final_incumbent_confirmation_1_five_seed",
+            NoImprovementFakeAgent.created_stage_names,
+        )
 
 
 if __name__ == "__main__":

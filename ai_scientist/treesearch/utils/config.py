@@ -65,18 +65,24 @@ class AblationConfig:
 @dataclass
 class ResearchLoopSettings:
     enabled: bool = False
-    max_research_rounds: int = 3
-    patience: int = 3
+    max_research_rounds: int = 4
+    patience: int = 2
     stage1_validation_iterations: int = 2
-    baseline_tuning_iterations: int = 20
-    candidate_branches: int = 3
-    candidate_parallel_workers: int = 1
-    stage3_generation_attempts: int = 12
-    candidate_tuning_iterations: int = 12
+    baseline_tuning_iterations: int = 24
+    candidate_branches: int = 8
+    candidate_parallel_workers: int = 3
+    stage3_generation_attempts: int = 16
+    candidate_tuning_iterations: int = 8
+    candidate_refinement_top_k: int = 3
+    candidate_refinement_iterations: int = 12
+    candidate_finalist_top_k: int = 2
     finalist_top_k: int = 3
     finalist_num_seeds: int = 3
     experience_top_k: int = 3
     stage3_startup_stagger_seconds: float = 0.0
+    final_confirmation_num_seeds: int = 5
+    ablation_candidate_top_k: int = 2
+    ablation_synergy_pairs: int = 3
     min_primary_gain: float = 0.002
     required_seed_wins: int = 2
 
