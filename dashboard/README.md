@@ -1,9 +1,11 @@
 # ByteRush Competition Showcase
 
-The Dashboard is now a frozen competition showcase rather than a live run
-selector. It joins the real server-side `experiments/` and `artifacts/` through
-the final model's `source_node_id`, rejects interrupted runs, and presents one
-auditable champion story.
+The Dashboard is now a frozen, seven-page 16:9 competition showcase rather than
+a live run selector. It joins the real server-side `experiments/` and
+`artifacts/` through the final model's `source_node_id`, rejects interrupted
+runs, and presents one auditable champion story. Use the sticky top navigation,
+normal page scrolling, or the browser's Page Up/Page Down controls to move
+between presentation pages.
 
 ## Data contract
 
@@ -52,6 +54,10 @@ python -m streamlit run dashboard/app.py \
 Use `dashboard/showcase_config.yaml` for presentation copy and to pin the final
 artifact directory. Do not enter metric values in that file; scores always come
 from the verified artifact manifest.
+
+The Search page offers three animated levels of detail: `Champion path`,
+`Curated evidence`, and `Full search`. Hover a node to read its exact Primary,
+GAUC, nDCG@5, status, and node ID.
 
 ## Optional live technical appendix
 
