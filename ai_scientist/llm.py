@@ -86,6 +86,17 @@ def _api_model_name(model: str) -> str:
     return model
 
 
+def _normalize_openai_kwargs(model: str, request_kwargs: dict) -> dict:
+    """Apply the GPT-5.6 Chat Completions parameter contract."""
+    if model.startswith("gpt-5.6"):
+        request_kwargs.pop("temperature", None)
+        if "max_tokens" in request_kwargs:
+            request_kwargs["max_completion_tokens"] = request_kwargs.pop(
+                "max_tokens"
+            )
+    return request_kwargs
+
+
 # Get N responses from a single message, used for ensembling.
 @backoff.on_exception(
     backoff.expo,
@@ -144,7 +155,9 @@ def get_batch_responses_from_llm(
             request_kwargs["extra_body"] = {
                 "thinking": {"type": os.getenv("DEEPSEEK_THINKING", "disabled")}
             }
-        response = client.chat.completions.create(**request_kwargs)
+        response = client.chat.completions.create(
+            **_normalize_openai_kwargs(model, request_kwargs)
+        )
         content = [r.message.content for r in response.choices]
         new_msg_history = [
             new_msg_history + [{"role": "assistant", "content": c}] for c in content
@@ -243,7 +256,9 @@ def make_llm_call(client, model, temperature, system_message, prompt):
             request_kwargs["extra_body"] = {
                 "thinking": {"type": os.getenv("DEEPSEEK_THINKING", "disabled")}
             }
-        return client.chat.completions.create(**request_kwargs)
+        return client.chat.completions.create(
+            **_normalize_openai_kwargs(model, request_kwargs)
+        )
     elif "o1" in model or "o3" in model:
         return client.chat.completions.create(
             model=model,
