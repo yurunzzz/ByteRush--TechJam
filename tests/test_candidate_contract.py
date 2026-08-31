@@ -36,7 +36,7 @@ def create_model(feature_dimension, config=None):
 
 def history_candidate(role_name="causal_history_interest", component="history_factor"):
     return f"""
-CONFIG = {{'learning_rate': 0.001, 'epochs': 6}}
+CONFIG = {{'learning_rate': 0.001, 'epochs': 6, 'batch_size': 8192, 'inference_batch_size': 4096}}
 RESEARCH_MANIFEST = {{
     'candidate_id': 'history_din',
     'role': {role_name!r},
@@ -86,9 +86,16 @@ def build_features(splits, feature_state=None):
         output_field = 'history_author_match'
     return splits, feature_state
 def create_model(feature_dimension, config=None):
+    inference_batch_size = CONFIG['inference_batch_size']
     if component_enabled('din_attention'):
-        return ('din', feature_dimension)
+        return ('din', feature_dimension, inference_batch_size)
     return ('fm', feature_dimension)
+def predict(x, batch_size=None):
+    if batch_size is None:
+        batch_size = CONFIG['inference_batch_size']
+    for start in range(0, len(x), batch_size):
+        pass
+    return x
     """
 
 
@@ -214,6 +221,10 @@ class CandidateContractTests(unittest.TestCase):
         self.assertIn("duplicate or research-family", prompt)
         self.assertIn("user_ids = x_tensor[:, 0]", prompt)
         self.assertIn("exact string literal inside build_features", prompt)
+        self.assertIn("Treat compute feasibility as a required contract", prompt)
+        self.assertIn("inference_batch_size must not exceed", prompt)
+        self.assertIn("Never materialize full-dataset or all-pairs N x N", prompt)
+        self.assertIn("may not bypass the proposed mechanism", prompt)
         self.assertTrue(prompt.rstrip().endswith(build_assignment_marker(
             AUTONOMOUS_STAGE3_ROLE,
             assignment_id="round1:autonomous:2",
@@ -248,12 +259,45 @@ class CandidateContractTests(unittest.TestCase):
         self.assertFalse(over_budget.valid)
         self.assertTrue(any("between 1 and 12" in reason for reason in over_budget.reasons))
 
+    def test_autonomous_resource_contract_rejects_unsafe_prediction_batches(self):
+        valid = autonomous_history_candidate()
+        self.assertTrue(
+            validate_candidate_contract(
+                BASE, valid, AUTONOMOUS_STAGE3_ROLE
+            ).valid
+        )
+
+        oversized = valid.replace(
+            "'inference_batch_size': 4096",
+            "'inference_batch_size': 16384",
+        )
+        oversized_result = validate_candidate_contract(
+            BASE, oversized, AUTONOMOUS_STAGE3_ROLE
+        )
+        self.assertTrue(
+            any("inference_batch_size" in reason for reason in oversized_result.reasons),
+            oversized_result.reasons,
+        )
+
+        hard_coded = valid.replace(
+            "def predict(x, batch_size=None):",
+            "def predict(x, batch_size=65536):",
+        )
+        hard_coded_result = validate_candidate_contract(
+            BASE, hard_coded, AUTONOMOUS_STAGE3_ROLE
+        )
+        self.assertIn(
+            "predict batch_size default exceeds CONFIG inference_batch_size",
+            hard_coded_result.reasons,
+        )
+
     def test_autonomous_family_change_requires_real_model_change(self):
         candidate = autonomous_history_candidate().replace(
             "'model_family': 'fm'", "'model_family': 'dcn'"
         ).replace(
+            "    inference_batch_size = CONFIG['inference_batch_size']\n"
             "    if component_enabled('din_attention'):\n"
-            "        return ('din', feature_dimension)\n"
+            "        return ('din', feature_dimension, inference_batch_size)\n"
             "    return ('fm', feature_dimension)",
             "    return ('fm', feature_dimension)",
         )
@@ -300,7 +344,10 @@ class CandidateContractTests(unittest.TestCase):
             .replace("history_factor", "renamed_factor")
             .replace("'candidate_id': 'history_din'", "'candidate_id': 'renamed'")
         )
-        changed = first.replace("return ('din', feature_dimension)", "return ('dcn', feature_dimension)")
+        changed = first.replace(
+            "return ('din', feature_dimension, inference_batch_size)",
+            "return ('dcn', feature_dimension, inference_batch_size)",
+        )
 
         self.assertEqual(
             candidate_implementation_signature(first),

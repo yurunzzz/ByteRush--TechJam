@@ -14,6 +14,7 @@ from .factor_library import FACTOR_IDS
 
 
 MAX_RESEARCH_PROTOTYPE_EPOCHS = 12
+MAX_RESEARCH_BATCH_SIZE = 8192
 
 
 @dataclass(frozen=True)
@@ -327,6 +328,17 @@ def autonomous_candidate_prompt(
         "construct a same_user equality mask or explicit grouped indices before pair "
         "selection and restrict every positive/negative pair to that relation. Merely "
         "reading user_ids without constructing same-user groups is invalid.\n"
+        "- Treat compute feasibility as a required contract. CONFIG must define "
+        "literal positive batch_size and inference_batch_size integers no greater "
+        f"than {MAX_RESEARCH_BATCH_SIZE}; inference_batch_size must not exceed "
+        "batch_size. CandidateModel.predict and create_model must consume "
+        "inference_batch_size, and predict may not hide a larger hard-coded default.\n"
+        "- Chunk every operation whose memory or work scales with rows, users, or "
+        "items. Never materialize full-dataset or all-pairs N x N tensors. Attention, "
+        "ranking, and history operations must use bounded field axes or local groups, "
+        "not the complete batch or dataset axis. Smoke and formal runs must share the "
+        "same feature, model, prediction, and batching path; smoke may reduce epochs "
+        "but may not bypass the proposed mechanism.\n"
         "- Preserve the trusted split, evaluator, CandidateModel interfaces, checkpoint "
         "round-trip, CUDA placement, and validation-only feedback. Fit all learned "
         "feature state on train only and compute histories causally.\n"
@@ -1348,6 +1360,84 @@ def _ranking_objective_reasons(candidate_code: str) -> list[str]:
     return []
 
 
+def _resource_feasibility_reasons(
+    candidate_code: str,
+    candidate_config: Mapping[str, Any],
+) -> list[str]:
+    reasons: list[str] = []
+    train_batch = candidate_config.get("batch_size")
+    inference_batch = candidate_config.get("inference_batch_size")
+
+    def valid_batch(value: Any) -> bool:
+        return (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and 1 <= value <= MAX_RESEARCH_BATCH_SIZE
+        )
+
+    if not valid_batch(train_batch):
+        reasons.append(
+            "autonomous CONFIG batch_size must be a literal integer between 1 "
+            f"and {MAX_RESEARCH_BATCH_SIZE}"
+        )
+    if not valid_batch(inference_batch):
+        reasons.append(
+            "autonomous CONFIG inference_batch_size must be a literal integer "
+            f"between 1 and {MAX_RESEARCH_BATCH_SIZE}"
+        )
+    if valid_batch(train_batch) and valid_batch(inference_batch):
+        if inference_batch > train_batch:
+            reasons.append(
+                "inference_batch_size must not exceed training batch_size"
+            )
+
+    predict_nodes = _named_function_nodes(candidate_code, "predict")
+    predict_dump = " ".join(
+        ast.dump(node, include_attributes=False) for node in predict_nodes
+    )
+    if not predict_nodes:
+        reasons.append("autonomous candidate has no predict method")
+    elif "inference_batch_size" not in predict_dump:
+        reasons.append(
+            "predict must consume CONFIG inference_batch_size instead of an "
+            "independent hard-coded chunk size"
+        )
+
+    create_dump = function_dump(candidate_code, "create_model") or ""
+    if "inference_batch_size" not in create_dump:
+        reasons.append(
+            "create_model must propagate CONFIG inference_batch_size to the model"
+        )
+
+    if valid_batch(inference_batch):
+        for predict in predict_nodes:
+            positional = list(predict.args.posonlyargs) + list(predict.args.args)
+            defaults = list(predict.args.defaults)
+            default_by_name = {
+                argument.arg: default
+                for argument, default in zip(
+                    positional[-len(defaults) :] if defaults else (),
+                    defaults,
+                )
+            }
+            default = default_by_name.get("batch_size")
+            if default is not None:
+                try:
+                    value = ast.literal_eval(default)
+                except (ValueError, TypeError, SyntaxError):
+                    value = None
+                if (
+                    isinstance(value, int)
+                    and not isinstance(value, bool)
+                    and value > inference_batch
+                ):
+                    reasons.append(
+                        "predict batch_size default exceeds CONFIG "
+                        "inference_batch_size"
+                    )
+    return reasons
+
+
 _AUXILIARY_RAW_FIELDS = {
     "is_click",
     "is_like",
@@ -1590,6 +1680,10 @@ def validate_candidate_contract(
         reasons.append(
             "CONFIG must use a literal max_epochs/epochs integer between 1 and "
             f"{MAX_RESEARCH_PROTOTYPE_EPOCHS}"
+        )
+    if role.autonomous:
+        reasons.extend(
+            _resource_feasibility_reasons(candidate_code, candidate_config)
         )
     model_family = ""
     research_family = ""
