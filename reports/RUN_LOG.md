@@ -1,7 +1,7 @@
 # KuaiRand Agent Run Log
 
 *ByteRush · TechJam — KuaiRand-Pure long_view ranking · primary = mean(GAUC, nDCG@5)*  
-*Auto-generated 2026-08-30 16:56 · 16 rows / 29 scored of 37 launched (8 unscored/aborted hidden, 13 FM-level duplicates collapsed)*
+*Auto-generated 2026-08-31 20:59 · 22 rows / 35 scored of 43 launched (8 unscored/aborted hidden, 13 FM-level duplicates collapsed)*
 
 ## Reference scores (validation)
 
@@ -20,10 +20,10 @@ The bar to beat is **`fm_official`** — `random` is only a sanity check. `oracl
 |---|---|
 | FM baseline (fm_official) | `0.6016` |
 | **Best validation primary** | **`0.6053`** (+0.0037 vs FM baseline · 1.5% of oracle headroom) (2026-08-29 16:09) |
-| Scored runs | 29 of 37 launched |
-| Total LLM tokens | 7.53M across ~1,876 calls |
-| Agent wall-clock | 6.4 h |
-| GPU-active training | 109 min |
+| Scored runs | 35 of 43 launched |
+| Total LLM tokens | 17.28M across ~3,561 calls |
+| Agent wall-clock | 15.6 h |
+| GPU-active training | 200 min |
 
 > **Reality check:** measured against the real FM baseline (`0.6016`), the agent's best is only **+0.0037** — essentially matching the provided FM. Early runs reproduced FM at ~0.6014; later architecture changes (DeepFM, BPR, DIN attention) added <0.004. The '+0.12' figure from an earlier draft compared against `random` and was misleading.
 
@@ -49,14 +49,21 @@ Chronological. `Primary` = best validation node in that run. `Stage` = which BFT
 | 2026-08-30 07:26 | DIN target-attention · BPR pairwise + history | 86m | 51m | 931k | 178 | 25 | 21 | `0.6044` | ~S4 | +0.0028 | +0.0003 |
 | 2026-08-30 15:30 | embedding model · BCE | 27m | 8m | 702k | 176 | 16 | 18 | `0.6040` | ~S4 | +0.0024 | −0.0004 |
 | 2026-08-30 16:17 | Embedding + MLP · BCE | 36m | 13m | 1.02M | 276 | 22 | 27 | `0.6047` | S3 | +0.0031 | +0.0006 |
+| 2026-08-30 17:57 | embedding model · BCE | 4m | 28s | 55k | 16 | 2 | 0 | `0.6017` | S2 | +0.0001 | −0.0030 |
+| 2026-08-30 22:11 | DIN target-attention · BPR pairwise | 82m | 17m | 1.47M | 257 | 46 | 4 | `0.6043` | ~S4 | +0.0027 | +0.0027 |
+| 2026-08-30 23:41 | Embedding + MLP · BPR pairwise | 33m | 4m | 774k | 129 | 25 | 2 | `0.6041` | S1 | +0.0025 | −0.0002 |
+| 2026-08-31 09:52 | embedding model · BCE | 169m | 27m | 3.17M | 446 | 129 | 2 | `0.6044` | S1 | +0.0028 | +0.0003 |
+| 2026-08-31 14:06 | Embedding + MLP · BCE | 172m | 34m | 2.97M | 499 | 93 | 8 | `0.6044` | S3 | +0.0028 | ±0 |
+| 2026-08-31 18:02 | Wide&Deep · BCE | 89m | 9m | 1.31M | 338 | 25 | 17 | `0.6045` | ~S4 | +0.0029 | +0.0001 |
 
 ## Model usage
 
 | Model | Role | Tokens | Calls |
 |---|---|---|---|
-| `deepseek-v4-pro` | plan + code | 3.73M | 406 |
-| `deepseek-v4-flash-vision-exp` | plot / figure reading | 1.92M | 269 |
-| `deepseek-v4-flash` | feedback + select + summary | 1.87M | 1,201 |
+| `gpt-4.1-mini-2025-04-14` | — | 7.45M | 1,283 |
+| `deepseek-v4-pro` | plan + code | 5.33M | 520 |
+| `deepseek-v4-flash` | feedback + select + summary | 2.25M | 1,450 |
+| `deepseek-v4-flash-vision-exp` | plot / figure reading | 2.24M | 308 |
 
 ## Workflow (per run)
 
