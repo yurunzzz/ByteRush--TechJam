@@ -77,6 +77,16 @@ def edit_bfts_config_file(config_path: str, idea_dir: str, idea_path: str) -> st
     os.makedirs(log_dir, exist_ok=True)
     config["log_dir"] = log_dir
 
+    # Final artifacts must belong to this timestamped run.  Leaving the value
+    # relative would resolve it against the repository working directory and
+    # let later runs overwrite an earlier winner.
+    agent_config = config.setdefault("agent", {})
+    final_model_dir = agent_config.get("final_model_dir", "artifacts/final_model")
+    if not osp.isabs(final_model_dir):
+        agent_config["final_model_dir"] = osp.abspath(
+            osp.join(idea_dir, final_model_dir)
+        )
+
     with open(run_config_path, "w") as f:
         yaml.dump(config, f)
     return run_config_path
