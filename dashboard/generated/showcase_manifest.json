@@ -1,0 +1,1430 @@
+{
+  "schema_version": 1,
+  "generated_at": 1788200734.8907611,
+  "project": {
+    "name": "ByteRush",
+    "subtitle": "Autonomous ML Research Agent for Recommender Systems",
+    "competition": "TikTok TechJam",
+    "tagline": "From an FM baseline to a verified, submission-ready ranking model."
+  },
+  "story": {
+    "winner_label": "Wide & Deep",
+    "problem": "Recommendation research is usually a slow manual loop of proposing, coding, training, evaluating, and deciding what to try next.",
+    "solution": "ByteRush turns that loop into an autonomous, evidence-guided search while keeping model selection validation-only.",
+    "winner_summary": "The winning Wide & Deep model combines a memorization path for frequent interactions with a nonlinear path for higher-order feature combinations.",
+    "takeaways": [
+      "Diverse model roots prevented the search from being trapped in the original FM family.",
+      "Controlled tuning promoted Wide & Deep before creative research continued around the new incumbent.",
+      "Multi-seed verification confirmed stability before the model and submission were frozen."
+    ]
+  },
+  "selection": {
+    "run_id": "2026-08-31_18-02-46_kuairand_fm_validation_baseline_attempt_0",
+    "source_node_id": "f032d282bdcc421a92a7576440dda561",
+    "source_stage": "4_final_incumbent_confirmation_1_configured_seeds",
+    "selection_metric": "validation primary mean across seeds",
+    "stage4_verified": true,
+    "successful_seed_count": 5,
+    "complete_candidate_count": 1
+  },
+  "winner": {
+    "label": "Wide & Deep",
+    "model_family": "unknown",
+    "research_family": "architecture",
+    "principal_change": "A wide linear path captures memorized interactions while a deep path learns nonlinear feature combinations.",
+    "baseline": {
+      "node_id": "55c78f62f5904c7dac0255fd8dafce69",
+      "label": "Factorization Machine baseline",
+      "GAUC": 0.6673658490180969,
+      "nDCG@5": 0.5359438061714172,
+      "primary": 0.6016548275947571
+    },
+    "metrics": {
+      "GAUC": {
+        "mean": 0.6710276126861572,
+        "std": 0.00017765266275857568,
+        "values": [
+          0.6708383560180664,
+          0.6712708473205566,
+          0.6708839535713196,
+          0.6712105870246887,
+          0.6709343194961548
+        ]
+      },
+      "nDCG@5": {
+        "mean": 0.5376702547073364,
+        "std": 7.722262394600473e-05,
+        "values": [
+          0.5377732515335083,
+          0.5377140045166016,
+          0.5376704335212708,
+          0.5375397801399231,
+          0.5376538038253784
+        ]
+      },
+      "primary": {
+        "mean": 0.6043489336967468,
+        "std": 7.911618522102806e-05,
+        "values": [
+          0.6043058037757874,
+          0.6044924259185791,
+          0.6042771935462952,
+          0.6043751835823059,
+          0.6042940616607666
+        ]
+      }
+    },
+    "final": {
+      "GAUC": 0.6710276126861572,
+      "nDCG@5": 0.5376702547073364,
+      "primary": 0.6043489336967468
+    },
+    "delta": {
+      "GAUC": 0.0036617636680602583,
+      "nDCG@5": 0.0017264485359191895,
+      "primary": 0.002694106101989724
+    },
+    "relative_delta": {
+      "GAUC": 0.00548689099606738,
+      "nDCG@5": 0.0032213237955902394,
+      "primary": 0.004477826784437158
+    }
+  },
+  "search": {
+    "stages": [
+      {
+        "key": "baseline",
+        "eyebrow": "Stage 1",
+        "title": "Diverse starting points",
+        "total": 4,
+        "succeeded": 4,
+        "failed": 0,
+        "best_node_id": "5fccce3f662e41998da5ba9bab0d9da5"
+      },
+      {
+        "key": "tuning",
+        "eyebrow": "Stage 2",
+        "title": "Controlled tuning",
+        "total": 16,
+        "succeeded": 16,
+        "failed": 0,
+        "best_node_id": "f032d282bdcc421a92a7576440dda561"
+      },
+      {
+        "key": "creative",
+        "eyebrow": "Stage 3",
+        "title": "Creative research",
+        "total": 29,
+        "succeeded": 13,
+        "failed": 16,
+        "best_node_id": "43b551341fee46c7a825093999bd735e"
+      },
+      {
+        "key": "ablation",
+        "eyebrow": "Stage 4",
+        "title": "Ablation & verification",
+        "total": 5,
+        "succeeded": 5,
+        "failed": 0,
+        "best_node_id": "frozen-final-verification",
+        "primary": 0.6043489336967468
+      }
+    ],
+    "nodes": [
+      {
+        "id": "55c78f62f5904c7dac0255fd8dafce69",
+        "parent_id": "",
+        "label": "Execute the organizer-aligned starting implementation …",
+        "stage": "baseline",
+        "stage_number": 1,
+        "primary": 0.6016548275947571,
+        "gauc": 0.6673658490180969,
+        "ndcg": 0.5359438061714172,
+        "status": "succeeded",
+        "hypothesis": "Execute the organizer-aligned starting implementation unchanged. Ask the LLM to debug only if this execution fails.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": true,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "249fdffe09a24be782f1cafba1698583",
+        "parent_id": "55c78f62f5904c7dac0255fd8dafce69",
+        "label": "Replace the FM model with a lightweight MLP that takes…",
+        "stage": "baseline",
+        "stage_number": 1,
+        "primary": 0.5887828469276428,
+        "gauc": 0.6490326523780823,
+        "ndcg": 0.5285330414772034,
+        "status": "succeeded",
+        "hypothesis": "Replace the FM model with a lightweight MLP that takes the same categorical inputs embedded and concatenated, then passes through a small feedforward network to produce logits. Keep the pointwise BCE loss and training loop unchanged. Use the same feature building and evaluation pipeline to ensure comparability. Cap training at 5 epochs per bootstrap constraints. Register the new MLP component and guard its use with ablation flags. This tests if a simple MLP architecture can reproduce or improve baseline ranking metrics under the same data and evaluation constraints.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "5fccce3f662e41998da5ba9bab0d9da5",
+        "parent_id": "55c78f62f5904c7dac0255fd8dafce69",
+        "label": "Replace the FM model with a lightweight Wide & Deep ar…",
+        "stage": "baseline",
+        "stage_number": 1,
+        "primary": 0.6042602360248566,
+        "gauc": 0.6710575222969055,
+        "ndcg": 0.5374629497528076,
+        "status": "succeeded",
+        "hypothesis": "Replace the FM model with a lightweight Wide & Deep architecture that combines a linear (wide) part and a small MLP (deep) part. Keep the same input schema v2 and legacy FM feature encoding for compatibility. Use pointwise BCE loss and preserve the training loop and evaluation protocol unchanged. Cap training epochs to 5 as per bootstrap constraints. Register the new model as an ablation component guarded by `component_enabled`. This change tests if a simple Wide & Deep model can bootstrap ranking improvements while preserving the official validation primary metric and checkpoint interface.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": true,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "11e6b893623e42f98a73f6025059f9f7",
+        "parent_id": "55c78f62f5904c7dac0255fd8dafce69",
+        "label": "Replace the FM model with a lightweight Deep & Cross N…",
+        "stage": "baseline",
+        "stage_number": 1,
+        "primary": 0.6037757694721222,
+        "gauc": 0.6702647805213928,
+        "ndcg": 0.5372867584228516,
+        "status": "succeeded",
+        "hypothesis": "Replace the FM model with a lightweight Deep & Cross Network (DCN) that captures explicit feature crosses with a cross network and nonlinear transformations with a deep network, while preserving the input schema, pointwise BCE loss, and validation-only evaluation. The data flow remains the same: categorical feature IDs input to embedding layers, then fed into the DCN model producing logits for BCE loss. The training loop and checkpointing are unchanged except for a 5-epoch cap per bootstrap constraints. The DCN model is registered as an ablation component and guarded accordingly. This controlled architectural change tests the hypothesis that DCN improves validation ranking metrics over FM under the same protocol.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "000aefb33538452e93078953d8274be6",
+        "parent_id": "55c78f62f5904c7dac0255fd8dafce69",
+        "label": "config_lr0.005_emb32_bs4096",
+        "stage": "tuning",
+        "stage_number": 2,
+        "primary": 0.5981058478355408,
+        "gauc": 0.6619824171066284,
+        "ndcg": 0.5342292785644531,
+        "status": "succeeded",
+        "hypothesis": "Hyperparam tuning name: config_lr0.005_emb32_bs4096.\nI will update the CONFIG dictionary to match the specified hyperparameters: embedding_dim=32, learning_rate=0.005, batch_size=4096, max_epochs=12, l2=1e-6, patience=4, and min_delta=1e-5, while keeping the seed runtime-controlled. No other code changes are needed since the rest of the code already supports these parameters. This will enable training with a larger embedding size, a higher learning rate, and a smaller batch size as requested.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "9196c7192cad4a9582df87ff8f821a5f",
+        "parent_id": "55c78f62f5904c7dac0255fd8dafce69",
+        "label": "config_lr0.002_emb24_bs6144",
+        "stage": "tuning",
+        "stage_number": 2,
+        "primary": 0.6009058952331543,
+        "gauc": 0.6664403676986694,
+        "ndcg": 0.5353714227676392,
+        "status": "succeeded",
+        "hypothesis": "Hyperparam tuning name: config_lr0.002_emb24_bs6144.\nI will implement the requested hyperparameter tuning by modifying only the CONFIG dictionary to use the specified values: learning_rate=0.002, embedding_dim=24, batch_size=6144, max_epochs=12, patience=4, and min_delta=1e-5, while preserving the seed environment variable. The rest of the code remains unchanged to ensure consistent training, evaluation, and checkpointing behavior. This will test a moderate learning rate and embedding size with a balanced batch size and early stopping within 12 epochs.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "e6f8aff81c2e46d0bd51de007adabf11",
+        "parent_id": "55c78f62f5904c7dac0255fd8dafce69",
+        "label": "Seed node",
+        "stage": "tuning",
+        "stage_number": 2,
+        "primary": 0.6016548275947571,
+        "gauc": 0.6673658490180969,
+        "ndcg": 0.5359438061714172,
+        "status": "succeeded",
+        "hypothesis": "Seed node",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": true,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "114bb1add3f4413dbc8fe241f799fef4",
+        "parent_id": "55c78f62f5904c7dac0255fd8dafce69",
+        "label": "Seed node",
+        "stage": "tuning",
+        "stage_number": 2,
+        "primary": 0.6011046469211578,
+        "gauc": 0.666496992111206,
+        "ndcg": 0.5357123017311096,
+        "status": "succeeded",
+        "hypothesis": "Seed node",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": true,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "f032d282bdcc421a92a7576440dda561",
+        "parent_id": "5fccce3f662e41998da5ba9bab0d9da5",
+        "label": "config_lr0.0005_emb32_bs4096",
+        "stage": "tuning",
+        "stage_number": 2,
+        "primary": 0.6043751835823059,
+        "gauc": 0.6712105870246887,
+        "ndcg": 0.5375397801399231,
+        "status": "succeeded",
+        "hypothesis": "Hyperparam tuning name: config_lr0.0005_emb32_bs4096.\nThe tuning involves updating the CONFIG dictionary to reflect the new hyperparameters: learning_rate=0.0005, embedding_dim=32, batch_size=4096, max_epochs=12, while keeping the seed dynamic from the environment variable. The rest of the code remains unchanged to preserve the training, evaluation, and checkpointing logic. This single change will test the specified configuration for improved training stability and model capacity.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": true,
+        "is_promoted": true,
+        "is_final": false
+      },
+      {
+        "id": "f0057fdb20554295bb76e23422850532",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "config_lr0.0003_emb64_bs8192",
+        "stage": "tuning",
+        "stage_number": 2,
+        "primary": 0.604193776845932,
+        "gauc": 0.6709660887718201,
+        "ndcg": 0.537421464920044,
+        "status": "succeeded",
+        "hypothesis": "Hyperparam tuning name: config_lr0.0003_emb64_bs8192.\nThe tuning involves updating the CONFIG dictionary to set the learning rate to 0.0003, embedding dimension to 64, and batch size to 8192, while keeping max_epochs at 12 and early stopping parameters unchanged. No other code changes are needed since the model and training loop already use these config values dynamically. This will allow the model to train with a smaller learning rate, larger embedding capacity, and larger batch size for potentially better generalization and stable convergence.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "f68ea611f8d24e9bbf8e80f97d14eb95",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "config_lr0.0005_emb32_bs4096",
+        "stage": "tuning",
+        "stage_number": 2,
+        "primary": 0.6043751835823059,
+        "gauc": 0.6712105870246887,
+        "ndcg": 0.5375397801399231,
+        "status": "succeeded",
+        "hypothesis": "Seed node",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": true,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "88318ab3b6664adcaec36d405e9684d9",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "config_lr0.0005_emb32_bs4096",
+        "stage": "tuning",
+        "stage_number": 2,
+        "primary": 0.6043058037757874,
+        "gauc": 0.6708383560180664,
+        "ndcg": 0.5377732515335083,
+        "status": "succeeded",
+        "hypothesis": "Seed node",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": true,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "8cffea2f7b1e4afc8094804db3ed36e8",
+        "parent_id": "11e6b893623e42f98a73f6025059f9f7",
+        "label": "config_lr0.005_emb32_l2_1e-5_bs4096",
+        "stage": "tuning",
+        "stage_number": 2,
+        "primary": 0.6007950007915497,
+        "gauc": 0.6661326885223389,
+        "ndcg": 0.5354573130607605,
+        "status": "succeeded",
+        "hypothesis": "Hyperparam tuning name: config_lr0.005_emb32_l2_1e-5_bs4096.\nThe solution is to update the CONFIG dictionary with the specified hyperparameters: learning_rate=0.005, embedding_dim=32, l2=1e-5, batch_size=4096, max_epochs=12, patience=4, and min_delta=1e-5. All other code remains unchanged to preserve the baseline training, evaluation, and checkpointing logic. This will test the effect of a moderately higher learning rate, larger embedding dimension, and stronger L2 regularization with a smaller batch size and longer training patience.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "1e8cd232effd49829c8eb9abdc2a9b20",
+        "parent_id": "11e6b893623e42f98a73f6025059f9f7",
+        "label": "config_lr0.002_emb16_l2_1e-6_bs8192",
+        "stage": "tuning",
+        "stage_number": 2,
+        "primary": 0.6038356125354767,
+        "gauc": 0.6705156564712524,
+        "ndcg": 0.5371555685997009,
+        "status": "succeeded",
+        "hypothesis": "Hyperparam tuning name: config_lr0.002_emb16_l2_1e-6_bs8192.\nI will update the CONFIG dictionary to reflect the specified hyperparameters: learning_rate=0.002, embedding_dim=16, l2=1e-6, batch_size=8192, max_epochs=12, patience=4, and min_delta=1e-5. The seed remains controlled by the environment variable. No other code changes are needed since the existing training loop and model creation already use these config values. This will run the training with the tuned hyperparameters and save the best checkpoint and metrics accordingly.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "dd4c326225c34f5892aa6a0d21aada90",
+        "parent_id": "1e8cd232effd49829c8eb9abdc2a9b20",
+        "label": "config_lr0.002_emb16_l2_1e-6_bs8192",
+        "stage": "tuning",
+        "stage_number": 2,
+        "primary": 0.6038356125354767,
+        "gauc": 0.6705156564712524,
+        "ndcg": 0.5371555685997009,
+        "status": "succeeded",
+        "hypothesis": "Seed node",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": true,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "8451e49e715b4fe999707ebd0339f9e3",
+        "parent_id": "1e8cd232effd49829c8eb9abdc2a9b20",
+        "label": "config_lr0.002_emb16_l2_1e-6_bs8192",
+        "stage": "tuning",
+        "stage_number": 2,
+        "primary": 0.6037800312042236,
+        "gauc": 0.6702643036842346,
+        "ndcg": 0.5372957587242126,
+        "status": "succeeded",
+        "hypothesis": "Seed node",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": true,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "819ac287d84743f081fcd97736772ced",
+        "parent_id": "249fdffe09a24be782f1cafba1698583",
+        "label": "config_001_coarse",
+        "stage": "tuning",
+        "stage_number": 2,
+        "primary": 0.6007205247879028,
+        "gauc": 0.6659416556358337,
+        "ndcg": 0.5354993939399719,
+        "status": "succeeded",
+        "hypothesis": "Hyperparam tuning name: config_001_coarse.\nI will update the CONFIG dictionary to match the specified coarse tuning parameters: embedding_dim=32, learning_rate=0.005, l2=1e-5, batch_size=4096, max_epochs=12, patience=4, and min_delta=1e-5. The seed remains controlled by the environment variable. No other code changes are needed since the existing training loop and model creation already use CONFIG. This will enable a broader search with moderate embedding size and learning rate, longer training with early stopping, and slightly stronger regularization.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "c03faa1d979140f98f05fbf318d29c7c",
+        "parent_id": "819ac287d84743f081fcd97736772ced",
+        "label": "config_002_refined_lr_l2",
+        "stage": "tuning",
+        "stage_number": 2,
+        "primary": 0.6000321209430695,
+        "gauc": 0.6654151082038879,
+        "ndcg": 0.534649133682251,
+        "status": "succeeded",
+        "hypothesis": "Hyperparam tuning name: config_002_refined_lr_l2.\nI will implement the refined hyperparameter configuration by updating the CONFIG dictionary to use a learning rate of 0.003 and L2 regularization of 5e-6, keeping all other parameters unchanged. This will test a gentler optimization step with less weight decay to potentially improve validation metrics. The rest of the code remains identical to preserve the training, evaluation, and checkpointing logic.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "5ae252ae17db44a39ae18af93b310665",
+        "parent_id": "819ac287d84743f081fcd97736772ced",
+        "label": "config_001_coarse",
+        "stage": "tuning",
+        "stage_number": 2,
+        "primary": 0.6007205247879028,
+        "gauc": 0.6659416556358337,
+        "ndcg": 0.5354993939399719,
+        "status": "succeeded",
+        "hypothesis": "Seed node",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": true,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "5fd7714f3b664e30814a7ba2f1ae9f46",
+        "parent_id": "819ac287d84743f081fcd97736772ced",
+        "label": "config_001_coarse",
+        "stage": "tuning",
+        "stage_number": 2,
+        "primary": 0.6012043058872223,
+        "gauc": 0.6660963892936707,
+        "ndcg": 0.5363122224807739,
+        "status": "succeeded",
+        "hypothesis": "Seed node",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": true,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "e70983a1906c4c7e98e27b82a57d4cfd",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "The hypothesis is that adding causal recent user histo…",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": null,
+        "gauc": null,
+        "ndcg": null,
+        "status": "failed",
+        "hypothesis": "The hypothesis is that adding causal recent user history factors and a matching lightweight interest encoder will improve validation ranking metrics (GAUC and nDCG@5). We will extend build_features to attach causal recent history fields using research_data.attach_causal_history, producing new integer ID sequences per sample. The create_model function will instantiate a WideDeepModel variant that embeds these history IDs, applies a simple DIN-style attention mechanism over the recent history embeddings conditioned on the target item embedding, and combines this with the original FM features in a wide & deep manner. The training loss remains pointwise BCE. All new components are guarded by a dedicated ablation component to preserve invariants and allow ablation. The official chronological split, evaluation protocol, and checkpointing remain unchanged.",
+        "analysis": "PREFLIGHT_REJECTED: factor candidate must select at least one library factor; factor candidate has no literal FEATURE_FACTORS entries",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "890fa31e27c54ce1be330043edbfa80c",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "A hybrid pointwise and pairwise ranking objective can …",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": null,
+        "gauc": null,
+        "ndcg": null,
+        "status": "failed",
+        "hypothesis": "A hybrid pointwise and pairwise ranking objective can better align training with the GAUC/nDCG metrics by encouraging correct ordering within the same user. We will implement a new ablation component \"ranking_objective_component\" that replaces the pure BCE loss with a combined BCE + BPR pairwise loss. The BPR loss will be computed over positive-negative pairs sampled within each batch restricted to the same user, using the first feature column as user_id. This preserves the existing FM model architecture and feature inputs but changes the loss path. The training loop will remain unchanged except for the loss computation in step(). All other invariants including data loading, evaluation, checkpointing, and validation primary metric remain protected.",
+        "analysis": "PREFLIGHT_REJECTED: ranking objective extracts users but does not construct same-user groups or equality masks",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "19d942d1e6444349a610c337820a893b",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "Implementation plan: We hypothesize that adding causal…",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": null,
+        "gauc": null,
+        "ndcg": null,
+        "status": "failed",
+        "hypothesis": "Implementation plan:\nWe hypothesize that adding causal recent user history features (e.g., recent author, tag, duration, and recency profiles) and a lightweight DIN-style interest encoder consuming their embeddings will improve validation ranking metrics (GAUC and nDCG@5). We will extend the build_features function to attach these causal history factors using research_data.attach_causal_history, producing new integer ID fields for recent authors and tags, and recency buckets. The CandidateModel will be replaced by a WideDeepModel that embeds these new history features alongside the original 5 fields, concatenates all embeddings, and passes them through a small MLP to produce logits. This new model path will be guarded by a new ablation component 'causal_history_interest_component'. We preserve all existing training, evaluation, checkpointing, and validation protocols, ensuring no leakage by building history only from strictly earlier events and freezing feature state after train. This approach respects the input contract and is expected to improve GAUC primarily by modeling recent user interests.",
+        "analysis": "SMOKE_TEST_REJECTED: {'args': ['splits']}",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "a21c53be82904abdbe041f6a5a3a4082",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "A controlled hybrid ranking objective combining pointw…",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": 0.601217120885849,
+        "gauc": 0.6668737530708313,
+        "ndcg": 0.5355604887008667,
+        "status": "succeeded",
+        "hypothesis": "A controlled hybrid ranking objective combining pointwise BCE and pairwise BPR loss is implemented to better align training with the GAUC/nDCG metrics. The model remains the existing FM embedding architecture, but the loss computation is extended to include a pairwise BPR term computed over same-user positive-negative pairs extracted from the batch. User IDs are read from the first feature column to build masks for valid pairs. The pairwise loss is weighted and added to the BCE loss, guarded by an ablation component. All other training, evaluation, and checkpointing protocols remain unchanged and protected. This approach tests whether adding a pairwise ranking signal improves validation primary metrics without changing model capacity or features.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "6275ce4e67264ef5a1a83f995098e3bd",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "Implementation plan: We hypothesize that adding causal…",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": null,
+        "gauc": null,
+        "ndcg": null,
+        "status": "failed",
+        "hypothesis": "Implementation plan:\nWe hypothesize that adding causal recent user history factors and a matching lightweight interest encoder will improve validation ranking metrics (GAUC, nDCG@5, primary). We will extend build_features to attach causal recent user history (e.g., last 20 interactions) using research_data.attach_causal_history, producing new integer ID fields for recent authors and tags. The CandidateModel will be extended with embeddings for these history features and a simple DIN-style attention mechanism to encode user interest from these histories, combined with the original FM embeddings. This new interest embedding will be integrated into the FM prediction score. The new component will be guarded by a literal ablation component flag. We preserve all existing training, evaluation, checkpointing, and data contracts, ensuring no leakage and causal feature construction from train only. This approach respects the assigned role and mechanism, and expects to improve GAUC primarily by modeling recent user interest.",
+        "analysis": "PREFLIGHT_REJECTED: factor candidate must select at least one library factor; factor candidate has no literal FEATURE_FACTORS entries",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "153c2c73ab3643bf8f6700fbdd0e91ac",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "Implementation plan: We keep the incumbent wide_deep c…",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": 0.6016870737075806,
+        "gauc": 0.6676037907600403,
+        "ndcg": 0.5357703566551208,
+        "status": "succeeded",
+        "hypothesis": "Implementation plan:\nWe keep the incumbent wide_deep candidate as the base model and transfer exactly one donor mechanism: the deep & cross network (DCN) component from the dcn candidate. This involves adding a CrossNetwork module and integrating it with the existing wide and deep embeddings, summing cross and deep outputs plus bias. The new DCN component is guarded by a new ablation component flag `cross_parent_transfer_dcn_1_component` to allow independent ablation. The data flow remains unchanged: input integer feature IDs are embedded, flattened, passed through cross and deep MLP paths, then combined for logits. The training loop, loss (pointwise BCE), evaluation, checkpointing, and validation protocol are preserved. This transfer tests if adding DCN interactions improves validation GAUC and nDCG@5 over the wide_deep baseline without disrupting existing infrastructure.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "4dad9b5ad9ef4b38a35e8f07366eb316",
+        "parent_id": "a21c53be82904abdbe041f6a5a3a4082",
+        "label": "config_emb16_lr001_l2_1e6_bs8192_ep12",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": 0.601217120885849,
+        "gauc": 0.6668737530708313,
+        "ndcg": 0.5355604887008667,
+        "status": "failed",
+        "hypothesis": "Hyperparam tuning name: config_emb16_lr001_l2_1e6_bs8192_ep12.\nI will keep the entire baseline code unchanged except for updating the CONFIG dictionary to the specified tuning parameters: embedding_dim=16, learning_rate=0.001, l2=1e-6, batch_size=8192, max_epochs=12, patience=4, and min_delta=1e-5. This will establish the reference point for this tuning experiment as requested. No other code or logic will be modified.",
+        "analysis": "Invalid tuning node: no literal CONFIG value changed",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "30f41258c9d34a79a7b529d8cca36e17",
+        "parent_id": "153c2c73ab3643bf8f6700fbdd0e91ac",
+        "label": "config_lr0.0005_emb32_l2_1e-5_bs4096",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": 0.6012246906757355,
+        "gauc": 0.6675087213516235,
+        "ndcg": 0.5349406599998474,
+        "status": "succeeded",
+        "hypothesis": "Hyperparam tuning name: config_lr0.0005_emb32_l2_1e-5_bs4096.\nI will update the CONFIG dictionary with the specified hyperparameters: learning_rate=0.0005, embedding_dim=32, l2=1e-5, and batch_size=4096. All other code remains unchanged to preserve the existing training, evaluation, and checkpointing logic. This will implement the requested hyperparameter tuning exactly as specified.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "4f361f47e3f847c7a7bc6ec185b3c165",
+        "parent_id": "153c2c73ab3643bf8f6700fbdd0e91ac",
+        "label": "config_lr0.0005_emb32_bs4096",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": 0.6010046601295471,
+        "gauc": 0.666930079460144,
+        "ndcg": 0.5350792407989502,
+        "status": "succeeded",
+        "hypothesis": "Hyperparam tuning name: config_lr0.0005_emb32_bs4096.\nI will implement the tuning by updating the CONFIG dictionary with the specified hyperparameters: a lower learning rate of 0.0005, an embedding dimension of 32, and a smaller batch size of 4096. All other code remains unchanged to preserve the training, evaluation, and checkpointing logic. The seed remains controlled by the environment variable as before.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "13876fc3b50e46eabe59507c40cbb9b1",
+        "parent_id": "153c2c73ab3643bf8f6700fbdd0e91ac",
+        "label": "config_lr0.001_emb16_bs8192",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": 0.6016870737075806,
+        "gauc": 0.6676037907600403,
+        "ndcg": 0.5357703566551208,
+        "status": "failed",
+        "hypothesis": "Hyperparam tuning name: config_lr0.001_emb16_bs8192.\nThe existing code already uses the desired hyperparameters in the CONFIG dictionary: learning_rate=0.001, embedding_dim=16, batch_size=8192, l2=1e-6, max_epochs=12, patience=4, min_delta=1e-5, and seed from environment or default 0. Thus, no changes are needed beyond confirming these values explicitly in CONFIG. I will keep the rest of the code intact to preserve the baseline implementation and ensure reproducibility. This confirms the baseline performance with the specified tuning configuration.",
+        "analysis": "Invalid tuning node: no literal CONFIG value changed",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "bbc0ead587da40128b16c804f5bca2cf",
+        "parent_id": "13876fc3b50e46eabe59507c40cbb9b1",
+        "label": "The previous implementation incorrectly included a tra…",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": 0.6016548275947571,
+        "gauc": 0.6673658490180969,
+        "ndcg": 0.5359438061714172,
+        "status": "failed",
+        "hypothesis": "The previous implementation incorrectly included a transferred DCN component and associated ablation logic, which is not part of the fixed Factorization Machine baseline required for Stage 1. To fix this, I will revert to the original FM model architecture with embeddings for linear and interaction terms, use BCEWithLogitsLoss as the loss, and remove all DCN-related code and ablation components. The training loop and evaluation will remain unchanged, preserving the official chronological split and evaluation protocol. This ensures the baseline is reproduced exactly as specified.",
+        "analysis": "Invalid tuning node: tuning changed code outside CONFIG or metadata",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "ebe99bfcd11d4884b2cfa5ee1b644bd8",
+        "parent_id": "bbc0ead587da40128b16c804f5bca2cf",
+        "label": "The previous implementation is already a correct and c…",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": 0.6016548275947571,
+        "gauc": 0.6673658490180969,
+        "ndcg": 0.5359438061714172,
+        "status": "failed",
+        "hypothesis": "The previous implementation is already a correct and complete fixed Factorization Machine baseline for the KuaiRand-Pure dataset. It correctly uses the official chronological split, the official evaluation, and the prescribed validation primary metric. It trains with BCEWithLogitsLoss and early stopping on validation primary. The model and training loop are well implemented with proper device handling and checkpointing. No bug is apparent in the provided code or output. Therefore, the fix is to keep the implementation as is, ensuring no changes that break the contract or evaluation. I will provide the same code with no modifications, as it meets all requirements and runs successfully.",
+        "analysis": "Invalid tuning node: no literal CONFIG value changed",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "03f287e263014a57880fb052c49b272f",
+        "parent_id": "153c2c73ab3643bf8f6700fbdd0e91ac",
+        "label": "Seed node",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": 0.6016870737075806,
+        "gauc": 0.6676037907600403,
+        "ndcg": 0.5357703566551208,
+        "status": "succeeded",
+        "hypothesis": "Seed node",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": true,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "43b551341fee46c7a825093999bd735e",
+        "parent_id": "153c2c73ab3643bf8f6700fbdd0e91ac",
+        "label": "Seed node",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": 0.6018489003181458,
+        "gauc": 0.6677365899085999,
+        "ndcg": 0.5359612107276917,
+        "status": "succeeded",
+        "hypothesis": "Seed node",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": true,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "44e69e1084fc481a8c24a0599fa1b2a1",
+        "parent_id": "a21c53be82904abdbe041f6a5a3a4082",
+        "label": "config_lr16emb",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": 0.600340336561203,
+        "gauc": 0.6660882234573364,
+        "ndcg": 0.5345924496650696,
+        "status": "succeeded",
+        "hypothesis": "Hyperparam tuning name: config_lr16emb.\nI will implement the tuning by modifying only the CONFIG dictionary to set embedding_dim to 16 and learning_rate to 0.0015, keeping other parameters as specified. The rest of the code remains unchanged to preserve the baseline functionality and evaluation protocol. This will test if the moderate embedding dimension increase and slightly higher learning rate improve learning without overfitting.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "e81c20415b924c7997090a984c08af2c",
+        "parent_id": "a21c53be82904abdbe041f6a5a3a4082",
+        "label": "config_lr12emb24l2",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": 0.6016433537006378,
+        "gauc": 0.6673271656036377,
+        "ndcg": 0.5359595417976379,
+        "status": "succeeded",
+        "hypothesis": "Hyperparam tuning name: config_lr12emb24l2.\nThe tuning involves updating the CONFIG dictionary with the specified hyperparameters: embedding_dim=24, learning_rate=0.0008, and l2=5e-6, while keeping other parameters unchanged. No other code changes are needed as the model and training loop already use these config values. This will test if the richer embedding space with stronger regularization and a smaller learning rate improves validation metrics within 12 epochs.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "ecdaffc6c2114ae591691075d57a35de",
+        "parent_id": "e81c20415b924c7997090a984c08af2c",
+        "label": "config_lr10emb32l2",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": 0.6012945473194122,
+        "gauc": 0.6666272878646851,
+        "ndcg": 0.5359618067741394,
+        "status": "succeeded",
+        "hypothesis": "Hyperparam tuning name: config_lr10emb32l2.\nThe tuning involves updating the CONFIG dictionary with the specified hyperparameters: embedding_dim=32, learning_rate=0.0010, and l2=1e-5, while keeping other parameters unchanged. The rest of the code remains exactly the same to isolate the effect of these hyperparameters. This will test if a moderate learning rate combined with a larger embedding dimension and slightly stronger L2 regularization improves validation metrics without overfitting.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "4bc753cdaeba4ad7bf3cb29cf32d425f",
+        "parent_id": "e81c20415b924c7997090a984c08af2c",
+        "label": "config_lr09emb28l2",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": 0.6016620397567749,
+        "gauc": 0.6670325398445129,
+        "ndcg": 0.5362915396690369,
+        "status": "succeeded",
+        "hypothesis": "Hyperparam tuning name: config_lr09emb28l2.\nI will implement the requested hyperparameter tuning by updating the CONFIG dictionary to set learning_rate=0.0009, embedding_dim=28, and l2=7e-6, while keeping all other parameters unchanged. The rest of the code remains exactly as provided to ensure reproducibility and isolate the effect of these hyperparameters. This will allow training and evaluation to run with the refined configuration as specified.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "9a10f9cf0c7842f68b6aca00dacc3d19",
+        "parent_id": "4bc753cdaeba4ad7bf3cb29cf32d425f",
+        "label": "config_lr09emb28l2",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": 0.6016620397567749,
+        "gauc": 0.6670325398445129,
+        "ndcg": 0.5362915396690369,
+        "status": "succeeded",
+        "hypothesis": "Seed node",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": true,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "3f4ebf358c0e488e821fdd7389061f71",
+        "parent_id": "4bc753cdaeba4ad7bf3cb29cf32d425f",
+        "label": "config_lr09emb28l2",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": 0.600942999124527,
+        "gauc": 0.666517972946167,
+        "ndcg": 0.535368025302887,
+        "status": "succeeded",
+        "hypothesis": "Seed node",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": true,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "6e94406113244bf9a3de74f3d3a6b06f",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "Implementation plan: We hypothesize that incorporating…",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": null,
+        "gauc": null,
+        "ndcg": null,
+        "status": "failed",
+        "hypothesis": "Implementation plan:\nWe hypothesize that incorporating causal recent user history factors and a matching interest encoder will improve validation ranking metrics (GAUC, nDCG@5, primary). We will extend build_features to attach causal user history (e.g., recent author, tag, duration, recency profiles) using research_data.attach_causal_history, ensuring all history is strictly from past interactions and frozen after training. The CandidateModel will be extended with embedding layers for these new history features and a lightweight DIN-style attention mechanism to encode user interest from the causal history embeddings. This interest representation will be combined with the original FM embeddings to produce the final prediction score. The new component will be guarded by a literal ablation component flag to allow independent enabling/disabling. We preserve the official chronological split, evaluation protocol, and checkpointing, ensuring no leakage or test feedback is used.",
+        "analysis": "PREFLIGHT_REJECTED: declared factor outputs not created literally in build_features: history_author_0, history_author_1, history_author_10, history_author_11, history_author_12, history_author_13, history_author_14, history_author_15, history_author_16, history_author_17, history_author_18, history_author_19, history_author_2, history_author_3, history_author_4, history_author_5, history_author_6, history_author_7, history_author_8, history_author_9, history_duration_0, history_duration_1, history_duration_10, history_duration_11, history_duration_12, history_duration_13, history_duration_14, history_duration_15, history_duration_16, history_duration_17, history_duration_18, history_duration_19, history_duration_2, history_duration_3, history_duration_4, history_duration_5, history_duration_6, history_duration_7, history_duration_8, history_duration_9, history_recency_0, history_recency_1, history_recency_10, history_recency_11, history_recency_12, history_recency_13, history_recency_14, history_recency_15, history_recency_16, history_recency_17, history_recency_18, history_recency_19, history_recency_2, history_recency_3, history_recency_4, history_recency_5, history_recency_6, history_recency_7, history_recency_8, history_recency_9, history_tag_0, history_tag_1, history_tag_10, history_tag_11, history_tag_12, history_tag_13, history_tag_14, history_tag_15, history_tag_16, history_tag_17, history_tag_18, history_tag_19, history_tag_2, history_tag_3, history_tag_4, history_tag_5, history_tag_6, history_tag_7, history_tag_8, history_tag_9",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "6da681832ba34e27a83fadac1b818f81",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "Implementation plan: We hypothesize that replacing the…",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": null,
+        "gauc": null,
+        "ndcg": null,
+        "status": "failed",
+        "hypothesis": "Implementation plan:\nWe hypothesize that replacing the pointwise BCE loss with a hybrid loss combining pointwise BCE and a pairwise Bayesian Personalized Ranking (BPR) loss will improve validation ranking metrics (GAUC and nDCG@5). The data flow remains the same: input features are embedded and scored by the existing FM model architecture. The changed model/loss path adds a pairwise ranking loss computed over positive-negative pairs sampled within the same user, combined with the original BCE loss weighted equally. We extract user IDs from the first feature column to form valid pairs. The pairwise loss is computed only on training data, preserving the official chronological split and no test feedback. The new loss component is guarded by the ablation component \"ranking_objective_component\" to allow ablation. All other training, evaluation, checkpointing, and data invariants remain protected.",
+        "analysis": "PREFLIGHT_REJECTED: ranking objective extracts users but does not construct same-user groups or equality masks",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "8bd5cb97f3d44a83a38c414f5766e6ef",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "Implementation plan:   We hypothesize that adding caus…",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": null,
+        "gauc": null,
+        "ndcg": null,
+        "status": "failed",
+        "hypothesis": "Implementation plan:  \nWe hypothesize that adding causal recent user history factors (author_id, tag, duration, recency) from strictly earlier interactions will improve ranking metrics by capturing dynamic user interests. We will extend `build_features` to attach causal history using `research_data.attach_causal_history` and extract these new fields explicitly, returning them in the legacy FM format. The `CandidateModel` will be replaced with a Wide & Deep model that consumes these new history embeddings concatenated with original features, gated by an ablation component flag. We will preserve the official chronological split, evaluation protocol, and checkpointing. The new component will be guarded by `causal_history_interest_component` to enable ablation studies. This approach respects leakage constraints and focuses on improving GAUC and nDCG@5.",
+        "analysis": "PREFLIGHT_REJECTED: declared factor outputs not created literally in build_features: history_author_0, history_author_1, history_author_2, history_author_3, history_author_4, history_author_5, history_author_6, history_author_7, history_author_8, history_author_9, history_duration_0, history_duration_1, history_duration_2, history_duration_3, history_duration_4, history_duration_5, history_duration_6, history_duration_7, history_duration_8, history_duration_9, history_recency_0, history_recency_1, history_recency_2, history_recency_3, history_recency_4, history_recency_5, history_recency_6, history_recency_7, history_recency_8, history_recency_9, history_tag_0, history_tag_1, history_tag_2, history_tag_3, history_tag_4, history_tag_5, history_tag_6, history_tag_7, history_tag_8, history_tag_9",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "af9baeab8881436d92706f505a723c9f",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "Implementation plan: We hypothesize that replacing the…",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": null,
+        "gauc": null,
+        "ndcg": null,
+        "status": "failed",
+        "hypothesis": "Implementation plan:\nWe hypothesize that replacing the pointwise BCE loss with a hybrid loss combining BCE and a pairwise Bayesian Personalized Ranking (BPR) loss over same-user positive-negative pairs will improve validation ranking metrics (GAUC and nDCG@5). We will extract user IDs from the first feature column to build same-user masks and sample pairs within each batch. The loss will be a weighted sum of pointwise BCE and pairwise BPR, guarded by an ablation component \"ranking_objective_component\". The model architecture remains the incumbent Wide & Deep model. We preserve all data loading, feature building, evaluation, checkpointing, and validation protocols unchanged. This controlled change targets ranking optimization while maintaining reproducibility and evaluation integrity.",
+        "analysis": "PREFLIGHT_REJECTED: ranking objective extracts users but does not construct same-user groups or equality masks",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "ca8ae2cb891f473da5f9bf61e5431628",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "The hypothesis is that adding causal recent user histo…",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": null,
+        "gauc": null,
+        "ndcg": null,
+        "status": "failed",
+        "hypothesis": "The hypothesis is that adding causal recent user history factors (author, tag, duration, recency) constructed strictly from past interactions and consumed by a lightweight DIN-style interest encoder will improve validation ranking metrics. The data flow extends `build_features` to attach these causal history fields using `research_data.attach_causal_history` and encode them as integer IDs and floats. The model is extended with embedding layers for these history features and a simple attention-based interest encoder producing a dense vector concatenated with the original FM embeddings before the final FM interaction and linear terms. This new path is guarded by the `causal_history_interest_component` ablation flag. All existing invariants are preserved: no leakage, official splits, evaluation, checkpointing, and training protocols remain unchanged.",
+        "analysis": "PREFLIGHT_REJECTED: factor candidate must select at least one library factor; factor candidate has no literal FEATURE_FACTORS entries",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "1af8ad890122404e8b8b0f8e319a76d2",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "Implementation plan: We hypothesize that replacing the…",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": 0.6012503504753113,
+        "gauc": 0.6669681668281555,
+        "ndcg": 0.535532534122467,
+        "status": "succeeded",
+        "hypothesis": "Implementation plan:\nWe hypothesize that replacing the pointwise BCE loss with a hybrid loss combining pointwise BCE and a pairwise Bayesian Personalized Ranking (BPR) loss over same-user positive-negative pairs will improve validation ranking metrics (GAUC and nDCG@5). We will extract user IDs from the first feature column, build same-user masks to identify valid positive-negative pairs within each batch, and compute the BPR loss on these pairs. The final loss is a weighted sum of BCE and BPR losses, controlled by a hyperparameter. This new loss path is guarded by the ablation component 'ranking_objective_component'. We preserve all other training, evaluation, checkpointing, and data invariants, including the use of long_view as the primary target and the official chronological split.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "4e031cafc74d437c9ad20723e2599d6d",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "Implementation plan: We implement a controlled hybrid …",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": null,
+        "gauc": null,
+        "ndcg": null,
+        "status": "failed",
+        "hypothesis": "Implementation plan:\nWe implement a controlled hybrid ranking objective combining pointwise BCE loss and a pairwise BPR loss computed over same-user positive-negative pairs. The model remains the incumbent FM embedding architecture. During training step, we extract user IDs from the first feature column, build positive-negative pairs within each user group, and compute the BPR loss on these pairs. The final loss is a weighted sum of BCE and BPR losses, guarded by the ablation component 'ranking_objective_component'. This preserves the official chronological split, uses only train labels, and maintains the validation primary metric as (GAUC + nDCG@5)/2. The feature building remains unchanged. This approach targets improved GAUC by optimizing a ranking-aware loss while preserving all protected invariants and interfaces.",
+        "analysis": "PREFLIGHT_REJECTED: ranking objective extracts users but does not construct same-user groups or equality masks",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "6f4a767e677443c1b6755464b2cb07a7",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "The hypothesis is that adding causal recent user histo…",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": null,
+        "gauc": null,
+        "ndcg": null,
+        "status": "failed",
+        "hypothesis": "The hypothesis is that adding causal recent user history features (e.g., recent author and tag interactions) and a matching lightweight DIN-style interest encoder will improve validation GAUC and nDCG@5. The data flow is extended by attaching causal history factors from train-only past interactions using research_data.attach_causal_history, exposing these new fields in build_features, and embedding them in the model. The model is extended with embedding layers for these history features and a simple attention mechanism to produce an interest representation that is combined with the original FM embeddings. The loss remains pointwise BCE, preserving the official evaluation and checkpointing invariants. The new component is guarded by a literal ablation flag to allow controlled ablation studies.",
+        "analysis": "PREFLIGHT_REJECTED: factor candidate must select at least one library factor; factor candidate has no literal FEATURE_FACTORS entries",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "eb98f2bdd1d74c61ad6c3de7c4c4d96d",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "The hypothesis is that replacing the pointwise BCE los…",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": null,
+        "gauc": null,
+        "ndcg": null,
+        "status": "failed",
+        "hypothesis": "The hypothesis is that replacing the pointwise BCE loss with a hybrid loss combining pointwise BCE and a pairwise Bayesian Personalized Ranking (BPR) loss will better align training with the ranking metrics GAUC and nDCG@5, improving validation primary. The data flow remains the same: inputs are integer feature ID arrays with shape (batch, 5), and the long_view label is the target. The model is the existing FM embedding-based model, but the step function is modified to compute a combined loss: BCE on all samples plus a BPR pairwise loss on sampled positive-negative pairs from the same user. Pairwise sampling is done within each batch by grouping indices by user ID, then pairing positives with negatives. The BPR loss encourages correct ranking within users, targeting GAUC improvements. The BCE loss remains to stabilize training. The new loss path is guarded by a new ablation component \"ranking_objective_component\". All other invariants are preserved, including the evaluation protocol, checkpointing, and no test label usage.",
+        "analysis": "PREFLIGHT_REJECTED: ranking objective extracts users but does not construct same-user groups or equality masks",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "frozen-final-verification",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "5-seed final verification",
+        "stage": "ablation",
+        "stage_number": 4,
+        "primary": 0.6043489336967468,
+        "gauc": 0.6710276126861572,
+        "ndcg": 0.5376702547073364,
+        "status": "succeeded",
+        "hypothesis": "Verify the promoted model across independent random seeds before freezing it.",
+        "analysis": "The model remained stable and was frozen for submission generation.",
+        "is_seed_node": false,
+        "is_champion_path": true,
+        "is_promoted": false,
+        "is_final": true
+      }
+    ],
+    "edges": [
+      [
+        "55c78f62f5904c7dac0255fd8dafce69",
+        "249fdffe09a24be782f1cafba1698583"
+      ],
+      [
+        "55c78f62f5904c7dac0255fd8dafce69",
+        "5fccce3f662e41998da5ba9bab0d9da5"
+      ],
+      [
+        "55c78f62f5904c7dac0255fd8dafce69",
+        "11e6b893623e42f98a73f6025059f9f7"
+      ],
+      [
+        "55c78f62f5904c7dac0255fd8dafce69",
+        "000aefb33538452e93078953d8274be6"
+      ],
+      [
+        "55c78f62f5904c7dac0255fd8dafce69",
+        "9196c7192cad4a9582df87ff8f821a5f"
+      ],
+      [
+        "55c78f62f5904c7dac0255fd8dafce69",
+        "e6f8aff81c2e46d0bd51de007adabf11"
+      ],
+      [
+        "55c78f62f5904c7dac0255fd8dafce69",
+        "114bb1add3f4413dbc8fe241f799fef4"
+      ],
+      [
+        "5fccce3f662e41998da5ba9bab0d9da5",
+        "f032d282bdcc421a92a7576440dda561"
+      ],
+      [
+        "f032d282bdcc421a92a7576440dda561",
+        "f0057fdb20554295bb76e23422850532"
+      ],
+      [
+        "f032d282bdcc421a92a7576440dda561",
+        "f68ea611f8d24e9bbf8e80f97d14eb95"
+      ],
+      [
+        "f032d282bdcc421a92a7576440dda561",
+        "88318ab3b6664adcaec36d405e9684d9"
+      ],
+      [
+        "11e6b893623e42f98a73f6025059f9f7",
+        "8cffea2f7b1e4afc8094804db3ed36e8"
+      ],
+      [
+        "11e6b893623e42f98a73f6025059f9f7",
+        "1e8cd232effd49829c8eb9abdc2a9b20"
+      ],
+      [
+        "1e8cd232effd49829c8eb9abdc2a9b20",
+        "dd4c326225c34f5892aa6a0d21aada90"
+      ],
+      [
+        "1e8cd232effd49829c8eb9abdc2a9b20",
+        "8451e49e715b4fe999707ebd0339f9e3"
+      ],
+      [
+        "249fdffe09a24be782f1cafba1698583",
+        "819ac287d84743f081fcd97736772ced"
+      ],
+      [
+        "819ac287d84743f081fcd97736772ced",
+        "c03faa1d979140f98f05fbf318d29c7c"
+      ],
+      [
+        "819ac287d84743f081fcd97736772ced",
+        "5ae252ae17db44a39ae18af93b310665"
+      ],
+      [
+        "819ac287d84743f081fcd97736772ced",
+        "5fd7714f3b664e30814a7ba2f1ae9f46"
+      ],
+      [
+        "f032d282bdcc421a92a7576440dda561",
+        "e70983a1906c4c7e98e27b82a57d4cfd"
+      ],
+      [
+        "f032d282bdcc421a92a7576440dda561",
+        "890fa31e27c54ce1be330043edbfa80c"
+      ],
+      [
+        "f032d282bdcc421a92a7576440dda561",
+        "19d942d1e6444349a610c337820a893b"
+      ],
+      [
+        "f032d282bdcc421a92a7576440dda561",
+        "a21c53be82904abdbe041f6a5a3a4082"
+      ],
+      [
+        "f032d282bdcc421a92a7576440dda561",
+        "6275ce4e67264ef5a1a83f995098e3bd"
+      ],
+      [
+        "f032d282bdcc421a92a7576440dda561",
+        "153c2c73ab3643bf8f6700fbdd0e91ac"
+      ],
+      [
+        "a21c53be82904abdbe041f6a5a3a4082",
+        "4dad9b5ad9ef4b38a35e8f07366eb316"
+      ],
+      [
+        "153c2c73ab3643bf8f6700fbdd0e91ac",
+        "30f41258c9d34a79a7b529d8cca36e17"
+      ],
+      [
+        "153c2c73ab3643bf8f6700fbdd0e91ac",
+        "4f361f47e3f847c7a7bc6ec185b3c165"
+      ],
+      [
+        "153c2c73ab3643bf8f6700fbdd0e91ac",
+        "13876fc3b50e46eabe59507c40cbb9b1"
+      ],
+      [
+        "13876fc3b50e46eabe59507c40cbb9b1",
+        "bbc0ead587da40128b16c804f5bca2cf"
+      ],
+      [
+        "bbc0ead587da40128b16c804f5bca2cf",
+        "ebe99bfcd11d4884b2cfa5ee1b644bd8"
+      ],
+      [
+        "153c2c73ab3643bf8f6700fbdd0e91ac",
+        "03f287e263014a57880fb052c49b272f"
+      ],
+      [
+        "153c2c73ab3643bf8f6700fbdd0e91ac",
+        "43b551341fee46c7a825093999bd735e"
+      ],
+      [
+        "a21c53be82904abdbe041f6a5a3a4082",
+        "44e69e1084fc481a8c24a0599fa1b2a1"
+      ],
+      [
+        "a21c53be82904abdbe041f6a5a3a4082",
+        "e81c20415b924c7997090a984c08af2c"
+      ],
+      [
+        "e81c20415b924c7997090a984c08af2c",
+        "ecdaffc6c2114ae591691075d57a35de"
+      ],
+      [
+        "e81c20415b924c7997090a984c08af2c",
+        "4bc753cdaeba4ad7bf3cb29cf32d425f"
+      ],
+      [
+        "4bc753cdaeba4ad7bf3cb29cf32d425f",
+        "9a10f9cf0c7842f68b6aca00dacc3d19"
+      ],
+      [
+        "4bc753cdaeba4ad7bf3cb29cf32d425f",
+        "3f4ebf358c0e488e821fdd7389061f71"
+      ],
+      [
+        "f032d282bdcc421a92a7576440dda561",
+        "6e94406113244bf9a3de74f3d3a6b06f"
+      ],
+      [
+        "f032d282bdcc421a92a7576440dda561",
+        "6da681832ba34e27a83fadac1b818f81"
+      ],
+      [
+        "f032d282bdcc421a92a7576440dda561",
+        "8bd5cb97f3d44a83a38c414f5766e6ef"
+      ],
+      [
+        "f032d282bdcc421a92a7576440dda561",
+        "af9baeab8881436d92706f505a723c9f"
+      ],
+      [
+        "f032d282bdcc421a92a7576440dda561",
+        "ca8ae2cb891f473da5f9bf61e5431628"
+      ],
+      [
+        "f032d282bdcc421a92a7576440dda561",
+        "1af8ad890122404e8b8b0f8e319a76d2"
+      ],
+      [
+        "f032d282bdcc421a92a7576440dda561",
+        "4e031cafc74d437c9ad20723e2599d6d"
+      ],
+      [
+        "f032d282bdcc421a92a7576440dda561",
+        "6f4a767e677443c1b6755464b2cb07a7"
+      ],
+      [
+        "f032d282bdcc421a92a7576440dda561",
+        "eb98f2bdd1d74c61ad6c3de7c4c4d96d"
+      ],
+      [
+        "f032d282bdcc421a92a7576440dda561",
+        "frozen-final-verification"
+      ]
+    ],
+    "champion_path": [
+      "55c78f62f5904c7dac0255fd8dafce69",
+      "5fccce3f662e41998da5ba9bab0d9da5",
+      "f032d282bdcc421a92a7576440dda561",
+      "frozen-final-verification"
+    ],
+    "top_candidates": [
+      {
+        "id": "f032d282bdcc421a92a7576440dda561",
+        "parent_id": "5fccce3f662e41998da5ba9bab0d9da5",
+        "label": "config_lr0.0005_emb32_bs4096",
+        "stage": "tuning",
+        "stage_number": 2,
+        "primary": 0.6043751835823059,
+        "gauc": 0.6712105870246887,
+        "ndcg": 0.5375397801399231,
+        "status": "succeeded",
+        "hypothesis": "Hyperparam tuning name: config_lr0.0005_emb32_bs4096.\nThe tuning involves updating the CONFIG dictionary to reflect the new hyperparameters: learning_rate=0.0005, embedding_dim=32, batch_size=4096, max_epochs=12, while keeping the seed dynamic from the environment variable. The rest of the code remains unchanged to preserve the training, evaluation, and checkpointing logic. This single change will test the specified configuration for improved training stability and model capacity.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": true,
+        "is_promoted": true,
+        "is_final": false
+      },
+      {
+        "id": "frozen-final-verification",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "5-seed final verification",
+        "stage": "ablation",
+        "stage_number": 4,
+        "primary": 0.6043489336967468,
+        "gauc": 0.6710276126861572,
+        "ndcg": 0.5376702547073364,
+        "status": "succeeded",
+        "hypothesis": "Verify the promoted model across independent random seeds before freezing it.",
+        "analysis": "The model remained stable and was frozen for submission generation.",
+        "is_seed_node": false,
+        "is_champion_path": true,
+        "is_promoted": false,
+        "is_final": true
+      },
+      {
+        "id": "5fccce3f662e41998da5ba9bab0d9da5",
+        "parent_id": "55c78f62f5904c7dac0255fd8dafce69",
+        "label": "Replace the FM model with a lightweight Wide & Deep ar…",
+        "stage": "baseline",
+        "stage_number": 1,
+        "primary": 0.6042602360248566,
+        "gauc": 0.6710575222969055,
+        "ndcg": 0.5374629497528076,
+        "status": "succeeded",
+        "hypothesis": "Replace the FM model with a lightweight Wide & Deep architecture that combines a linear (wide) part and a small MLP (deep) part. Keep the same input schema v2 and legacy FM feature encoding for compatibility. Use pointwise BCE loss and preserve the training loop and evaluation protocol unchanged. Cap training epochs to 5 as per bootstrap constraints. Register the new model as an ablation component guarded by `component_enabled`. This change tests if a simple Wide & Deep model can bootstrap ranking improvements while preserving the official validation primary metric and checkpoint interface.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": true,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "f0057fdb20554295bb76e23422850532",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "config_lr0.0003_emb64_bs8192",
+        "stage": "tuning",
+        "stage_number": 2,
+        "primary": 0.604193776845932,
+        "gauc": 0.6709660887718201,
+        "ndcg": 0.537421464920044,
+        "status": "succeeded",
+        "hypothesis": "Hyperparam tuning name: config_lr0.0003_emb64_bs8192.\nThe tuning involves updating the CONFIG dictionary to set the learning rate to 0.0003, embedding dimension to 64, and batch size to 8192, while keeping max_epochs at 12 and early stopping parameters unchanged. No other code changes are needed since the model and training loop already use these config values dynamically. This will allow the model to train with a smaller learning rate, larger embedding capacity, and larger batch size for potentially better generalization and stable convergence.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "1e8cd232effd49829c8eb9abdc2a9b20",
+        "parent_id": "11e6b893623e42f98a73f6025059f9f7",
+        "label": "config_lr0.002_emb16_l2_1e-6_bs8192",
+        "stage": "tuning",
+        "stage_number": 2,
+        "primary": 0.6038356125354767,
+        "gauc": 0.6705156564712524,
+        "ndcg": 0.5371555685997009,
+        "status": "succeeded",
+        "hypothesis": "Hyperparam tuning name: config_lr0.002_emb16_l2_1e-6_bs8192.\nI will update the CONFIG dictionary to reflect the specified hyperparameters: learning_rate=0.002, embedding_dim=16, l2=1e-6, batch_size=8192, max_epochs=12, patience=4, and min_delta=1e-5. The seed remains controlled by the environment variable. No other code changes are needed since the existing training loop and model creation already use these config values. This will run the training with the tuned hyperparameters and save the best checkpoint and metrics accordingly.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "11e6b893623e42f98a73f6025059f9f7",
+        "parent_id": "55c78f62f5904c7dac0255fd8dafce69",
+        "label": "Replace the FM model with a lightweight Deep & Cross N…",
+        "stage": "baseline",
+        "stage_number": 1,
+        "primary": 0.6037757694721222,
+        "gauc": 0.6702647805213928,
+        "ndcg": 0.5372867584228516,
+        "status": "succeeded",
+        "hypothesis": "Replace the FM model with a lightweight Deep & Cross Network (DCN) that captures explicit feature crosses with a cross network and nonlinear transformations with a deep network, while preserving the input schema, pointwise BCE loss, and validation-only evaluation. The data flow remains the same: categorical feature IDs input to embedding layers, then fed into the DCN model producing logits for BCE loss. The training loop and checkpointing are unchanged except for a 5-epoch cap per bootstrap constraints. The DCN model is registered as an ablation component and guarded accordingly. This controlled architectural change tests the hypothesis that DCN improves validation ranking metrics over FM under the same protocol.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "153c2c73ab3643bf8f6700fbdd0e91ac",
+        "parent_id": "f032d282bdcc421a92a7576440dda561",
+        "label": "Implementation plan: We keep the incumbent wide_deep c…",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": 0.6016870737075806,
+        "gauc": 0.6676037907600403,
+        "ndcg": 0.5357703566551208,
+        "status": "succeeded",
+        "hypothesis": "Implementation plan:\nWe keep the incumbent wide_deep candidate as the base model and transfer exactly one donor mechanism: the deep & cross network (DCN) component from the dcn candidate. This involves adding a CrossNetwork module and integrating it with the existing wide and deep embeddings, summing cross and deep outputs plus bias. The new DCN component is guarded by a new ablation component flag `cross_parent_transfer_dcn_1_component` to allow independent ablation. The data flow remains unchanged: input integer feature IDs are embedded, flattened, passed through cross and deep MLP paths, then combined for logits. The training loop, loss (pointwise BCE), evaluation, checkpointing, and validation protocol are preserved. This transfer tests if adding DCN interactions improves validation GAUC and nDCG@5 over the wide_deep baseline without disrupting existing infrastructure.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      },
+      {
+        "id": "4bc753cdaeba4ad7bf3cb29cf32d425f",
+        "parent_id": "e81c20415b924c7997090a984c08af2c",
+        "label": "config_lr09emb28l2",
+        "stage": "creative",
+        "stage_number": 3,
+        "primary": 0.6016620397567749,
+        "gauc": 0.6670325398445129,
+        "ndcg": 0.5362915396690369,
+        "status": "succeeded",
+        "hypothesis": "Hyperparam tuning name: config_lr09emb28l2.\nI will implement the requested hyperparameter tuning by updating the CONFIG dictionary to set learning_rate=0.0009, embedding_dim=28, and l2=7e-6, while keeping all other parameters unchanged. The rest of the code remains exactly as provided to ensure reproducibility and isolate the effect of these hyperparameters. This will allow training and evaluation to run with the refined configuration as specified.",
+        "analysis": "Trusted KuaiRand execution completed successfully.",
+        "is_seed_node": false,
+        "is_champion_path": false,
+        "is_promoted": false,
+        "is_final": false
+      }
+    ],
+    "total_nodes": 49,
+    "successful_nodes": 33,
+    "failed_nodes": 16,
+    "research_rounds": 0,
+    "elapsed_seconds": 2435.152002569288
+  },
+  "training_history": [
+    {
+      "epoch": 1,
+      "train_loss": 0.5839296803679518,
+      "GAUC": 0.665588915348053,
+      "nDCG@5": 0.5347132682800293,
+      "primary": 0.6001510620117188
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.5082419993202318,
+      "GAUC": 0.6680601239204407,
+      "nDCG@5": 0.5357205867767334,
+      "primary": 0.6018903255462646
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.501866273555277,
+      "GAUC": 0.669707179069519,
+      "nDCG@5": 0.5370379686355591,
+      "primary": 0.6033725738525391
+    },
+    {
+      "epoch": 4,
+      "train_loss": 0.4996483781004465,
+      "GAUC": 0.6710106730461121,
+      "nDCG@5": 0.5373757481575012,
+      "primary": 0.6041932106018066
+    },
+    {
+      "epoch": 5,
+      "train_loss": 0.49851563690383804,
+      "GAUC": 0.6698855757713318,
+      "nDCG@5": 0.5373700261116028,
+      "primary": 0.6036278009414673
+    },
+    {
+      "epoch": 6,
+      "train_loss": 0.49767874742066986,
+      "GAUC": 0.671053409576416,
+      "nDCG@5": 0.5373733639717102,
+      "primary": 0.6042133569717407
+    },
+    {
+      "epoch": 7,
+      "train_loss": 0.4971502936014565,
+      "GAUC": 0.6712708473205566,
+      "nDCG@5": 0.5377140045166016,
+      "primary": 0.6044924259185791
+    },
+    {
+      "epoch": 8,
+      "train_loss": 0.4967797566272025,
+      "GAUC": 0.6704373955726624,
+      "nDCG@5": 0.5368533134460449,
+      "primary": 0.6036453247070312
+    },
+    {
+      "epoch": 9,
+      "train_loss": 0.49637743787953503,
+      "GAUC": 0.6711610555648804,
+      "nDCG@5": 0.537630558013916,
+      "primary": 0.6043958067893982
+    },
+    {
+      "epoch": 10,
+      "train_loss": 0.4960214733863817,
+      "GAUC": 0.6703841686248779,
+      "nDCG@5": 0.5373945832252502,
+      "primary": 0.6038893461227417
+    },
+    {
+      "epoch": 11,
+      "train_loss": 0.4955693380807036,
+      "GAUC": 0.6698323488235474,
+      "nDCG@5": 0.5370322465896606,
+      "primary": 0.603432297706604
+    }
+  ],
+  "integrity": {
+    "validation_only_selection": true,
+    "test_metrics_computed": false,
+    "submission_rows": 170588,
+    "successful_seed_count": 5,
+    "checkpoint_sha256": "8b18ad1fa1598e1bfae1a904b34283a7c6e9f37bc87f61081fd03d2d10e75b62",
+    "model_sha256": "fe1e9000f2e6ce3c1b097741c1863ba676ef19c7d478b88f2f92724e9db7ea0c",
+    "submission_sha256": "98207e00188211b051c82042e7df3151291046c402e1d42aa9c6f616beb95f36"
+  },
+  "files": {
+    "data_root": "ByteRush",
+    "experiment_snapshot": "experiments/2026-08-31_18-02-46_kuairand_fm_validation_baseline_attempt_0/dashboard_snapshot.json",
+    "artifact_dir": "artifacts/comparison_current/final_model",
+    "model": "artifacts/comparison_current/final_model/model.py",
+    "checkpoint": "artifacts/comparison_current/final_model/checkpoint.npz",
+    "submission": "artifacts/comparison_current/final_model/submission.csv",
+    "manifest": "artifacts/comparison_current/final_model/manifest.json"
+  }
+}
