@@ -401,7 +401,7 @@ def build_showcase_payload(root: Path, config_path: Path | None = None) -> dict[
             "submission_sha256": str(metadata.get("submission_sha256") or _sha256(artifact_dir / "submission.csv")),
         },
         "files": {
-            "data_root": str(root),
+            "data_root": root.name,
             "experiment_snapshot": _relative(winner["snapshot_path"], root),
             "artifact_dir": _relative(artifact_dir, root),
             "model": _relative(artifact_dir / "model.py", root),
