@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 import tempfile
@@ -93,6 +94,7 @@ class FakeManager:
         self.current_stage = initial
         self.stages = [initial]
         self.journals = {initial.name: Journal()}
+        self.completed_stages = []
         self.main_stage_goals = {
             1: "validate FM",
             2: "tune FM",
@@ -359,6 +361,89 @@ class MultiRootTuningFakeAgent(FakeAgent):
 
 
 class ClosedLoopTests(unittest.TestCase):
+    @staticmethod
+    def _stage2_snapshot(root: Path) -> Path:
+        snapshot = root / "parent_run" / "artifacts" / "incumbent_snapshots" / "001_stage2"
+        snapshot.mkdir(parents=True)
+        model = (
+            "RESEARCH_MANIFEST = {'model_family': 'fm', "
+            "'research_family': 'baseline', 'loss_family': 'pointwise_bce'}\n"
+            "ABLATION_COMPONENTS = {}\n"
+        )
+        checkpoint = b"frozen-stage2-checkpoint"
+        (snapshot / "model.py").write_text(model)
+        (snapshot / "checkpoint.npz").write_bytes(checkpoint)
+        (snapshot / "training_history.json").write_text("[]\n")
+        (snapshot / "source_node_id.txt").write_text("stage2-node\n")
+        manifest = {
+            "schema_version": 2,
+            "source_stage": "2_multi_root_tuning_1_fm",
+            "source_node_id": "stage2-node",
+            "model_sha256": hashlib.sha256(model.encode()).hexdigest(),
+            "checkpoint_sha256": hashlib.sha256(checkpoint).hexdigest(),
+            "test_metrics_used_for_selection": False,
+            "validation": {
+                "GAUC": {"mean": 0.62, "values": [0.61, 0.63]},
+                "nDCG@5": {"mean": 0.58, "values": [0.57, 0.59]},
+                "primary": {"mean": 0.60, "values": [0.59, 0.61]},
+            },
+        }
+        (snapshot / "manifest.json").write_text(json.dumps(manifest))
+        return snapshot
+
+    def test_stage2_resume_verifies_and_materializes_independent_bundle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            snapshot = self._stage2_snapshot(root)
+            manager = FakeManager(
+                self._data_dir(root / "starter"),
+                root / "continuation" / "artifacts" / "final_model",
+            )
+            runner = ClosedLoopRunner(
+                manager,
+                exec_callback=lambda *args: None,
+                resume_from_stage2=snapshot,
+                agent_factory=FakeAgent,
+                finalizer=lambda *args, **kwargs: {},
+                submission_exporter=lambda **kwargs: {},
+            )
+
+            resumed = runner._load_stage2_resume(snapshot)
+            copied = root / "continuation" / "artifacts" / "resume_parent_stage2"
+            provenance = json.loads(
+                (root / "continuation" / "artifacts" / "resume_provenance.json").read_text()
+            )
+            copied_checkpoint_exists = (copied / "checkpoint.npz").is_file()
+
+        self.assertEqual(resumed.node.id, "stage2-node")
+        self.assertEqual(resumed.seed_scores, [0.59, 0.61])
+        self.assertAlmostEqual(resumed.score, 0.60)
+        self.assertTrue(copied_checkpoint_exists)
+        self.assertEqual(provenance["source_stage"], "2_multi_root_tuning_1_fm")
+        self.assertFalse(provenance["test_metrics_used_for_selection"])
+        self.assertEqual(runner.state.verified_incumbent_id, "stage2-node")
+
+    def test_stage2_resume_rejects_hash_mismatch_before_copy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            snapshot = self._stage2_snapshot(root)
+            (snapshot / "checkpoint.npz").write_bytes(b"tampered")
+            manager = FakeManager(
+                self._data_dir(root / "starter"),
+                root / "continuation" / "artifacts" / "final_model",
+            )
+            runner = ClosedLoopRunner(
+                manager,
+                exec_callback=lambda *args: None,
+                resume_from_stage2=snapshot,
+            )
+
+            with self.assertRaisesRegex(ValueError, "hash mismatch"):
+                runner._load_stage2_resume(snapshot)
+            self.assertFalse(
+                (root / "continuation" / "artifacts" / "resume_parent_stage2").exists()
+            )
+
     def setUp(self):
         FakeAgent.created_stage_names = []
         FakeAgent.created_task_descs = {}

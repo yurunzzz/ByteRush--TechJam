@@ -805,7 +805,13 @@ Your research idea:\n\n
             f"{', '.join(components)}",
         )
 
-    def run(self, exec_callback, step_callback=None):
+    def run(
+        self,
+        exec_callback,
+        step_callback=None,
+        *,
+        resume_from_stage2=None,
+    ):
         """Run the experiment through generated stages"""
         research_loop_cfg = self.cfg.agent.get("research_loop", {})
         if bool(research_loop_cfg.get("enabled", False)):
@@ -815,7 +821,13 @@ Your research idea:\n\n
                 self,
                 exec_callback=exec_callback,
                 step_callback=step_callback,
+                resume_from_stage2=resume_from_stage2,
             ).run()
+
+        if resume_from_stage2 is not None:
+            raise ValueError(
+                "--resume-from-stage2 requires agent.research_loop.enabled=true"
+            )
 
         while self.current_stage:  # Main stage loop
             main_stage = self.parse_stage_names(self.current_stage.name)[0]
