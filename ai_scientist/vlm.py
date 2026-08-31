@@ -32,6 +32,17 @@ AVAILABLE_VLMS = [
 ]
 
 
+def _normalize_openai_kwargs(model: str, request_kwargs: dict) -> dict:
+    """Apply the GPT-5.6 Chat Completions parameter contract."""
+    if model.startswith("gpt-5.6"):
+        request_kwargs.pop("temperature", None)
+        if "max_tokens" in request_kwargs:
+            request_kwargs["max_completion_tokens"] = request_kwargs.pop(
+                "max_tokens"
+            )
+    return request_kwargs
+
+
 def encode_image_to_base64(image_path: str) -> str:
     """Convert an image to base64 string."""
     with Image.open(image_path) as img:
@@ -65,17 +76,20 @@ def make_llm_call(client, model, temperature, system_message, prompt):
             seed=0,
         )
     elif "gpt" in model:
-        return client.chat.completions.create(
-            model=model,
-            messages=[
+        request_kwargs = {
+            "model": model,
+            "messages": [
                 {"role": "system", "content": system_message},
                 *prompt,
             ],
-            temperature=temperature,
-            max_tokens=MAX_NUM_TOKENS,
-            n=1,
-            stop=None,
-            seed=0,
+            "temperature": temperature,
+            "max_tokens": MAX_NUM_TOKENS,
+            "n": 1,
+            "stop": None,
+            "seed": 0,
+        }
+        return client.chat.completions.create(
+            **_normalize_openai_kwargs(model, request_kwargs)
         )
     elif "o1" in model or "o3" in model:
         return client.chat.completions.create(
@@ -105,14 +119,17 @@ def make_vlm_call(client, model, temperature, system_message, prompt):
             max_tokens=MAX_NUM_TOKENS,
         )
     elif "gpt" in model:
-        return client.chat.completions.create(
-            model=model,
-            messages=[
+        request_kwargs = {
+            "model": model,
+            "messages": [
                 {"role": "system", "content": system_message},
                 *prompt,
             ],
-            temperature=temperature,
-            max_tokens=MAX_NUM_TOKENS,
+            "temperature": temperature,
+            "max_tokens": MAX_NUM_TOKENS,
+        }
+        return client.chat.completions.create(
+            **_normalize_openai_kwargs(model, request_kwargs)
         )
     else:
         raise ValueError(f"Model {model} not supported.")
@@ -315,16 +332,19 @@ def get_batch_responses_from_vlm(
             )
         else:
             # Get multiple responses
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
+            request_kwargs = {
+                "model": model,
+                "messages": [
                     {"role": "system", "content": system_message},
                     *new_msg_history,
                 ],
-                temperature=temperature,
-                max_tokens=MAX_NUM_TOKENS,
-                n=n_responses,
-                seed=0,
+                "temperature": temperature,
+                "max_tokens": MAX_NUM_TOKENS,
+                "n": n_responses,
+                "seed": 0,
+            }
+            response = client.chat.completions.create(
+                **_normalize_openai_kwargs(model, request_kwargs)
             )
 
         track_response_usage(response, system_message, new_msg_history)

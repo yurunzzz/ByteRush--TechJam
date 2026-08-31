@@ -47,6 +47,13 @@ def query(
         "temperature": temperature,
     }
 
+    # GPT-5.6 Chat Completions uses the reasoning-model parameter contract:
+    # sampling temperature is fixed and the token limit has a new name.
+    if model.startswith("gpt-5.6"):
+        model_kwargs.pop("temperature", None)
+        if max_tokens is not None:
+            model_kwargs["max_completion_tokens"] = max_tokens
+
     # Handle models with beta limitations
     # ref: https://platform.openai.com/docs/guides/reasoning/beta-limitations
     if model.startswith("o1"):
@@ -64,7 +71,7 @@ def query(
         model_kwargs["max_completion_tokens"] = 100000  # max_tokens
         # remove 'temperature' from model_kwargs
         model_kwargs.pop("temperature", None)
-    else:
+    elif not model.startswith("gpt-5.6"):
         model_kwargs["max_tokens"] = max_tokens
 
     query_func = backend_anthropic.query if "claude-" in model else backend_openai.query
