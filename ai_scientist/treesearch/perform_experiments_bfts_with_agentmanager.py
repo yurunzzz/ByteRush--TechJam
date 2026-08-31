@@ -56,7 +56,11 @@ def journal_to_rich_tree(journal: Journal, cfg):
     return tree
 
 
-def perform_experiments_bfts(config_path: str):
+def perform_experiments_bfts(
+    config_path: str,
+    *,
+    resume_from_stage2: str | None = None,
+):
     # turn config path string into a path object
     config_path = Path(config_path)
     cfg = load_cfg(config_path)
@@ -215,7 +219,11 @@ def perform_experiments_bfts(config_path: str):
         screen=True,
     )
 
-    manager.run(exec_callback=create_exec_callback(status), step_callback=step_callback)
+    manager.run(
+        exec_callback=create_exec_callback(status),
+        step_callback=step_callback,
+        resume_from_stage2=resume_from_stage2,
+    )
 
     manager_pickle_path = cfg.log_dir / "manager.pkl"
     try:

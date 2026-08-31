@@ -3,14 +3,17 @@ from __future__ import annotations
 
 import ast
 import copy
+import hashlib
 import json
 import math
 import re
+import shutil
 import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from itertools import combinations
 from pathlib import Path
 from statistics import mean
@@ -57,6 +60,7 @@ from .research_loop import (
     extract_primary_score,
     research_loop_config_from_mapping,
 )
+from .utils.metric import MetricValue
 
 
 @dataclass
@@ -434,6 +438,7 @@ class ClosedLoopRunner:
         submission_exporter: Callable[..., dict[str, Any]] = (
             export_and_check_submission
         ),
+        resume_from_stage2: Optional[str | Path] = None,
     ):
         self.manager = manager
         self.exec_callback = exec_callback
@@ -475,6 +480,11 @@ class ClosedLoopRunner:
         self.incumbent: Optional[EvaluatedConfiguration] = None
         self.started_at = time.monotonic()
         self.snapshot_index = 0
+        self.resume_from_stage2 = (
+            Path(resume_from_stage2).expanduser().resolve()
+            if resume_from_stage2 is not None
+            else None
+        )
 
     def _new_stage(
         self,
@@ -2038,6 +2048,190 @@ class ClosedLoopRunner:
             + "\n"
         )
 
+    @staticmethod
+    def _sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+        return digest.hexdigest()
+
+    @staticmethod
+    def _parent_run_dir(snapshot_dir: Path) -> Path:
+        for candidate in snapshot_dir.parents:
+            if (candidate / "idea.json").is_file():
+                return candidate
+        return snapshot_dir.parents[3] if len(snapshot_dir.parents) > 3 else snapshot_dir
+
+    def _load_stage2_resume(self, snapshot_dir: Path) -> EvaluatedConfiguration:
+        """Validate and materialize an immutable Stage 2 continuation bundle."""
+        required_files = (
+            "manifest.json",
+            "model.py",
+            "checkpoint.npz",
+            "training_history.json",
+            "source_node_id.txt",
+        )
+        if not snapshot_dir.is_dir():
+            raise FileNotFoundError(f"Stage 2 snapshot directory not found: {snapshot_dir}")
+        missing = [name for name in required_files if not (snapshot_dir / name).is_file()]
+        if missing:
+            raise FileNotFoundError(
+                f"Stage 2 snapshot is incomplete ({', '.join(missing)}): {snapshot_dir}"
+            )
+
+        manifest = json.loads((snapshot_dir / "manifest.json").read_text())
+        if int(manifest.get("schema_version", 0)) < 2:
+            raise ValueError("Stage 2 resume requires snapshot schema_version >= 2")
+        source_stage = str(manifest.get("source_stage", ""))
+        if not source_stage.startswith("2_"):
+            raise ValueError(
+                f"resume snapshot must come from Stage 2, got {source_stage!r}"
+            )
+        if bool(manifest.get("test_metrics_used_for_selection", True)):
+            raise ValueError("refusing Stage 2 snapshot selected with test metrics")
+
+        expected_hashes = {
+            "model.py": str(manifest.get("model_sha256", "")),
+            "checkpoint.npz": str(manifest.get("checkpoint_sha256", "")),
+        }
+        for name, expected in expected_hashes.items():
+            actual = self._sha256(snapshot_dir / name)
+            if not expected or actual != expected:
+                raise ValueError(
+                    f"Stage 2 snapshot hash mismatch for {name}: "
+                    f"expected {expected or '<missing>'}, got {actual}"
+                )
+
+        validation = manifest.get("validation", {})
+        primary = validation.get("primary", {})
+        primary_values = [float(value) for value in primary.get("values", [])]
+        if not primary_values:
+            raise ValueError("Stage 2 snapshot has no validation primary seed values")
+        score = float(primary.get("mean"))
+        if not math.isfinite(score) or any(
+            not math.isfinite(value) for value in primary_values
+        ):
+            raise ValueError("Stage 2 snapshot contains non-finite validation metrics")
+
+        resume_bundle = self.output_dir.parent / "resume_parent_stage2"
+        if resume_bundle.exists():
+            raise FileExistsError(
+                f"continuation bundle already exists in new run: {resume_bundle}"
+            )
+        shutil.copytree(snapshot_dir, resume_bundle)
+        for name, expected in expected_hashes.items():
+            if self._sha256(resume_bundle / name) != expected:
+                raise ValueError(f"copied Stage 2 bundle failed hash verification: {name}")
+
+        metric_means = {
+            name: (
+                float(validation[name]["mean"])
+                if name in validation and validation[name].get("mean") is not None
+                else None
+            )
+            for name in ("GAUC", "nDCG@5", "primary")
+        }
+        seed_metrics = []
+        for index, value in enumerate(primary_values):
+            item = {"primary": value}
+            for name in ("GAUC", "nDCG@5"):
+                values = validation.get(name, {}).get("values", [])
+                item[name] = float(values[index]) if index < len(values) else None
+            seed_metrics.append(item)
+
+        source_node_id = str(manifest.get("source_node_id", "")).strip()
+        if not source_node_id:
+            source_node_id = (snapshot_dir / "source_node_id.txt").read_text().strip()
+        node = Node(
+            id=source_node_id,
+            code=(resume_bundle / "model.py").read_text(),
+            plan="Frozen Stage 2 verified incumbent resumed for Stage 3.",
+            overall_plan="Continue from the verified Stage 2 incumbent without rerunning Stage 1/2.",
+            exp_results_dir=str(resume_bundle),
+            metric=MetricValue(
+                value=score,
+                maximize=True,
+                name="validation primary",
+                description="Stage 2 validation-only seed mean",
+            ),
+            is_buggy=False,
+            is_buggy_plots=False,
+            _term_out=[],
+            parse_term_out=[],
+        )
+        stage, journal = self._new_stage(
+            name=source_stage,
+            goals="Imported immutable Stage 2 verified incumbent.",
+            max_iterations=0,
+        )
+        journal.append(node)
+        self.manager.completed_stages.append(stage.name)
+
+        resumed = EvaluatedConfiguration(
+            node=node,
+            journal=journal,
+            stage_name=source_stage,
+            score=score,
+            seed_scores=primary_values,
+            metrics=metric_means,
+            seed_metrics=seed_metrics,
+            metric_means={
+                name: value
+                for name, value in metric_means.items()
+                if value is not None
+            },
+            candidate_id=source_node_id,
+            model_family=model_family_from_code(node.code),
+        )
+        self.incumbent = resumed
+        self.state.set_incumbent(
+            source_node_id,
+            score,
+            primary_values,
+            metrics=metric_means,
+            source_stage=source_stage,
+        )
+        self.state.memory.mark_verified_incumbent(source_node_id)
+        self._register_frontier(
+            node,
+            source_stage=source_stage,
+            round_number=0,
+            semantic_signature=self._semantic_signature_for_node(node),
+        )
+
+        git_result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        provenance = {
+            "schema_version": 1,
+            "mode": "stage2_to_stage3_continuation",
+            "resumed_at_utc": datetime.now(timezone.utc).isoformat(),
+            "parent_run_dir": str(self._parent_run_dir(snapshot_dir)),
+            "parent_snapshot_dir": str(snapshot_dir),
+            "copied_snapshot_dir": str(resume_bundle),
+            "source_stage": source_stage,
+            "source_node_id": source_node_id,
+            "validation_primary_mean": score,
+            "validation_primary_values": primary_values,
+            "model_sha256": expected_hashes["model.py"],
+            "checkpoint_sha256": expected_hashes["checkpoint.npz"],
+            "resume_git_commit": git_result.stdout.strip() if git_result.returncode == 0 else None,
+            "test_metrics_used_for_selection": False,
+        }
+        (self.output_dir.parent / "resume_provenance.json").write_text(
+            json.dumps(provenance, indent=2, sort_keys=True) + "\n"
+        )
+        self._save_memory()
+        print(
+            f"[green]Resumed verified Stage 2 incumbent {source_node_id} "
+            f"with primary={score:.6f}; Stage 1/2 will not run.[/green]"
+        )
+        return resumed
+
     def _save_round_summary(self, round_number: int) -> None:
         summary = self.state.round_summary(round_number)
         archive_dir = self.memory_dir / "round_summaries"
@@ -2145,11 +2339,14 @@ class ClosedLoopRunner:
         )
         print(f"[cyan]Closed-loop maximum execution budget: {budget}[/cyan]")
 
-        baseline = self._run_stage1()
-        stage1b_roots = self._run_stage1b(baseline)
-        self.incumbent = self._run_stage2(baseline, stage1b_roots)
-        self._save_memory()
-        self._snapshot_best_available("stage2_verified_incumbent")
+        if self.resume_from_stage2 is not None:
+            self.incumbent = self._load_stage2_resume(self.resume_from_stage2)
+        else:
+            baseline = self._run_stage1()
+            stage1b_roots = self._run_stage1b(baseline)
+            self.incumbent = self._run_stage2(baseline, stage1b_roots)
+            self._save_memory()
+            self._snapshot_best_available("stage2_verified_incumbent")
 
         while not self.state.should_stop:
             if self._time_limit_reached():

@@ -107,6 +107,15 @@ def parse_arguments():
         help="Attempt ID, used to distinguish same idea in different attempts in parallel runs",
     )
     parser.add_argument(
+        "--resume-from-stage2",
+        type=str,
+        default=None,
+        help=(
+            "Path to a frozen Stage 2 incumbent snapshot. Skip Stage 1/2, "
+            "verify and copy the snapshot into a new run, then start Stage 3."
+        ),
+    )
+    parser.add_argument(
         "--model_agg_plots",
         type=str,
         default="o3-mini-2025-01-31",
@@ -229,9 +238,10 @@ if __name__ == "__main__":
     experiment_root = os.environ.get(
         "AI_SCIENTIST_EXPERIMENT_ROOT", "experiments"
     )
+    run_suffix = "_stage3_resume" if args.resume_from_stage2 else ""
     idea_dir = osp.join(
         experiment_root,
-        f"{date}_{idea['Name']}_attempt_{args.attempt_id}",
+        f"{date}_{idea['Name']}_attempt_{args.attempt_id}{run_suffix}",
     )
     print(f"Results will be saved in {idea_dir}")
     os.makedirs(idea_dir, exist_ok=True)
@@ -300,7 +310,10 @@ if __name__ == "__main__":
         idea_path_json,
     )
 
-    perform_experiments_bfts(idea_config_path)
+    perform_experiments_bfts(
+        idea_config_path,
+        resume_from_stage2=args.resume_from_stage2,
+    )
     experiment_results_dir = osp.join(idea_dir, "logs/0-run/experiment_results")
     if os.path.exists(experiment_results_dir):
         shutil.copytree(
