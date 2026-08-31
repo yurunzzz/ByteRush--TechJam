@@ -1,8 +1,8 @@
 """Zero-dependency terminal intro samples for ByteRush.
 
-Preview every design with::
+Preview the design with::
 
-    python terminal_intro.py --all --force-animate
+    python terminal_intro.py --force-animate
 
 Import ``show_intro`` from a real entry point once a design has been selected.
 The animation automatically becomes a single static frame in CI, redirected
@@ -19,7 +19,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from typing import Callable, Iterable, TextIO
+from typing import Iterable, TextIO
 
 
 ESC = "\033["
@@ -29,7 +29,6 @@ DIM = f"{ESC}2m"
 CYAN = f"{ESC}38;5;51m"
 BLUE = f"{ESC}38;5;39m"
 VIOLET = f"{ESC}38;5;141m"
-PINK = f"{ESC}38;5;213m"
 GREEN = f"{ESC}38;5;84m"
 AMBER = f"{ESC}38;5;220m"
 WHITE = f"{ESC}38;5;255m"
@@ -121,80 +120,6 @@ def _cyber_scan(ctx: RenderContext, frame: int, frames: int) -> list[str]:
         )
     )
     return lines
-
-
-def _neural_boot(ctx: RenderContext, frame: int, frames: int) -> list[str]:
-    """Research-console boot sequence with an animated signal graph."""
-    del frames
-    nodes = ["IDEA", "CODE", "TRAIN", "EVAL", "SELECT"]
-    active = min(frame // 2, len(nodes) - 1)
-    rendered = []
-    for index, node in enumerate(nodes):
-        if index < active:
-            rendered.append(ctx.paint(f"● {node}", GREEN, BOLD))
-        elif index == active:
-            rendered.append(ctx.paint(f"◉ {node}", CYAN, BOLD))
-        else:
-            rendered.append(ctx.paint(f"○ {node}", DIM, WHITE))
-    connector = "  ━━━  "
-    title = ctx.paint("NEURAL RESEARCH CORE", BOLD, WHITE)
-    pulse = "▁▂▃▅▇█▇▅▃▂"[(frame * 2) % 10 :] + "▁▂▃▅▇█▇▅▃▂"[: (frame * 2) % 10]
-    inner = min(72, ctx.width - 4)
-    graph = connector.join(re.sub(r"\x1b\[[0-9;]*m", "", item) for item in rendered)
-    graph = graph[:inner].center(inner)
-    return _center(
-        [
-            "┌" + "─" * inner + "┐",
-            "│" + _center([title], inner)[0] + "│",
-            "│" + " " * inner + "│",
-            "│" + ctx.paint(graph, CYAN) + "│",
-            "│" + ctx.paint(pulse.center(inner), VIOLET, PINK) + "│",
-            "└" + "─" * inner + "┘",
-            ctx.paint("Turning experiments into evidence.", DIM, WHITE),
-        ],
-        ctx.width,
-    )
-
-
-def _warp_drive(ctx: RenderContext, frame: int, frames: int) -> list[str]:
-    """Compact speed/launch motif, best for frequent local starts."""
-    ratio = min(1.0, (frame + 1) / frames)
-    speed = int(ratio * 100)
-    streak = "═" * max(1, int(ratio * 21))
-    bolt = "⚡" if ctx.unicode else ">>"
-    return _center(
-        [
-            ctx.paint(f"{streak} {bolt} BYTERUSH {bolt} {streak}", BOLD, AMBER),
-            ctx.paint("RESEARCH ENGINE / IGNITION", BOLD, WHITE),
-            "",
-            ctx.paint(f"CORE VELOCITY  {speed:>3}%  " + "█" * int(ratio * 18), CYAN),
-            ctx.paint("KuaiRand · GAUC · nDCG@5 · autonomous search", DIM, WHITE),
-        ],
-        ctx.width,
-    )
-
-
-def _minimal(ctx: RenderContext, frame: int, frames: int) -> list[str]:
-    """Quiet professional variant for production logs and demos."""
-    del frames
-    spinner = ("◐", "◓", "◑", "◒") if ctx.unicode else ("|", "/", "-", "\\")
-    glyph = spinner[frame % len(spinner)]
-    return [
-        "",
-        "  " + ctx.paint("BYTERUSH", BOLD, CYAN) + ctx.paint(" / research agent", DIM, WHITE),
-        "  " + ctx.paint("━" * 46, VIOLET),
-        "  " + ctx.paint(glyph, CYAN) + " Initializing autonomous experiment pipeline",
-        "  " + ctx.paint("READY", GREEN, BOLD) + ctx.paint("  validation-only · reproducible · guarded", DIM, WHITE),
-        "",
-    ]
-
-
-STYLES: dict[str, tuple[str, Callable[[RenderContext, int, int], list[str]], int]] = {
-    "cyber": ("霓虹扫描 / 适合比赛演示", _cyber_scan, 10),
-    "neural": ("神经研究核心 / 适合展示 Agent 流程", _neural_boot, 10),
-    "warp": ("曲速点火 / 紧凑有冲击力", _warp_drive, 12),
-    "minimal": ("专业极简 / 适合日常启动", _minimal, 8),
-}
 
 
 def live_cyber_frame(
@@ -350,17 +275,15 @@ class LiveCyberDisplay:
 
 
 def show_intro(
-    style: str = "cyber",
     *,
     duration: float = 0.9,
     animate: bool | None = None,
     ascii_only: bool = False,
     stream: TextIO = sys.stdout,
 ) -> None:
-    """Render one intro, automatically falling back to a static final frame."""
-    if style not in STYLES:
-        raise ValueError(f"Unknown intro style: {style!r}")
-    _, renderer, total_frames = STYLES[style]
+    """Render the Cyber intro, falling back to a static final frame."""
+    renderer = _cyber_scan
+    total_frames = 10
     ctx = _terminal_context(stream, ascii_only=ascii_only)
     if animate is None:
         animate = ctx.color and not os.getenv("CI") and not os.getenv("BYTERUSH_NO_INTRO")
@@ -388,34 +311,19 @@ def show_intro(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Preview ByteRush terminal intro designs")
-    parser.add_argument("--style", choices=STYLES, default="cyber")
-    parser.add_argument("--all", action="store_true", help="preview all designs")
-    parser.add_argument("--list", action="store_true", help="list available designs")
-    parser.add_argument("--duration", type=float, default=0.9, help="seconds per design")
+    parser = argparse.ArgumentParser(description="Preview the ByteRush Cyber terminal intro")
+    parser.add_argument("--duration", type=float, default=0.9, help="animation duration in seconds")
     parser.add_argument("--force-animate", action="store_true", help="animate even when output is redirected")
     parser.add_argument("--no-animate", action="store_true", help="print one static frame")
     parser.add_argument("--ascii", action="store_true", help="avoid Unicode-only symbols")
     args = parser.parse_args()
 
-    if args.list:
-        for name, (description, _, _) in STYLES.items():
-            print(f"{name:<8} {description}")
-        return
-
-    styles = list(STYLES) if args.all else [args.style]
     requested_animation = True if args.force_animate else False if args.no_animate else None
-    for index, style in enumerate(styles):
-        if len(styles) > 1:
-            print(f"\n[{style}] {STYLES[style][0]}")
-        show_intro(
-            style,
-            duration=max(0.0, args.duration),
-            animate=requested_animation,
-            ascii_only=args.ascii,
-        )
-        if index < len(styles) - 1 and requested_animation:
-            time.sleep(0.25)
+    show_intro(
+        duration=max(0.0, args.duration),
+        animate=requested_animation,
+        ascii_only=args.ascii,
+    )
 
 
 if __name__ == "__main__":

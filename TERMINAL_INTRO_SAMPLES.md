@@ -1,26 +1,13 @@
-# ByteRush 终端开场动画 samples
+# ByteRush Cyber 终端开场动画
 
-直接预览全部方案：
-
-```bash
-python terminal_intro.py --all --force-animate
-```
-
-单独预览：
+直接预览：
 
 ```bash
-python terminal_intro.py --style cyber --force-animate
-python terminal_intro.py --style neural --force-animate
-python terminal_intro.py --style warp --force-animate
-python terminal_intro.py --style minimal --force-animate
+python terminal_intro.py --force-animate
 ```
 
-## 方案定位
-
-- `cyber`：霓虹扫描大 Logo，视觉冲击最强，适合比赛演示或录屏。
-- `neural`：展示 `IDEA → CODE → TRAIN → EVAL → SELECT`，最能表达项目的自主研究流程。
-- `warp`：曲速点火和进度条，短、快，适合高频本地启动。
-- `minimal`：克制的单行控制台风格，适合正式运行和长日志。
+Cyber 动画使用霓虹扫描大 Logo，并在下方显示真实启动进度。宽终端显示完整 Logo，窄终端
+自动切换为紧凑版本。
 
 ## 接入真实入口
 
@@ -55,7 +42,7 @@ python launch_with_intro.py --intro-log-file /tmp/byterush.log [原有参数...]
 ```python
 from terminal_intro import show_intro
 
-show_intro("neural")
+show_intro()
 ```
 
 动画在 CI、输出重定向、`TERM=dumb` 或设置 `NO_COLOR` 时会自动降级为静态帧。设置

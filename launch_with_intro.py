@@ -66,7 +66,7 @@ def main() -> int:
     if live:
         display.start()
     else:
-        show_intro("cyber", animate=False, ascii_only=args.intro_ascii)
+        show_intro(animate=False, ascii_only=args.intro_ascii)
 
     raw_log: TextIO | None = None
     if args.intro_log_file:
