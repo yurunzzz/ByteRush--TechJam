@@ -12,7 +12,7 @@
 → 自动选择最佳实现并保存 checkpoint
 ```
 
-当前版本已经在 SeeTacloud 云服务器上完整跑通 Stage 1 AgentManager baseline。代码不会把 test 标签或 test 指标暴露给 Agent。
+当前版本已经在 SeeTacloud 云服务器上完整跑通多轮端到端 AgentManager campaign(Stage 1→4),并在两个独立 LLM 后端上验证可复现:DeepSeek(`deepseek-v4-pro/flash/flash-vision-exp`,8-28→8-30)与 OpenAI(`gpt-4.1-mini`,8-31),切换后端无需改任何代码。全程 agent 只根据 validation primary 选择节点,代码不会把 test 标签或 test 指标暴露给 Agent。截至目前最佳 validation primary 为 **0.6053**(相对官方 FM baseline 0.6016,+0.0037;来自 8-29 DeepSeek 运行)。
 
 ## 1. 当前状态
 
@@ -20,7 +20,7 @@
 
 - AI Scientist-v2 与 KuaiRand starter kit 的目录和执行接口连接；
 - validation-only FM 实验边界；
-- DeepSeek V4、OpenAI 和 Ollama 的模型路由；
+- DeepSeek 与 OpenAI 两个后端的模型路由(经 `AI_SCIENTIST_*_MODEL` 环境变量切换,无需改代码;上游还保留 Anthropic/Bedrock/Vertex、Ollama 路径,本项目未使用);
 - DeepSeek 结构化工具调用与指标解析；
 - LLM 自动生成代码、V2 自动执行、自动分析结果；
 - journal 节点创建、单 seed 复验和最佳节点选择；
@@ -37,9 +37,21 @@
 | primary | 0.601469547 |
 | best epoch | 7 |
 
-`primary = (GAUC + nDCG@5) / 2`。这些数字用于确认 pipeline 可复现，不是最终比赛成绩。
+`primary = (GAUC + nDCG@5) / 2`。上表是 **FM baseline 复现校验**(约等于官方 0.6016),用于确认 pipeline 可复现,不是最终比赛成绩。
 
-## 2. 比赛任务口径
+在此基础上,agent 自主搜索到的**最佳 validation 节点为 primary 0.6053**(+0.0037 vs FM baseline,来自 8-29 DeepSeek 运行),8-31 换 OpenAI `gpt-4.1-mini` 重跑三次的最佳约 0.6045、未超过它。完整的逐 run 账本见 [`reports/RUN_LOG.md`](reports/RUN_LOG.md)。注意:**最终名次由组委会在 hidden test 上评一次**,参赛期间我们看不到 test 反馈,因此本仓库只自报 validation 指标;官方 FM 在 hidden test 上的参考分为 primary 0.5946。
+
+## 2. 团队贡献与致谢
+
+本项目主要通过远程服务器协作开发，Git 提交身份不能准确代表每位成员的实际贡献。感谢每位团队成员：
+
+- **Jiang Yushan**：负责团队分工、题目分析、进度管理和服务器资源管理，以及运行记录、代码差异追踪、可靠性测试与终端演示体验；
+- **Zhang Yurun**：负责 AI-Scientist 与 KuaiRand 的整体集成、研究反馈循环，以及可信实验与最终提交管线；
+- **Lepeng Wang**：负责 Agent 阶段编排、候选模型契约、闭环搜索、并行执行和核心测试；
+- **Xie Maonan**：负责 KuaiRand 数据分析和研究先验、实验结果核验，以及比赛文档与交付材料整理；
+- **Lu Yujing**：负责初步文献调研、API 管理和 README 整理，以及实验 Dashboard、数据加载与快照展示。
+
+## 3. 比赛任务口径
 
 | 项目 | 约定 |
 |---|---|
@@ -53,7 +65,7 @@
 
 `evaluate.py` 是唯一评分口径。当前研究循环必须根据 validation primary 选择节点；test 只能在最终模型冻结后用于生成提交文件，不能返回给 Agent。
 
-## 3. 仓库结构
+## 4. 仓库结构
 
 ```text
 ByteRush/
@@ -80,7 +92,7 @@ ByteRush/
 
 以下内容不会上传 GitHub：KuaiRand 原始数据和压缩包、API Key、`.env`、`experiments/`、`deployment_runs/`、缓存和模型 checkpoint。
 
-## 4. 环境与数据准备
+## 5. 环境与数据准备
 
 推荐 Linux、Python 3.11/3.12 和 CUDA PyTorch。FM 本身也可以在 CPU 上运行。
 
@@ -108,7 +120,7 @@ cd ..
 test -d kuairand-starter-kit/KuaiRand-Pure/data && echo "data ready"
 ```
 
-## 5. 配置 LLM API
+## 6. 配置 LLM API
 
 仓库不保存 API Key。凭据必须在启动 Agent 的同一个 shell 或 tmux 会话中加载。
 
@@ -150,7 +162,7 @@ export AI_SCIENTIST_SELECT_MODEL="gpt-4.1-mini"
 
 兼容 OpenAI API 的网关还可设置 `OPENAI_BASE_URL`。取消六个 `AI_SCIENTIST_*_MODEL` 环境变量即可恢复 DeepSeek 默认值。
 
-## 6. 推荐使用 tmux
+## 7. 推荐使用 tmux
 
 ```bash
 tmux new-session -A -s byterush
@@ -158,7 +170,7 @@ tmux new-session -A -s byterush
 
 在 tmux 中加载 API Key 后再运行 Agent。安全离开会话时按 `Ctrl+B`，松开后按 `D`。不要在唯一窗口中输入 `exit` 或按 `Ctrl+D`，否则会话及临时环境变量会消失。tmux 消失不会删除磁盘文件，但需要重新加载 Key。
 
-## 7. 运行 smoke test
+## 8. 运行 smoke test
 
 smoke test 不调用 LLM，用于验证 V2 Interpreter、FM validation-only 接口、指标结构、primary 计算、受保护文件哈希和 `experiment_data.npy`。
 
@@ -175,7 +187,7 @@ V2_FM_SMOKE_RESULT {"status": "success", ...}
 
 默认产物位于 `deployment_runs/v2_fm_baseline/`。
 
-## 8. 运行完整 AgentManager Baseline
+## 9. 运行完整 AgentManager Baseline
 
 先确认至少一个 Key 已加载：
 
@@ -203,7 +215,7 @@ python launch_with_intro.py \
 
 不要传入 `--add_dataset_ref`。当前配置是最小自主闭环：单 worker、单初始节点、一个 seed 复验，不生成论文或 review。它验证 Agent pipeline 的可靠性，不负责直接提升比赛指标；后续应保留它作为回归测试。
 
-## 9. 成功判据和产物
+## 10. 成功判据和产物
 
 日志应依次出现：
 
@@ -241,7 +253,7 @@ experiments/<timestamp>_kuairand_fm_validation_baseline_attempt_0/
 | `logs/0-kuairand/stage_*/checkpoint.pkl` | 阶段 checkpoint |
 | `token_tracker*.json` | LLM 调用与 token 记录 |
 
-## 10. Validation-only FM 接口
+## 11. Validation-only FM 接口
 
 独立运行一个受控实验：
 
@@ -257,7 +269,7 @@ stdout 的机器可读记录以 `AI_SCIENTIST_RESULT ` 开头。成功结果只�
 
 允许配置的实验参数只有 `seed`、`embedding_dim`、`learning_rate`、`l2`、`batch_size`、`max_epochs`、`early_stopping_patience`、`min_delta` 和安全的 `experiment_name`。未知字段以及替换 label、split、evaluator 或 data loader 的尝试会被拒绝。详细契约见 `kuairand-starter-kit/AGENT_FM_INTERFACE.md`。
 
-## 11. 常见问题
+## 12. 常见问题
 
 ### tmux 显示 `no sessions`
 
@@ -292,15 +304,28 @@ PY
 tail -f /tmp/kuairand_agent_baseline.log
 ```
 
-## 12. 后续研究方向
+## 13. 局限性反思与未来工作
 
-1. Stage 2：自动搜索 FM 超参数；
-2. Stage 3：pairwise/listwise 损失、历史序列、多任务、观看时长建模；
-3. 增加多个候选节点和多 seed 稳健比较；
-4. 为 Stage 3 建立受控 model-plugin 接口；
-5. 最终模型冻结后再生成 test submission，且不向 Agent 返回 test 反馈。
+### 13.1 已知局限
 
-## 13. 上传 GitHub 前检查
+1. **Agent workflow 仍然偏简单。** 部署配置是最小自主闭环:单 worker、单初始节点、单 seed 复验、搜索树较浅、分支有限,reflect/revise 只做浅层调整,节点间没有跨 run 的记忆或更强的元推理。探索广度不足,是最终结果聚集在 FM baseline 附近(最佳仅 +0.0037)的重要原因之一。
+
+2. **在 KuaiRand-Pure 上的边际收益递减。** 我们把绝大部分时间花在 Pure 的增量调优上。Pure 虽占 primary **100%** 权重,但 FM baseline 已经很强、可提升空间小(oracle 上限 0.8484,FM 已到 0.6016,我们仅 +0.0037),在同一模型家族里继续微调回报很低。更有价值的做法本应是更早地**扩大模型家族搜索空间**,或尝试 bonus 数据集(1k / 27k)换取额外加分。
+
+3. **搜索效率低、token 成本高。** 两轮 campaign 合计约 **17.28M tokens** 才换来 +0.0037 的 primary 提升,单位提升的 token 成本很高。根因是树搜索每个节点都要重新构建上下文,缺乏节点间的缓存/记忆机制。
+   > 补充:GPU 峰值占用仅 **~436 MiB / RTX 3080 Ti**,说明在 FM 家族上瓶颈**不是算力**,而是 agent 的模型搜索空间与时间预算。
+
+### 13.2 如果有更多时间
+
+1. **更大显存的卡 + 更多时间 + 扩大候选模型空间,把近年推荐系统架构完整跑到收敛。** 把 agent 的候选从 FM 家族扩展到序列建模与特征交互的代表工作,并给足训练预算跑到收敛:
+   - **SASRec**(自注意力序列推荐,2018)、**DIN**(深度兴趣网络,2018)—— 经典基线(DIN 本次已浅层试过,best ≈ 0.6044,但未充分调优、未跑到收敛);
+   - **HSTU**(Meta 生成式推荐,2024)、**OneTrans**(WWW 2026,统一特征交互与序列建模的单一 Transformer)、**HyFormer**(2026,长序列建模 + 特征交互统一 backbone)—— 近年 scaling 期的代表架构。
+2. 引入**多候选节点 + 多 seed** 的稳健比较,降低单点噪声与偶然性。
+3. 为节点间加**缓存 / 记忆机制**,显著降低 token 成本、提高搜索效率。
+4. 尝试 bonus 数据集(KuaiRand-1k / 27k)以争取额外加分。
+5. 最终模型冻结后再生成 test submission,且全程不向 Agent 返回 test 反馈。
+
+## 14. 上传 GitHub 前检查
 
 ```bash
 git status --short --untracked-files=all
@@ -317,7 +342,7 @@ python -m py_compile \
 
 确认 Git 状态中没有 API Key、`.env`、KuaiRand 数据、实验目录、checkpoint、日志、提交 CSV、SSH 密码或个人绝对路径配置。
 
-## 14. 上游项目与许可证
+## 15. 上游项目与许可证
 
 本项目基于 SakanaAI 的 AI Scientist-v2，并保留其许可证与负责任使用要求。系统会执行 LLM 生成的代码，只应在隔离且受控的环境中运行。任何论文或报告应按上游许可证要求披露 AI Scientist 的使用。
 
