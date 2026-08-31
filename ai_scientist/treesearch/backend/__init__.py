@@ -64,6 +64,13 @@ def query(
         model_kwargs["max_completion_tokens"] = 100000  # max_tokens
         # remove 'temperature' from model_kwargs
         model_kwargs.pop("temperature", None)
+    elif model.startswith("gpt-5.6"):
+        # GPT-5.6 accepts only its default sampling temperature and uses the
+        # completion-token parameter shared by reasoning-capable models.
+        model_kwargs.pop("temperature", None)
+        model_kwargs["max_completion_tokens"] = max_tokens
+        if func_spec is not None:
+            model_kwargs["reasoning_effort"] = "none"
     else:
         model_kwargs["max_tokens"] = max_tokens
 
