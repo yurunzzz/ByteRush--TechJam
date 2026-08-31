@@ -202,7 +202,8 @@ class FakeAgent:
                     else self.research_base
                 )
                 code = (
-                    "CONFIG = {'learning_rate': 0.001, 'epochs': 6}\n"
+                    "CONFIG = {'learning_rate': 0.001, 'epochs': 6, "
+                    "'batch_size': 8192, 'inference_batch_size': 4096}\n"
                     "RESEARCH_MANIFEST = {"
                     f"'candidate_id': {assignment_id!r}, 'role': 'autonomous_stage3', "
                     "'group': 'autonomous_research', 'category': 'open_choice', "
@@ -236,9 +237,16 @@ class FakeAgent:
                     "def build_features(splits, feature_state=None):\n"
                     "    return splits, feature_state\n"
                     "def create_model(feature_dimension, config=None):\n"
+                    "    inference_batch_size = CONFIG['inference_batch_size']\n"
                     f"    if component_enabled({component!r}):\n"
-                    f"        return ({token!r}, feature_dimension)\n"
+                    f"        return ({token!r}, feature_dimension, inference_batch_size)\n"
                     "    return ('fm', feature_dimension)\n"
+                    "def predict(x, batch_size=None):\n"
+                    "    if batch_size is None:\n"
+                    "        batch_size = CONFIG['inference_batch_size']\n"
+                    "    for start in range(0, len(x), batch_size):\n"
+                    "        pass\n"
+                    "    return x\n"
                 )
                 node = _node(code, score, parent=parent)
                 node.assignment_id = assignment_id
