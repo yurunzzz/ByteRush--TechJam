@@ -29,6 +29,7 @@ class BonusCacheDataTests(unittest.TestCase):
                 arrays[f"{name}_items"] = np.arange(size) % 20
                 arrays[f"{name}_labels"] = np.arange(size) % 2
                 arrays[f"{name}_history_end"] = np.arange(size)
+            arrays["valid_items"][-1] = 19
             np.savez(cache, **arrays)
             environment = {
                 "KUAIRAND_CACHE_PATH": str(cache),
@@ -52,6 +53,8 @@ class BonusCacheDataTests(unittest.TestCase):
         self.assertEqual(encoded["train"][0].shape, (5, 2))
         self.assertGreater(dimension, int(encoded["train"][0].max()))
         self.assertEqual(state["fields"], ["user_id", "video_id"])
+        self.assertNotIn(19, state["item_values"])
+        self.assertEqual(encoded["valid"][0][-1, 1], dimension - 1)
 
 
 if __name__ == "__main__":

@@ -112,22 +112,37 @@ def _bucket_edges(durations, n=10):
 def _encode_cache(splits, feature_state=None):
     if feature_state is None:
         reference = next(iter(splits.values()))
+        item_values = np.unique(np.asarray(splits["train"].items, dtype=np.int32))
         feature_state = {
             "schema_version": 1,
             "fields": list(CACHE_FIELDS),
             "num_users": int(reference.num_users),
             "num_items": int(reference.num_items),
             "item_offset": int(reference.num_users) + 1,
+            # Fit the compact vocabulary on train only.  The original cache
+            # uses sparse global item IDs (up to tens of millions), which
+            # would otherwise create multi-gigabyte embeddings/checkpoints.
+            "item_values": item_values.tolist(),
         }
     elif feature_state.get("fields") != CACHE_FIELDS:
         raise ValueError("feature_state fields do not match cache-backed fields")
     item_offset = int(feature_state["item_offset"])
-    feature_dimension = item_offset + int(feature_state["num_items"]) + 1
+    item_values = np.asarray(feature_state["item_values"], dtype=np.int32)
+    unknown_item = len(item_values)
+    feature_dimension = item_offset + unknown_item + 1
     encoded = {}
     for name, split in splits.items():
         x = np.empty((len(split.labels), 2), dtype=np.int32)
         x[:, 0] = split.users
-        x[:, 1] = split.items + item_offset
+        positions = np.searchsorted(item_values, split.items)
+        matched = positions < len(item_values)
+        matched_indices = np.flatnonzero(matched)
+        matched[matched_indices] = (
+            item_values[positions[matched_indices]] == split.items[matched_indices]
+        )
+        compact_items = np.full(len(split.items), unknown_item, dtype=np.int32)
+        compact_items[matched] = positions[matched]
+        x[:, 1] = compact_items + item_offset
         encoded[name] = (x, split.labels, split.users)
     return encoded, feature_dimension, feature_state
 
