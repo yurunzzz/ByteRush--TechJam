@@ -207,6 +207,13 @@ class CandidateContractTests(unittest.TestCase):
         self.assertNotIn("donor", prompt.lower())
         self.assertNotIn("required mechanism", prompt.lower())
         self.assertIn("No scientific choice has been made", prompt)
+        self.assertIn("source_type must be exactly one of", prompt)
+        self.assertIn("'literature', 'validation', or 'dependency'", prompt)
+        self.assertIn("'supports': ['your_exact_component_key']", prompt)
+        self.assertIn("contract, smoke, or execution failures", prompt)
+        self.assertIn("duplicate or research-family", prompt)
+        self.assertIn("user_ids = x_tensor[:, 0]", prompt)
+        self.assertIn("exact string literal inside build_features", prompt)
         self.assertTrue(prompt.rstrip().endswith(build_assignment_marker(
             AUTONOMOUS_STAGE3_ROLE,
             assignment_id="round1:autonomous:2",
