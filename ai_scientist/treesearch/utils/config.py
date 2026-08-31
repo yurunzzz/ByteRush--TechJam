@@ -99,6 +99,25 @@ class ResearchLoopSettings:
     final_confirmation_num_seeds: int = 5
     ablation_candidate_top_k: int = 2
     ablation_synergy_pairs: int = 3
+    min_valid_candidates_per_round: int = 3
+    target_valid_candidates_per_round: int = 5
+    max_candidate_branches: int = 8
+    branch_growth_per_positive_round: int = 2
+    max_repair_attempts_per_assignment: int = 2
+    no_valid_round_patience: int = 2
+    low_gain_round_patience: int = 3
+    min_round_primary_gain: float = 0.0002
+    provisional_min_primary_gain: float = 0.0005
+    final_promotion_min_primary_gain: float = 0.001
+    transfer_base_ratio: float = 0.30
+    transfer_min_ratio: float = 0.15
+    transfer_max_ratio: float = 0.50
+    donor_max_primary_gap: float = 0.002
+    smoke_test_enabled: bool = True
+    smoke_test_timeout_seconds: int = 240
+    max_wall_clock_seconds: int = 19800
+    finalize_reserve_seconds: int = 600
+    checkpoint_submission_each_incumbent: bool = True
     min_primary_gain: float = 0.002
     required_seed_wins: int = 2
 

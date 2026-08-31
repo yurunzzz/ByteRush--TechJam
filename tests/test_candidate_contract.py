@@ -3,11 +3,15 @@ import unittest
 from ai_scientist.treesearch.candidate_contract import (
     DEFAULT_CANDIDATE_ROLES,
     bootstrap_candidate_roles,
+    build_assignment_marker,
     candidate_semantic_signature,
     config_assignment,
     format_factor_change,
+    extract_assignment_contract,
     normalize_candidate_metadata,
     restore_dynamic_config_fields,
+    rewrite_for_smoke_test,
+    role_from_assignment,
     select_candidate_roles,
     validate_candidate_contract,
     validate_tuning_contract,
@@ -150,6 +154,33 @@ def create_model(feature_dimension, config=None):
 
 
 class CandidateContractTests(unittest.TestCase):
+    def test_assignment_marker_round_trip_preserves_parallel_identity(self):
+        role = DEFAULT_CANDIDATE_ROLES[2]
+        marker = build_assignment_marker(
+            role,
+            assignment_id="round2:transfer:1",
+            assignment_kind="transfer",
+            parent_node_id="incumbent-123",
+            parent_model_family="wide_deep",
+        )
+        payload = extract_assignment_contract("prefix\n" + marker + "suffix")
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["assignment_id"], "round2:transfer:1")
+        self.assertEqual(payload["assignment_kind"], "transfer")
+        self.assertEqual(payload["parent_node_id"], "incumbent-123")
+        restored = role_from_assignment(payload)
+        self.assertEqual(restored.name, role.name)
+
+    def test_smoke_rewrite_limits_training_without_changing_mechanism(self):
+        code = BASE.replace("'epochs': 6", "'epochs': 12, 'patience': 4")
+        smoke = rewrite_for_smoke_test(code)
+
+        config = config_assignment(smoke)
+        self.assertEqual(config["epochs"], 1)
+        self.assertEqual(config["patience"], 1)
+        self.assertIn("return ('fm', feature_dimension)", smoke)
+
     def test_metadata_normalizer_repairs_shapes_without_inventing_model_code(self):
         role = bootstrap_candidate_roles(["wide_deep"])[0]
         candidate = """

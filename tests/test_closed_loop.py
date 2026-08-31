@@ -12,6 +12,7 @@ from omegaconf import OmegaConf
 from ai_scientist.treesearch.agent_manager import AgentManager, Stage
 from ai_scientist.treesearch.closed_loop import (
     ClosedLoopRunner,
+    EvaluatedConfiguration,
     _node_validation_metrics,
 )
 from ai_scientist.treesearch.journal import Journal, Node
@@ -71,6 +72,8 @@ class FakeManager:
                         "ablation_synergy_pairs": 0,
                         "min_primary_gain": 0.002,
                         "required_seed_wins": 1,
+                        "checkpoint_submission_each_incumbent": False,
+                        "smoke_test_enabled": False,
                     },
                     "ablation": {"max_components": 1},
                     "final_model_dir": str(output_dir),
@@ -516,6 +519,58 @@ class ClosedLoopTests(unittest.TestCase):
         ]
         self.assertEqual(len(standardized), 1)
         self.assertEqual(standardized[0].status, "verified_incumbent")
+
+    def test_incumbent_snapshot_exports_submission_and_updates_pointer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manager = FakeManager(
+                self._data_dir(root / "starter"),
+                root / "artifacts" / "final_model",
+            )
+            manager.cfg.agent.research_loop.checkpoint_submission_each_incumbent = True
+            frozen = {}
+            exported = {}
+
+            def finalizer(journal, **kwargs):
+                frozen.update(kwargs)
+                Path(kwargs["output_dir"]).mkdir(parents=True, exist_ok=True)
+                return {"source_stage": kwargs["source_stage"]}
+
+            def submission_exporter(**kwargs):
+                exported.update(kwargs)
+                return {
+                    "path": str(Path(kwargs["output_dir"]) / "submission.csv"),
+                    "checked": True,
+                }
+
+            runner = ClosedLoopRunner(
+                manager,
+                exec_callback=lambda *args: None,
+                agent_factory=FakeAgent,
+                finalizer=finalizer,
+                submission_exporter=submission_exporter,
+            )
+            journal = Journal()
+            node = _node("ABLATION_COMPONENTS = {}\nBASELINE = 'FM'\n", 0.602)
+            journal.append(node)
+            runner.incumbent = EvaluatedConfiguration(
+                node=node,
+                journal=journal,
+                stage_name="2_baseline_tuning_1_test",
+                score=0.602,
+                seed_scores=[0.601, 0.603],
+                metrics={"GAUC": 0.61, "nDCG@5": 0.594, "primary": 0.602},
+            )
+
+            pointer = runner._snapshot_best_available("verified test")
+            pointer_file = root / "artifacts" / "best_available.json"
+
+            self.assertIsNotNone(pointer)
+            self.assertTrue(pointer_file.is_file())
+            self.assertTrue(pointer["submission"]["checked"])
+            self.assertEqual(frozen["required_seeds"], 2)
+            self.assertEqual(exported["output_dir"], frozen["output_dir"])
+            self.assertIn("incumbent_snapshots", str(exported["output_dir"]))
 
     def test_agent_manager_uses_closed_loop_only_when_enabled(self):
         manager = object.__new__(AgentManager)

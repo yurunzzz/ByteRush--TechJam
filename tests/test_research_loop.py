@@ -4,6 +4,8 @@ from omegaconf import OmegaConf
 
 from ai_scientist.treesearch.research_loop import (
     AblationEvidence,
+    CandidateAttemptRecord,
+    ExperimentRecord,
     PromotionPolicy,
     ResearchLoopConfig,
     ResearchLoopState,
@@ -96,6 +98,87 @@ class PromotionPolicyTests(unittest.TestCase):
 
 
 class ResearchLoopStateTests(unittest.TestCase):
+    def test_adaptive_stop_after_two_rounds_without_valid_candidates(self):
+        state = ResearchLoopState(
+            config=ResearchLoopConfig(
+                max_research_rounds=10,
+                patience=10,
+                no_valid_round_patience=2,
+                low_gain_round_patience=10,
+            )
+        )
+        state.set_incumbent("fm", 0.60, [0.60], metrics={"primary": 0.60})
+        for round_number in (1, 2):
+            self.assertEqual(state.start_round(), round_number)
+            state.memory.record_attempt(
+                CandidateAttemptRecord(
+                    round_number=round_number,
+                    assignment_id=f"r{round_number}",
+                    assignment_kind="exploit",
+                    role="ranking_objective",
+                    category="objective_and_training",
+                    parent_node_id="fm",
+                    status="preflight_rejected",
+                    failure_category="ranking_group_error",
+                )
+            )
+            state.finish_round()
+
+        self.assertTrue(state.should_stop)
+        self.assertEqual(state.no_valid_rounds, 2)
+
+    def test_transferable_insight_keeps_validation_only_donor_evidence(self):
+        state = ResearchLoopState()
+        state.memory.record(
+            ExperimentRecord(
+                round_number=1,
+                node_id="dcn-donor",
+                fingerprint="fingerprint",
+                score=0.604,
+                seed_scores=[0.604, 0.603],
+                promoted=False,
+                reason="valid but not promoted",
+                metrics={"GAUC": 0.67, "nDCG@5": 0.538, "primary": 0.604},
+                metric_deltas={"GAUC": 0.002, "nDCG@5": 0.001, "primary": 0.0015},
+                seed_mean=0.6035,
+                seed_std=0.0005,
+                seed_wins=2,
+                principal_change="explicit cross layer",
+                components=["cross_layer"],
+                model_family="dcn",
+                research_family="architecture",
+                code_path="model.py",
+                checkpoint_path="checkpoint.npz",
+                artifacts_valid=True,
+                status="valid_not_promoted",
+            )
+        )
+
+        insights = state.memory.transferable_insights(
+            incumbent_node_id="wide-deep", limit=2
+        )
+
+        self.assertEqual(len(insights), 1)
+        self.assertEqual(insights[0].donor_node_id, "dcn-donor")
+        self.assertEqual(insights[0].mechanism_ids, ("cross_layer",))
+        self.assertNotIn("test", insights[0].metrics)
+
+    def test_strict_config_schema_accepts_adaptive_transfer_settings(self):
+        schema = OmegaConf.structured(ResearchLoopSettings)
+        merged = OmegaConf.merge(
+            schema,
+            {
+                "min_valid_candidates_per_round": 3,
+                "transfer_base_ratio": 0.3,
+                "smoke_test_enabled": True,
+                "max_wall_clock_seconds": 19800,
+            },
+        )
+
+        self.assertEqual(merged.min_valid_candidates_per_round, 3)
+        self.assertAlmostEqual(merged.transfer_base_ratio, 0.3)
+        self.assertTrue(merged.smoke_test_enabled)
+
     def test_strict_config_schema_accepts_experience_top_k(self):
         schema = OmegaConf.structured(ResearchLoopSettings)
         merged = OmegaConf.merge(schema, {"experience_top_k": 5})

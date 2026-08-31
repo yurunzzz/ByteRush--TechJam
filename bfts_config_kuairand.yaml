@@ -42,7 +42,9 @@ agent:
     num_seeds: 3
   research_loop:
     enabled: true
-    max_research_rounds: 4
+    # This is a safety ceiling. Adaptive convergence normally stops earlier;
+    # productive directions may use more rounds while gains remain positive.
+    max_research_rounds: 10
     patience: 4
     stage1_validation_iterations: 2
     # Stage 1A remains the official FM control. Stage 1B creates cheap,
@@ -64,6 +66,8 @@ agent:
     max_component_regression: 0.001
     # Match the proven dbcab71 run while retaining evidence-guided selection.
     candidate_branches: 5
+    max_candidate_branches: 8
+    branch_growth_per_positive_round: 2
     # Two champion branches, two validation-successful frontier branches, and
     # one Stage-1B architecture root form each multi-parent Stage-3 portfolio.
     stage3_incumbent_parent_slots: 2
@@ -80,6 +84,20 @@ agent:
     # The stricter candidate contract needs two spare attempts beyond dbcab71.
     # Three first attempts plus two contract/debug retries.
     stage3_generation_attempts: 30
+    min_valid_candidates_per_round: 3
+    target_valid_candidates_per_round: 5
+    max_repair_attempts_per_assignment: 2
+    no_valid_round_patience: 2
+    low_gain_round_patience: 3
+    min_round_primary_gain: 0.0002
+    # Explicit transfer starts at 30%; positive transfer outcomes increase it,
+    # repeated failures reduce it, always within these bounds.
+    transfer_base_ratio: 0.30
+    transfer_min_ratio: 0.15
+    transfer_max_ratio: 0.50
+    donor_max_primary_gap: 0.002
+    smoke_test_enabled: true
+    smoke_test_timeout_seconds: 240
     # Reuse the generation score for 3 -> 2 elimination. Top 2 get one
     # targeted correction; the fixed Top 1 gets most of the parameter budget.
     candidate_tuning_top_k: 3
@@ -88,22 +106,29 @@ agent:
     candidate_refinement_iterations: 4
     candidate_finalist_top_k: 2
     finalist_top_k: 1
-    # One screening seed is enough before ablation; final confirmation uses two.
-    finalist_num_seeds: 1
+    # Two screening seeds precede ablation; final confirmation uses five.
+    finalist_num_seeds: 2
     # Feed the strongest diverse validation-only non-winners into the next
     # Stage 3 round as transferable lessons, never as automatic promotions.
     experience_top_k: 3
     # Preserve parallel Stage 3 execution while avoiding simultaneous
     # PyTorch/CUDA initialization spikes on the single competition GPU.
     stage3_startup_stagger_seconds: 8
-    final_confirmation_num_seeds: 2
-    ablation_candidate_top_k: 1
-    ablation_synergy_pairs: 0
+    final_confirmation_num_seeds: 5
+    ablation_candidate_top_k: 2
+    ablation_synergy_pairs: 1
+    provisional_min_primary_gain: 0.0005
+    final_promotion_min_primary_gain: 0.001
+    # A safety cutoff, not a runtime target. The loop stops earlier when
+    # marginal validation value disappears and reserves finalization time.
+    max_wall_clock_seconds: 19800
+    finalize_reserve_seconds: 600
+    checkpoint_submission_each_incumbent: true
     min_primary_gain: 0.002
     required_seed_wins: 1
   # Stage 4 entry requires both a promotable Stage 3 gain and a literal
   # ABLATION_COMPONENTS manifest in the winning code. Stage 4 runs controlled
-  # leave-one-component-out ablations, then two-seed final confirmation before freezing.
+  # leave-one-component-out ablations, then five-seed final confirmation before freezing.
   ablation:
     mode: registered_component_leave_one_out
     min_primary_gain: 0.002

@@ -22,6 +22,7 @@ from .candidate_contract import (
     CandidateRole,
     bootstrap_candidate_roles,
     candidate_semantic_signature,
+    classify_contract_failures,
     component_guard_calls,
     config_assignment,
     format_factor_change,
@@ -44,11 +45,13 @@ from .parallel_agent import (
 )
 from .research_loop import (
     AblationEvidence,
+    CandidateAttemptRecord,
     ExperimentRecord,
     FrontierRecord,
     PromotionPolicy,
     ResearchLoopConfig,
     ResearchLoopState,
+    TransferableInsightRecord,
     candidate_fingerprint,
     estimate_max_experiment_runs,
     extract_primary_score,
@@ -81,6 +84,10 @@ class CandidateAssignment:
     parent: Node
     parent_model_family: str
     source: str
+    assignment_id: str = ""
+    assignment_kind: str = "exploit"
+    donor: Optional[Node] = None
+    donor_insight: Optional[TransferableInsightRecord] = None
 
 
 def export_and_check_submission(
@@ -447,12 +454,15 @@ class ClosedLoopRunner:
         self.candidate_role_by_node_id: dict[str, CandidateRole] = {}
         self.candidate_origin_by_node_id: dict[str, tuple[Any, Journal]] = {}
         self.candidate_parent_by_node_id: dict[str, Node] = {}
+        self.candidate_assignment_by_node_id: dict[str, CandidateAssignment] = {}
         self.frontier_nodes_by_id: dict[str, Node] = {}
         self.bootstrap_node_ids: set[str] = set()
         self.memory_dir = self.output_dir.parent / "research_loop"
         self.generated_fingerprints: set[str] = set()
         self.generated_semantic_signatures: set[str] = set()
         self.incumbent: Optional[EvaluatedConfiguration] = None
+        self.started_at = time.monotonic()
+        self.snapshot_index = 0
 
     def _new_stage(
         self,
@@ -1076,6 +1086,75 @@ class ClosedLoopRunner:
         }
         return json.dumps(payload, sort_keys=True, ensure_ascii=True)
 
+    @staticmethod
+    def _transfer_symbol_context(code: str, *, max_chars: int = 12000) -> str:
+        """Extract compact executable donor symbols instead of copying a whole model."""
+        try:
+            tree = ast.parse(code)
+        except (SyntaxError, TypeError):
+            return code[:max_chars]
+        snippets = []
+        for statement in tree.body:
+            name = getattr(statement, "name", "")
+            if isinstance(statement, (ast.ClassDef, ast.FunctionDef)) and (
+                name in {"build_features", "create_model", "train_model"}
+                or "model" in name.lower()
+                or "loss" in name.lower()
+            ):
+                snippets.append(ast.unparse(statement))
+        return "\n\n".join(snippets)[:max_chars]
+
+    def _donor_context(self, assignment: CandidateAssignment) -> str:
+        if assignment.donor is None or assignment.donor_insight is None:
+            return ""
+        insight = assignment.donor_insight
+        payload = {
+            "donor_candidate_id": insight.donor_node_id,
+            "donor_model_family": insight.donor_model_family,
+            "mechanism_ids": list(insight.mechanism_ids),
+            "components": list(insight.components),
+            "principal_change": insight.principal_change,
+            "validation_metrics": dict(insight.metrics),
+            "validation_deltas": dict(insight.metric_deltas),
+            "confidence": insight.confidence,
+        }
+        return (
+            json.dumps(payload, indent=2, sort_keys=True)
+            + "\nDonor implementation symbols (reference only):\n"
+            + self._transfer_symbol_context(assignment.donor.code)
+        )
+
+    def _record_generation_attempt(
+        self,
+        assignment: CandidateAssignment,
+        *,
+        round_number: int,
+        status: str,
+        reason: str = "",
+        node_id: str = "",
+    ) -> None:
+        self.state.memory.record_attempt(
+            CandidateAttemptRecord(
+                round_number=round_number,
+                assignment_id=assignment.assignment_id,
+                assignment_kind=assignment.assignment_kind,
+                role=assignment.role.name,
+                category=assignment.role.group,
+                parent_node_id=assignment.parent.id,
+                donor_candidate_id=(
+                    assignment.donor_insight.donor_node_id
+                    if assignment.donor_insight is not None
+                    else ""
+                ),
+                status=status,
+                failure_category=(
+                    classify_contract_failures([reason]) if reason else ""
+                ),
+                reason=reason,
+                node_id=node_id,
+            )
+        )
+
     def _generate_assigned_candidates(
         self,
         assignments: Sequence[CandidateAssignment],
@@ -1108,6 +1187,10 @@ class ClosedLoopRunner:
                 parent=parents_by_id[assignment.parent.id],
                 parent_model_family=assignment.parent_model_family,
                 source=assignment.source,
+                assignment_id=assignment.assignment_id,
+                assignment_kind=assignment.assignment_kind,
+                donor=assignment.donor,
+                donor_insight=assignment.donor_insight,
             )
             for assignment in assignments
         ]
@@ -1152,8 +1235,21 @@ class ClosedLoopRunner:
                 ),
                 parent_node_id=item.parent.id,
                 parent_model_family=item.parent_model_family,
+                assignment_id=item.assignment_id,
+                assignment_kind=item.assignment_kind,
+                donor_context=self._donor_context(item),
             )
 
+        assignment_attempts = {item.assignment_id: 0 for item in normalized}
+        exhausted: set[str] = set()
+        target_valid = (
+            len(normalized)
+            if stage1b
+            else min(
+                len(normalized),
+                max(1, int(self.config.target_valid_candidates_per_round)),
+            )
+        )
         with self._agent(
             stage,
             journal,
@@ -1167,30 +1263,69 @@ class ClosedLoopRunner:
         ) as agent:
             while attempts < max_attempts:
                 pending = [
-                    item for item in normalized if item.role.name not in accepted
+                    item
+                    for item in normalized
+                    if item.role.name not in accepted
+                    and item.assignment_id not in exhausted
                 ]
-                if not pending:
+                if not pending or len(accepted) >= target_valid:
                     break
                 assigned = pending[: min(max_attempts - attempts, len(pending))]
+                for item in assigned:
+                    assignment_attempts[item.assignment_id] += 1
                 agent.research_base_nodes = [item.parent for item in assigned]
                 agent.research_base_node = assigned[0].parent
                 agent.candidate_contexts = [
                     prompt_for(item, role_index[item.role.name]) for item in assigned
                 ]
                 before = self._experiment_count(journal)
-                agent.step(self.exec_callback, max_nodes=len(assigned))
+                returned_nodes = agent.step(
+                    self.exec_callback, max_nodes=len(assigned)
+                )
                 added = self._experiment_count(journal) - before
-                if added <= 0:
+                if added <= 0 and not returned_nodes:
                     break
-                attempts += added
+                attempts += max(added, len(assigned))
                 self._notify(stage, journal)
-                new_nodes = [
-                    node for node in journal.nodes if node.id not in seen_node_ids
-                ]
-                for expected, node in zip(assigned, new_nodes):
+                if not isinstance(returned_nodes, list):
+                    returned_nodes = [
+                        node for node in journal.nodes if node.id not in seen_node_ids
+                    ]
+                padded_nodes = list(returned_nodes) + [None] * max(
+                    0, len(assigned) - len(returned_nodes)
+                )
+                for expected, node in zip(assigned, padded_nodes):
+                    if node is None:
+                        reason = "worker returned no candidate"
+                        retry_feedback[expected.role.name].append(reason)
+                        self._record_generation_attempt(
+                            expected,
+                            round_number=round_number,
+                            status="worker_failed",
+                            reason=reason,
+                        )
+                        if assignment_attempts[expected.assignment_id] > self.config.max_repair_attempts_per_assignment:
+                            exhausted.add(expected.assignment_id)
+                        continue
                     seen_node_ids.add(node.id)
                     if _node_score(node) is None:
-                        retry_feedback[expected.role.name].append("execution failed")
+                        reason = str(node.analysis or "execution failed")
+                        retry_feedback[expected.role.name].append(reason)
+                        self._record_generation_attempt(
+                            expected,
+                            round_number=round_number,
+                            status=(
+                                "preflight_rejected"
+                                if "PREFLIGHT_REJECTED" in reason
+                                else "smoke_rejected"
+                                if "SMOKE_TEST_REJECTED" in reason
+                                else "execution_failed"
+                            ),
+                            reason=reason,
+                            node_id=node.id,
+                        )
+                        if assignment_attempts[expected.assignment_id] > self.config.max_repair_attempts_per_assignment:
+                            exhausted.add(expected.assignment_id)
                         continue
                     node.code = normalize_candidate_metadata(
                         node.code,
@@ -1211,7 +1346,16 @@ class ClosedLoopRunner:
                         self.state.memory.failed_hypotheses.append(
                             f"{expected.role.name}: {reason}"
                         )
+                        self._record_generation_attempt(
+                            expected,
+                            round_number=round_number,
+                            status="contract_rejected",
+                            reason=reason,
+                            node_id=node.id,
+                        )
                         print(f"[yellow]Rejected candidate: {reason}[/yellow]")
+                        if assignment_attempts[expected.assignment_id] > self.config.max_repair_attempts_per_assignment:
+                            exhausted.add(expected.assignment_id)
                         continue
                     if stage1b:
                         config = config_assignment(node.code) or {}
@@ -1225,14 +1369,37 @@ class ClosedLoopRunner:
                             self.state.memory.failed_hypotheses.append(
                                 f"{expected.role.name}: {reason}"
                             )
+                            self._record_generation_attempt(
+                                expected,
+                                round_number=round_number,
+                                status="budget_rejected",
+                                reason=reason,
+                                node_id=node.id,
+                            )
                             continue
                     signature = candidate_semantic_signature(contract)
                     fingerprint = candidate_fingerprint(node.code)
                     if signature in self.generated_semantic_signatures:
-                        retry_feedback[expected.role.name].append("semantic duplicate")
+                        reason = "semantic duplicate"
+                        retry_feedback[expected.role.name].append(reason)
+                        self._record_generation_attempt(
+                            expected,
+                            round_number=round_number,
+                            status="duplicate",
+                            reason=reason,
+                            node_id=node.id,
+                        )
                         continue
                     if fingerprint in self.generated_fingerprints:
-                        retry_feedback[expected.role.name].append("code duplicate")
+                        reason = "code duplicate"
+                        retry_feedback[expected.role.name].append(reason)
+                        self._record_generation_attempt(
+                            expected,
+                            round_number=round_number,
+                            status="duplicate",
+                            reason=reason,
+                            node_id=node.id,
+                        )
                         continue
                     self.generated_semantic_signatures.add(signature)
                     self.generated_fingerprints.add(fingerprint)
@@ -1240,6 +1407,14 @@ class ClosedLoopRunner:
                     self.candidate_role_by_node_id[node.id] = expected.role
                     self.candidate_origin_by_node_id[node.id] = (stage, journal)
                     self.candidate_parent_by_node_id[node.id] = expected.parent
+                    self.candidate_assignment_by_node_id[node.id] = expected
+                    self._record_generation_attempt(
+                        expected,
+                        round_number=round_number,
+                        status="accepted",
+                        reason="passed preflight, smoke test, execution, and contract",
+                        node_id=node.id,
+                    )
                     self._register_frontier(
                         node,
                         source_stage=stage.name,
@@ -1264,8 +1439,15 @@ class ClosedLoopRunner:
             return []
         roles = bootstrap_candidate_roles(self.config.stage1b_model_families)
         assignments = [
-            CandidateAssignment(role, baseline, "fm", "stage1a_fm")
-            for role in roles
+            CandidateAssignment(
+                role,
+                baseline,
+                "fm",
+                "stage1a_fm",
+                assignment_id=f"stage1b:{index}:{role.name}",
+                assignment_kind="bootstrap",
+            )
+            for index, role in enumerate(roles, 1)
         ]
         roots = self._generate_assigned_candidates(
             assignments,
@@ -1413,16 +1595,141 @@ class ClosedLoopRunner:
         return pool[: self.config.candidate_branches]
 
     def _generate_candidates(self, incumbent: Node, round_number: int) -> list[Node]:
+        branch_count = int(self.config.candidate_branches)
+        if (
+            self.state.last_round_valid_candidates
+            >= self.config.min_valid_candidates_per_round
+            and self.state.last_round_best_gain is not None
+            and self.state.last_round_best_gain >= self.config.min_round_primary_gain
+        ):
+            branch_count = min(
+                int(self.config.max_candidate_branches),
+                branch_count + int(self.config.branch_growth_per_positive_round),
+            )
         roles = select_candidate_roles(
             self.state.memory.direction_summary(),
             round_number=round_number,
-            branch_count=self.config.candidate_branches,
+            branch_count=branch_count,
             preferred_role_names=self.config.initial_candidate_roles,
             reserved_role_name=self.config.reserved_candidate_role,
         )
-        parents = self._stage3_parent_pool()
-        assignments = []
-        for role, (parent, source) in zip(roles, parents):
+        donors = self.state.memory.transferable_insights(
+            incumbent_node_id=incumbent.id,
+            limit=branch_count,
+            max_primary_gap=self.config.donor_max_primary_gap,
+        )
+        recent_transfer_attempts = [
+            item
+            for item in self.state.memory.attempts[-20:]
+            if item.assignment_kind == "transfer"
+        ]
+        recent_transfer_records = [
+            item
+            for item in self.state.memory.records[-20:]
+            if item.assignment_kind == "transfer"
+        ]
+        recent_transfer_successes = sum(
+            item.transfer_status == "positive" for item in recent_transfer_records
+        )
+        transfer_ratio = float(self.config.transfer_base_ratio)
+        if recent_transfer_records:
+            success_rate = recent_transfer_successes / len(recent_transfer_records)
+            if success_rate >= 0.5:
+                transfer_ratio += 0.10
+            elif success_rate == 0:
+                transfer_ratio -= 0.10
+        elif len(recent_transfer_attempts) >= 2 and not any(
+            item.status == "accepted" for item in recent_transfer_attempts
+        ):
+            transfer_ratio -= 0.10
+        transfer_ratio = min(
+            float(self.config.transfer_max_ratio),
+            max(float(self.config.transfer_min_ratio), transfer_ratio),
+        )
+        transfer_count = min(
+            len(donors),
+            max(1, round(branch_count * transfer_ratio)) if donors else 0,
+        )
+        exploit_count = max(1, round(branch_count * 0.5))
+        exploit_count = min(exploit_count, branch_count - transfer_count)
+        explore_count = max(0, branch_count - exploit_count - transfer_count)
+
+        assignments: list[CandidateAssignment] = []
+        role_cursor = 0
+        incumbent_family = model_family_from_code(incumbent.code)
+        for index in range(exploit_count):
+            role = roles[role_cursor % len(roles)]
+            role_cursor += 1
+            constrained_role = replace(
+                role,
+                allowed_model_families=(incumbent_family,),
+            )
+            assignments.append(
+                CandidateAssignment(
+                    constrained_role,
+                    incumbent,
+                    incumbent_family,
+                    "verified_incumbent",
+                    assignment_id=f"round{round_number}:exploit:{index + 1}",
+                    assignment_kind="exploit",
+                )
+            )
+
+        for index, insight in enumerate(donors[:transfer_count], 1):
+            donor = self.frontier_nodes_by_id.get(insight.donor_node_id)
+            if donor is None:
+                continue
+            mechanism_text = ", ".join(insight.mechanism_ids)
+            transfer_role = CandidateRole(
+                name=(
+                    f"cross_parent_transfer_{insight.donor_model_family}_{index}"
+                ),
+                group="evidence_combination",
+                category="evidence_synthesis",
+                objective=(
+                    f"Keep the {incumbent_family} incumbent as the base and transfer "
+                    f"exactly one donor mechanism ({mechanism_text}) from the "
+                    f"{insight.donor_model_family} candidate. Preserve every unrelated "
+                    "base path and make the transferred component independently ablatable."
+                ),
+                required_evidence=(
+                    "Declare the donor candidate ID and transferred mechanism; show "
+                    "the exact guarded base-code path that consumes the transfer."
+                ),
+                allowed_model_families=(incumbent_family,),
+                allowed_loss_families=(
+                    "pointwise_bce",
+                    "hybrid_bce_bpr",
+                    "pairwise_bpr",
+                    "listwise_softmax",
+                    "multitask",
+                    "censored_watch_time",
+                ),
+            )
+            assignments.append(
+                CandidateAssignment(
+                    transfer_role,
+                    incumbent,
+                    incumbent_family,
+                    f"donor:{insight.donor_node_id}",
+                    assignment_id=f"round{round_number}:transfer:{index}",
+                    assignment_kind="transfer",
+                    donor=donor,
+                    donor_insight=insight,
+                )
+            )
+
+        exploratory_parents = [
+            item for item in self._stage3_parent_pool()
+            if item[0].id != incumbent.id
+        ]
+        for index in range(explore_count):
+            role = roles[role_cursor % len(roles)]
+            role_cursor += 1
+            if exploratory_parents:
+                parent, source = exploratory_parents[index % len(exploratory_parents)]
+            else:
+                parent, source = incumbent, "incumbent_exploration_fallback"
             parent_family = model_family_from_code(parent.code)
             constrained_role = replace(
                 role,
@@ -1434,8 +1741,15 @@ class ClosedLoopRunner:
                     parent,
                     parent_family,
                     source,
+                    assignment_id=f"round{round_number}:explore:{index + 1}",
+                    assignment_kind="explore",
                 )
             )
+        print(
+            f"[cyan]Adaptive Stage 3 portfolio: branches={len(assignments)}, "
+            f"exploit={exploit_count}, transfer={transfer_count}, "
+            f"explore={explore_count}, transfer_ratio={transfer_ratio:.2f}[/cyan]"
+        )
         return self._generate_assigned_candidates(
             assignments,
             stage_name=(
@@ -1939,6 +2253,12 @@ class ClosedLoopRunner:
             "verified_incumbent_id": self.state.verified_incumbent_id,
             "provisional_candidate_id": self.state.provisional_candidate_id,
             "provisional_candidate_score": self.state.provisional_candidate_score,
+            "no_valid_rounds": self.state.no_valid_rounds,
+            "low_gain_rounds": self.state.low_gain_rounds,
+            "last_round_valid_candidates": self.state.last_round_valid_candidates,
+            "last_round_best_gain": self.state.last_round_best_gain,
+            "forced_stop_reason": self.state.forced_stop_reason,
+            "elapsed_seconds": time.monotonic() - self.started_at,
             "memory": self.state.memory.to_dict(),
         }
         (self.memory_dir / "state.json").write_text(
@@ -1962,6 +2282,68 @@ class ClosedLoopRunner:
         (self.memory_dir / "round_summary.json").write_text(serialized)
         prompt = self.state.experience_prompt(before_round=round_number + 1)
         (self.memory_dir / "round_summary.prompt.txt").write_text(prompt + "\n")
+
+    def _time_limit_reached(self) -> bool:
+        limit = max(0, int(self.config.max_wall_clock_seconds))
+        if limit <= 0:
+            return False
+        usable = max(0, limit - int(self.config.finalize_reserve_seconds))
+        return time.monotonic() - self.started_at >= usable
+
+    def _snapshot_best_available(self, label: str) -> Optional[dict[str, Any]]:
+        """Freeze and export a recoverable incumbent without replacing final output."""
+        if (
+            not self.config.checkpoint_submission_each_incumbent
+            or self.incumbent is None
+            or not self.incumbent.seed_scores
+        ):
+            return None
+        self.snapshot_index += 1
+        safe_label = re.sub(r"[^a-zA-Z0-9_.-]+", "_", label).strip("_")
+        snapshot_dir = (
+            self.output_dir.parent
+            / "incumbent_snapshots"
+            / f"{self.snapshot_index:03d}_{safe_label}"
+        )
+        required = max(
+            1,
+            min(len(self.incumbent.seed_scores), self.config.final_confirmation_num_seeds),
+        )
+        try:
+            manifest = self.finalizer(
+                self.incumbent.journal,
+                output_dir=snapshot_dir,
+                source_stage=self.incumbent.stage_name,
+                required_seeds=required,
+            )
+            submission = self.submission_exporter(
+                output_dir=snapshot_dir,
+                starter_kit=Path(self.manager.cfg.data_dir).resolve(),
+            )
+            pointer = {
+                "label": label,
+                "snapshot_dir": str(snapshot_dir),
+                "manifest": manifest,
+                "submission": submission,
+                "validation_only_selection": True,
+            }
+            pointer_path = self.output_dir.parent / "best_available.json"
+            pointer_path.parent.mkdir(parents=True, exist_ok=True)
+            pointer_path.write_text(
+                json.dumps(pointer, indent=2, sort_keys=True) + "\n"
+            )
+            print(
+                f"[green]Saved recoverable incumbent snapshot and submission: "
+                f"{snapshot_dir}[/green]"
+            )
+            return pointer
+        except Exception as error:
+            self.memory_dir.mkdir(parents=True, exist_ok=True)
+            (self.memory_dir / "snapshot_error.txt").write_text(
+                f"{type(error).__name__}: {error}\n"
+            )
+            print(f"[yellow]Incumbent snapshot failed; search continues: {error}[/yellow]")
+            return None
 
     def _finalize(self) -> dict[str, Any]:
         if self.incumbent is None:
@@ -2002,8 +2384,18 @@ class ClosedLoopRunner:
         stage1b_roots = self._run_stage1b(baseline)
         self.incumbent = self._run_stage2(baseline, stage1b_roots)
         self._save_memory()
+        self._snapshot_best_available("stage2_verified_incumbent")
 
         while not self.state.should_stop:
+            if self._time_limit_reached():
+                self.state.request_stop(
+                    "safe wall-clock limit reached; finalization time reserved"
+                )
+                print(
+                    "[yellow]Stopping research before the safety deadline and "
+                    "preserving time for final confirmation/submission.[/yellow]"
+                )
+                break
             round_number = self.state.start_round()
             print(f"[green]Starting research round {round_number}[/green]")
             candidates = self._generate_candidates(
@@ -2022,6 +2414,10 @@ class ClosedLoopRunner:
                     factor_cards,
                 ) = _factor_selection(result.node)
                 artifact = _candidate_artifacts(result.node)
+                assignment = self.candidate_assignment_by_node_id.get(candidate_id)
+                donor_insight = (
+                    assignment.donor_insight if assignment is not None else None
+                )
                 decision = self.state.evaluate_candidate(
                     node_id=candidate_id,
                     fingerprint=candidate_fingerprint(result.node.code),
@@ -2053,6 +2449,17 @@ class ClosedLoopRunner:
                     random_seeds=range(len(result.seed_scores)),
                     training_epochs=artifact["training_epochs"],
                     artifacts_valid=bool(artifact["valid"]),
+                    assignment_id=(assignment.assignment_id if assignment else ""),
+                    assignment_kind=(
+                        assignment.assignment_kind if assignment else "exploit"
+                    ),
+                    base_parent_id=(assignment.parent.id if assignment else ""),
+                    donor_candidate_id=(
+                        donor_insight.donor_node_id if donor_insight else ""
+                    ),
+                    transferred_mechanism_ids=(
+                        donor_insight.mechanism_ids if donor_insight else ()
+                    ),
                 )
                 print(
                     f"[cyan]Candidate {candidate_id}: "
@@ -2061,8 +2468,36 @@ class ClosedLoopRunner:
                 if decision.promoted:
                     promoted_results[candidate_id] = result
 
+            stage4_pool = dict(promoted_results)
+            for result in tuned_results:
+                candidate_id = result.candidate_id or result.node.id
+                if candidate_id in stage4_pool:
+                    continue
+                gain = result.score - float(self.state.incumbent_score or result.score)
+                artifact = _candidate_artifacts(result.node)
+                metrics = _node_validation_metrics(result.node)
+                component_ok = all(
+                    metrics.get(name) is None
+                    or self.state.incumbent_metrics.get(name) is None
+                    or float(metrics[name])
+                    >= float(self.state.incumbent_metrics[name])
+                    - self.config.max_component_regression
+                    for name in ("GAUC", "nDCG@5")
+                )
+                if (
+                    gain >= self.config.provisional_min_primary_gain
+                    and artifact["valid"]
+                    and component_ok
+                ):
+                    self.state.admit_provisional_candidate(candidate_id, result.score)
+                    stage4_pool[candidate_id] = result
+                    print(
+                        f"[cyan]Candidate {candidate_id} admitted provisionally "
+                        f"to Stage 4 with gain {gain:+.6f}[/cyan]"
+                    )
+
             promoted = sorted(
-                promoted_results.values(),
+                stage4_pool.values(),
                 key=lambda result: result.score,
                 reverse=True,
             )[: self.config.ablation_candidate_top_k]
@@ -2108,12 +2543,18 @@ class ClosedLoopRunner:
                 )
                 if confirmation.promoted:
                     self.incumbent = result
+                    self._snapshot_best_available(
+                        f"round_{round_number:03d}_verified_incumbent"
+                    )
                     break
 
             self.state.finish_round()
             self._save_round_summary(round_number)
             self._save_memory()
             self.manager._save_checkpoint()
+
+            health = self.state.memory.round_health(round_number)
+            print(f"[cyan]Round {round_number} adaptive health: {health}[/cyan]")
 
         self._ensure_final_confirmation()
         manifest = self._finalize()

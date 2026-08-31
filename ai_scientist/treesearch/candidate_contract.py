@@ -31,6 +31,9 @@ class CandidateRole:
         factor_library_context: str = "",
         parent_node_id: str = "",
         parent_model_family: str = "fm",
+        assignment_id: str = "",
+        assignment_kind: str = "exploit",
+        donor_context: str = "",
     ) -> str:
         evidence_ids = ", ".join(CURATED_EVIDENCE)
         base_name = self.name.split("_alternative_", 1)[0]
@@ -78,6 +81,34 @@ class CandidateRole:
             self,
             parent_node_id=parent_node_id,
             parent_model_family=parent_model_family,
+        )
+        assignment_marker = build_assignment_marker(
+            self,
+            assignment_id=assignment_id or f"{self.name}:{parent_node_id}",
+            assignment_kind=assignment_kind,
+            parent_node_id=parent_node_id,
+            parent_model_family=parent_model_family,
+        )
+        donor_text = (
+            "\nExplicit cross-parent transfer assignment:\n"
+            + donor_context.strip()
+            + "\nUse the assigned incumbent as the only base code. Transfer exactly "
+            "one named donor mechanism; do not copy the entire donor model, data "
+            "pipeline, CONFIG, or checkpoint. Register the transferred component "
+            "and keep it independently ablatable.\n"
+            if donor_context.strip()
+            else ""
+        )
+        recipe_key = (
+            "cross_parent_transfer"
+            if assignment_kind == "transfer"
+            else base_name
+        )
+        recipe = ROLE_EXECUTION_RECIPES.get(recipe_key, ROLE_EXECUTION_RECIPES["default"])
+        recipe_text = (
+            "\nRole execution recipe (all checks are pre-training gates):\n"
+            + "\n".join(f"- {item}" for item in recipe)
+            + "\n"
         )
         return (
             f"Candidate role {index}/{total}: {self.name}\n"
@@ -145,10 +176,16 @@ class CandidateRole:
             "feature state, component guards, checkpoint round-trip, and CUDA tensor "
             "placement. Return only the concise plan and complete code required by the "
             "global response format."
+            "\nMachine-readable assignment marker (preserve this assignment in "
+            "RESEARCH_MANIFEST; it is parsed before any GPU training):\n"
+            + assignment_marker
+            +
             "\nThe following role-specific scaffold is syntactically valid. Copy its "
             "literal container shapes and exact identity fields, then make the named "
             "component control the real implementation (do not leave it as metadata only):\n"
             + scaffold_text
+            + donor_text
+            + recipe_text
             + role_contract
             + factor_text
             + memory_text
@@ -344,6 +381,45 @@ TECHNIQUE_CATALOG = {
 }
 
 
+ROLE_EXECUTION_RECIPES = {
+    "causal_history_interest": (
+        "Define literal FEATURE_FACTORS with a known library_id and concrete output_fields.",
+        "Create every output field literally inside build_features using past-only train history.",
+        "Pass the new tensor through create_model and consume it inside a component_enabled guard.",
+        "Keep unknown/empty history behavior deterministic and checkpoint the fitted history state.",
+    ),
+    "affinity_interest": (
+        "Build train-only smoothed user-author or user-tag affinity state and freeze it for validation.",
+        "Declare exact raw_fields/output_fields and consume the resulting tensor in the guarded model path.",
+        "Never use the current row label or validation outcomes to build affinity state.",
+    ),
+    "context_interaction": (
+        "Implement one DeepFM/DCN/xDeepFM interaction path in create_model, not metadata-only changes.",
+        "Keep the official schema-v2 adapter and make every added factor executable and ablatable.",
+    ),
+    "ranking_objective": (
+        "Read user_ids from x_tensor[:, 0] inside step.",
+        "Construct an explicit same_user equality mask before selecting positive-negative pairs.",
+        "Combine the ranking term with BCE through one registered loss component and handle empty pairs.",
+    ),
+    "auxiliary_objective": (
+        "Load an allowed auxiliary label only from the training-window log and align by stable exposure keys.",
+        "Keep long_view as the primary head and exclude auxiliary labels from inference features.",
+    ),
+    "cross_parent_transfer": (
+        "Start from the incumbent code, not the donor code.",
+        "Transfer exactly one donor mechanism and preserve every unrelated incumbent path.",
+        "Use one new component_enabled guard and declare the donor/mechanism in the manifest.",
+        "Do not transfer donor CONFIG, checkpoint, split, evaluator, or unrelated architecture blocks.",
+    ),
+    "default": (
+        "Change one executable scientific mechanism, not CONFIG or metadata alone.",
+        "Register and call every new component through component_enabled.",
+        "Preserve validation-only evaluation and checkpoint round-trip interfaces.",
+    ),
+}
+
+
 REQUIRED_MANIFEST_FIELDS = (
     "candidate_id",
     "role",
@@ -367,6 +443,117 @@ REQUIRED_MANIFEST_FIELDS = (
     "component_dependencies",
     "evidence",
 )
+
+ASSIGNMENT_MARKER_PREFIX = "BYTE_RUSH_ASSIGNMENT_JSON="
+
+
+def build_assignment_marker(
+    role: CandidateRole,
+    *,
+    assignment_id: str,
+    assignment_kind: str,
+    parent_node_id: str,
+    parent_model_family: str,
+) -> str:
+    payload = {
+        "assignment_id": assignment_id,
+        "assignment_kind": assignment_kind,
+        "role": role.name,
+        "group": role.group,
+        "category": role.category,
+        "objective": role.objective,
+        "required_evidence": role.required_evidence,
+        "allowed_model_families": list(role.allowed_model_families),
+        "allowed_loss_families": list(role.allowed_loss_families),
+        "parent_node_id": parent_node_id,
+        "parent_model_family": parent_model_family,
+    }
+    return ASSIGNMENT_MARKER_PREFIX + json.dumps(
+        payload, sort_keys=True, separators=(",", ":")
+    ) + "\n"
+
+
+def extract_assignment_contract(text: str) -> Mapping[str, Any] | None:
+    """Read the last assignment marker from an assembled worker prompt."""
+    payload = None
+    for line in str(text).splitlines():
+        if not line.startswith(ASSIGNMENT_MARKER_PREFIX):
+            continue
+        try:
+            candidate = json.loads(line[len(ASSIGNMENT_MARKER_PREFIX) :])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(candidate, Mapping):
+            payload = candidate
+    return payload
+
+
+def role_from_assignment(payload: Mapping[str, Any]) -> CandidateRole:
+    return CandidateRole(
+        name=str(payload.get("role", "")),
+        group=str(payload.get("group", "")),
+        category=str(payload.get("category", "")),
+        objective=str(payload.get("objective", "")),
+        required_evidence=str(payload.get("required_evidence", "")),
+        allowed_model_families=tuple(
+            map(str, payload.get("allowed_model_families", ()) or ())
+        ),
+        allowed_loss_families=tuple(
+            map(str, payload.get("allowed_loss_families", ()) or ())
+        ),
+    )
+
+
+def classify_contract_failures(reasons: Sequence[str]) -> str:
+    joined = " ".join(map(str, reasons)).lower()
+    if "duplicate" in joined:
+        return "duplicate"
+    if "same-user" in joined or "same user" in joined or "ranking objective" in joined:
+        return "ranking_group_error"
+    if "feature_factors" in joined or "build_features" in joined:
+        return "feature_implementation_error"
+    if "component_enabled" in joined or "ablation" in joined:
+        return "ablation_guard_error"
+    if "manifest" in joined or "factor_selection" in joined:
+        return "schema_error"
+    if "create_model" in joined or "model_family" in joined:
+        return "model_implementation_error"
+    if "test" in joined or "leak" in joined:
+        return "leakage_error"
+    return "contract_error"
+
+
+def rewrite_for_smoke_test(code: str) -> str:
+    """Return a one-epoch version without changing the scientific mechanism."""
+    tree = _tree(code)
+    if tree is None:
+        return code
+    changed = False
+    for statement in tree.body:
+        is_config = (
+            isinstance(statement, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "CONFIG"
+                for target in statement.targets
+            )
+            and isinstance(statement.value, ast.Dict)
+        )
+        if not is_config:
+            continue
+        for key_node, value_node in zip(statement.value.keys, statement.value.values):
+            if not isinstance(key_node, ast.Constant):
+                continue
+            if (
+                key_node.value in {"max_epochs", "epochs", "patience"}
+                and isinstance(value_node, ast.Constant)
+            ):
+                value_node.value = 1
+                changed = True
+        break
+    if not changed:
+        return code
+    ast.fix_missing_locations(tree)
+    return ast.unparse(tree) + "\n"
 
 
 def model_family_from_code(code: str, *, default: str = "fm") -> str:
@@ -1635,8 +1822,22 @@ def select_candidate_roles(
         mean_gain = float(values.get("mean_gain", 0.0))
         ablation_gain = float(values.get("ablation_gain", 0.0))
         promotion_rate = float(values.get("promotions", 0.0)) / max(1.0, trials)
+        generation_success_rate = float(values.get("generation_success_rate", 0.0))
+        generation_attempts = float(values.get("generation_attempts", 0.0))
         exploration = math.sqrt(math.log(total_trials + 1.0) / (trials + 1.0))
-        return mean_gain + ablation_gain + 0.001 * promotion_rate + 0.0005 * exploration
+        reliability = (
+            0.0006 * generation_success_rate
+            - 0.0004 * (1.0 - generation_success_rate)
+            if generation_attempts >= 2
+            else 0.0
+        )
+        return (
+            mean_gain
+            + ablation_gain
+            + 0.001 * promotion_rate
+            + 0.0005 * exploration
+            + reliability
+        )
 
     groups = list(by_group)
     ranked = sorted(groups, key=utility, reverse=True)

@@ -11,9 +11,14 @@ import logging
 import humanize
 from .backend import FunctionSpec, compile_prompt_to_md, query
 from .candidate_contract import (
+    extract_assignment_contract,
     config_assignment,
     literal_assignment,
+    normalize_candidate_metadata,
+    rewrite_for_smoke_test,
+    role_from_assignment,
     restore_dynamic_config_fields,
+    validate_candidate_contract,
     validate_tuning_contract,
 )
 from .interpreter import ExecutionResult
@@ -1912,6 +1917,94 @@ class ParallelAgent:
                         child_node = worker_agent._improve(parent_node)
                         child_node.parent = parent_node
 
+            assignment = extract_assignment_contract(task_desc)
+            is_research_candidate = bool(
+                assignment
+                and parent_node is not None
+                and stage_name
+                and (
+                    stage_name.startswith("3_")
+                    or stage_name.startswith("1_diverse_roots_")
+                )
+            )
+            if is_research_candidate:
+                role = role_from_assignment(assignment)
+                child_node.code = normalize_candidate_metadata(
+                    child_node.code,
+                    role,
+                    expected_parent_id=str(assignment.get("parent_node_id", "")),
+                    expected_parent_model_family=str(
+                        assignment.get("parent_model_family", "fm")
+                    ),
+                )
+                preflight = validate_candidate_contract(
+                    parent_node.code,
+                    child_node.code,
+                    role,
+                    expected_parent_id=str(assignment.get("parent_node_id", "")),
+                    expected_parent_model_family=str(
+                        assignment.get("parent_model_family", "fm")
+                    ),
+                )
+                if not preflight.valid:
+                    child_node.is_buggy = True
+                    child_node.metric = WorstMetricValue()
+                    child_node.analysis = (
+                        "PREFLIGHT_REJECTED: " + "; ".join(preflight.reasons)
+                    )
+                    child_node.parse_exc_type = "CandidatePreflightError"
+                    child_node.parse_exc_info = {
+                        "message": child_node.analysis,
+                        "assignment_id": assignment.get("assignment_id", ""),
+                    }
+                    print(child_node.analysis)
+                    return child_node.to_dict()
+
+                research_cfg = cfg.agent.get("research_loop", {})
+                if bool(research_cfg.get("smoke_test_enabled", True)):
+                    import shutil
+
+                    smoke_code = rewrite_for_smoke_test(child_node.code)
+                    smoke_timeout = int(
+                        research_cfg.get("smoke_test_timeout_seconds", 240)
+                    )
+                    smoke_interpreter = Interpreter(
+                        working_dir=workspace,
+                        timeout=smoke_timeout,
+                        startup_timeout=getattr(cfg.exec, "repl_startup_timeout", 60),
+                        format_tb_ipython=cfg.exec.format_tb_ipython,
+                        agent_file_name=cfg.exec.agent_file_name,
+                    )
+                    try:
+                        print("Running one-epoch candidate smoke test")
+                        smoke_result = smoke_interpreter.run(smoke_code, True)
+                    finally:
+                        smoke_interpreter.cleanup_session()
+                    smoke_artifacts = (
+                        os.path.isfile(os.path.join(working_dir, "experiment_data.npy"))
+                        and os.path.isfile(
+                            os.path.join(working_dir, "candidate_checkpoint.npz")
+                        )
+                    )
+                    if smoke_result.exc_type is not None or not smoke_artifacts:
+                        child_node.absorb_exec_result(smoke_result)
+                        child_node.is_buggy = True
+                        child_node.metric = WorstMetricValue()
+                        child_node.analysis = (
+                            "SMOKE_TEST_REJECTED: "
+                            + str(smoke_result.exc_info or "required artifacts missing")
+                        )
+                        child_node.parse_exc_type = "CandidateSmokeTestError"
+                        child_node.parse_exc_info = {
+                            "message": child_node.analysis,
+                            "assignment_id": assignment.get("assignment_id", ""),
+                        }
+                        print(child_node.analysis)
+                        return child_node.to_dict()
+                    shutil.rmtree(working_dir, ignore_errors=True)
+                    os.makedirs(working_dir, exist_ok=True)
+                    print("Candidate smoke test passed")
+
             # Execute and parse results
             print("Running code")
             iteration = reserve_iteration(
@@ -2596,9 +2689,9 @@ class ParallelAgent:
 
         if self.cfg.agent.get("summary", None) is not None:
             memory_summary = self.journal.generate_summary(
-                include_code=False, 
+                include_code=False,
                 **{
-                    "model": self.cfg.agent.summary.model, 
+                    "model": self.cfg.agent.summary.model,
                     "temp": self.cfg.agent.summary.temp
                 }
             )
@@ -2684,6 +2777,7 @@ class ParallelAgent:
 
         # Add results to journal
         print("Waiting for results")
+        returned_nodes: list[Optional[Node]] = []
         for i, future in enumerate(futures):
             try:
                 print("About to get result from future")
@@ -2706,14 +2800,17 @@ class ParallelAgent:
 
                 # Add node to journal's list and assign its step number
                 self.journal.append(result_node)
+                returned_nodes.append(result_node)
                 print("Added result node to journal")
                 if self._maybe_promote_tuning_base(result_node):
                     print("Promoted result node to the progressive tuning base")
 
             except TimeoutError:
+                returned_nodes.append(None)
                 print("Worker process timed out, couldn't get the result")
                 logger.error(f"Worker process timed out, couldn't get the result")
             except Exception as e:
+                returned_nodes.append(None)
                 print(f"Error processing node: {str(e)}")
                 logger.error(f"Error processing node: {str(e)}")
                 import traceback
@@ -2742,6 +2839,7 @@ class ParallelAgent:
                 ):
                     self.gpu_manager.release_gpu(process_id)
                     logger.info(f"Released GPU for process {process_id}")
+        return returned_nodes
 
     def _maybe_promote_tuning_base(self, result_node: Node) -> bool:
         """Continue tuning from the best valid configuration seen so far."""

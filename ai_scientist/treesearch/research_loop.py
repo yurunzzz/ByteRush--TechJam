@@ -324,6 +324,48 @@ class ExperimentRecord:
     artifacts_valid: bool = True
     eligible_for_promotion: bool = False
     provisional: bool = False
+    assignment_id: str = ""
+    assignment_kind: str = "exploit"
+    base_parent_id: str = ""
+    donor_candidate_id: str = ""
+    transferred_mechanism_ids: list[str] = field(default_factory=list)
+    transfer_status: str = "not_applicable"
+
+
+@dataclass
+class CandidateAttemptRecord:
+    """One generation/screening attempt, including cheap rejected attempts."""
+
+    round_number: int
+    assignment_id: str
+    assignment_kind: str
+    role: str
+    category: str
+    parent_node_id: str
+    donor_candidate_id: str = ""
+    status: str = "generated"
+    failure_category: str = ""
+    reason: str = ""
+    node_id: str = ""
+    elapsed_seconds: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class TransferableInsightRecord:
+    """Validation-only component evidence that may be moved to an incumbent."""
+
+    donor_node_id: str
+    donor_model_family: str
+    mechanism_ids: tuple[str, ...]
+    components: tuple[str, ...]
+    principal_change: str
+    metrics: Mapping[str, Optional[float]]
+    metric_deltas: Mapping[str, Optional[float]]
+    seed_mean: Optional[float]
+    seed_std: Optional[float]
+    code_path: str
+    checkpoint_path: str
+    confidence: str
 
 
 @dataclass
@@ -368,6 +410,7 @@ class ExperimentMemory:
     ablation_evidence: list[AblationEvidence] = field(default_factory=list)
     failed_hypotheses: list[str] = field(default_factory=list)
     frontier: list[FrontierRecord] = field(default_factory=list)
+    attempts: list[CandidateAttemptRecord] = field(default_factory=list)
 
     def register_candidate(self, fingerprint: str) -> bool:
         if fingerprint in self.fingerprints:
@@ -382,6 +425,105 @@ class ExperimentMemory:
             "reference_control",
         }:
             self.failed_hypotheses.append(record.reason)
+
+    def record_attempt(self, attempt: CandidateAttemptRecord) -> None:
+        self.attempts.append(attempt)
+
+    def round_attempts(self, round_number: int) -> list[CandidateAttemptRecord]:
+        return [item for item in self.attempts if item.round_number == round_number]
+
+    def round_health(self, round_number: int) -> dict[str, Any]:
+        attempts = self.round_attempts(round_number)
+        accepted = [item for item in attempts if item.status == "accepted"]
+        failures: dict[str, int] = {}
+        for item in attempts:
+            if item.status == "accepted":
+                continue
+            key = item.failure_category or item.status
+            failures[key] = failures.get(key, 0) + 1
+        records = self.records_for_round(round_number)
+        gains = [float(item.improvement) for item in records if item.score is not None]
+        transfers = [item for item in attempts if item.assignment_kind == "transfer"]
+        successful_transfers = [item for item in transfers if item.status == "accepted"]
+        return {
+            "attempts": len(attempts),
+            "valid_candidates": len(accepted),
+            "evaluated_candidates": len(records),
+            "best_primary_gain": max(gains) if gains else None,
+            "failure_categories": failures,
+            "transfer_attempts": len(transfers),
+            "successful_transfers": len(successful_transfers),
+        }
+
+    def transferable_insights(
+        self,
+        *,
+        incumbent_node_id: str = "",
+        limit: int = 6,
+        max_primary_gap: float = 0.002,
+    ) -> list[TransferableInsightRecord]:
+        """Return strong reloadable donor evidence without any test feedback."""
+        candidates = []
+        for record in self.records:
+            if (
+                record.node_id == incumbent_node_id
+                or record.score is None
+                or not record.artifacts_valid
+                or not record.model_family
+                or record.status in {"invalid_artifacts", "bootstrap_pending_standardization"}
+            ):
+                continue
+            primary_delta = record.metric_deltas.get("primary")
+            if primary_delta is not None and float(primary_delta) < -abs(max_primary_gap):
+                continue
+            mechanisms = tuple(record.transferred_mechanism_ids or record.components)
+            if not mechanisms:
+                mechanisms = (record.research_family or record.role,)
+            confidence = (
+                "ablation_supported"
+                if any(
+                    item.candidate_id == record.node_id
+                    and item.primary_contribution > 0
+                    for item in self.ablation_evidence
+                )
+                else "multi_seed_positive"
+                if record.seed_wins > 0 and record.improvement > 0
+                else "validation_hypothesis"
+            )
+            candidates.append(
+                TransferableInsightRecord(
+                    donor_node_id=record.node_id,
+                    donor_model_family=record.model_family,
+                    mechanism_ids=tuple(str(item) for item in mechanisms if item),
+                    components=tuple(record.components),
+                    principal_change=record.principal_change,
+                    metrics=dict(record.metrics),
+                    metric_deltas=dict(record.metric_deltas),
+                    seed_mean=record.seed_mean,
+                    seed_std=record.seed_std,
+                    code_path=record.code_path,
+                    checkpoint_path=record.checkpoint_path,
+                    confidence=confidence,
+                )
+            )
+        candidates.sort(
+            key=lambda item: (
+                float(item.metric_deltas.get("primary") or 0.0),
+                float(item.metrics.get("primary") or float("-inf")),
+            ),
+            reverse=True,
+        )
+        selected = []
+        seen = set()
+        for item in candidates:
+            signature = (item.donor_model_family, item.mechanism_ids)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            selected.append(item)
+            if len(selected) >= max(0, int(limit)):
+                break
+        return selected
 
     def mark_verified_incumbent(self, node_id: str) -> None:
         for record in reversed(self.records):
@@ -605,11 +747,30 @@ class ExperimentMemory:
                 )
                 item["ablation_trials"] += 1.0
                 item["ablation_gain"] += evidence.primary_contribution
+        for attempt in self.attempts:
+            if not attempt.category:
+                continue
+            item = summary.setdefault(
+                attempt.category,
+                {
+                    "trials": 0.0,
+                    "promotions": 0.0,
+                    "mean_gain": 0.0,
+                    "ablation_trials": 0.0,
+                    "ablation_gain": 0.0,
+                },
+            )
+            item["generation_attempts"] = item.get("generation_attempts", 0.0) + 1.0
+            if attempt.status == "accepted":
+                item["valid_candidates"] = item.get("valid_candidates", 0.0) + 1.0
         for item in summary.values():
             if item["trials"]:
                 item["mean_gain"] /= item["trials"]
             if item["ablation_trials"]:
                 item["ablation_gain"] /= item["ablation_trials"]
+            attempts = item.get("generation_attempts", 0.0)
+            valid = item.get("valid_candidates", 0.0)
+            item["generation_success_rate"] = valid / attempts if attempts else 0.0
         return summary
 
     def prompt_evidence(self, category: str, *, limit: int = 6) -> str:
@@ -706,6 +867,10 @@ class ExperimentMemory:
             "discovered_factor_cards": self.discovered_factor_cards(),
             "failed_hypotheses": list(self.failed_hypotheses),
             "diverse_frontier": [asdict(item) for item in self.frontier],
+            "candidate_attempts": [asdict(item) for item in self.attempts],
+            "transferable_insights": [
+                asdict(item) for item in self.transferable_insights()
+            ],
         }
 
 
@@ -743,6 +908,25 @@ class ResearchLoopConfig:
     final_confirmation_num_seeds: int = 5
     ablation_candidate_top_k: int = 2
     ablation_synergy_pairs: int = 3
+    min_valid_candidates_per_round: int = 3
+    target_valid_candidates_per_round: int = 5
+    max_candidate_branches: int = 8
+    branch_growth_per_positive_round: int = 2
+    max_repair_attempts_per_assignment: int = 2
+    no_valid_round_patience: int = 2
+    low_gain_round_patience: int = 3
+    min_round_primary_gain: float = 0.0002
+    provisional_min_primary_gain: float = 0.0005
+    final_promotion_min_primary_gain: float = 0.001
+    transfer_base_ratio: float = 0.30
+    transfer_min_ratio: float = 0.15
+    transfer_max_ratio: float = 0.50
+    donor_max_primary_gap: float = 0.002
+    smoke_test_enabled: bool = True
+    smoke_test_timeout_seconds: int = 240
+    max_wall_clock_seconds: int = 19800
+    finalize_reserve_seconds: int = 600
+    checkpoint_submission_each_incumbent: bool = True
 
 
 def research_loop_config_from_mapping(raw: Any) -> ResearchLoopConfig:
@@ -855,6 +1039,11 @@ class ResearchLoopState:
     eligible_candidate_ids: set[str] = field(default_factory=set)
     round_open: bool = False
     round_improved: bool = False
+    no_valid_rounds: int = 0
+    low_gain_rounds: int = 0
+    last_round_valid_candidates: int = 0
+    last_round_best_gain: Optional[float] = None
+    forced_stop_reason: str = ""
 
     def set_incumbent(
         self,
@@ -892,6 +1081,9 @@ class ResearchLoopState:
         self.round_improved = False
         return self.current_round
 
+    def request_stop(self, reason: str) -> None:
+        self.forced_stop_reason = str(reason)
+
     def evaluate_candidate(
         self,
         *,
@@ -923,6 +1115,11 @@ class ResearchLoopState:
         random_seeds: Sequence[int] = (),
         training_epochs: Optional[int] = None,
         artifacts_valid: bool = True,
+        assignment_id: str = "",
+        assignment_kind: str = "exploit",
+        base_parent_id: str = "",
+        donor_candidate_id: str = "",
+        transferred_mechanism_ids: Sequence[str] = (),
         round_number: Optional[int] = None,
         policy_override: Optional[PromotionPolicy] = None,
     ) -> PromotionDecision:
@@ -1028,6 +1225,18 @@ class ResearchLoopState:
                 artifacts_valid=artifacts_valid,
                 eligible_for_promotion=decision.promoted,
                 provisional=decision.promoted and source_phase != "stage3",
+                assignment_id=assignment_id,
+                assignment_kind=assignment_kind,
+                base_parent_id=base_parent_id or parent_node_id,
+                donor_candidate_id=donor_candidate_id,
+                transferred_mechanism_ids=list(transferred_mechanism_ids),
+                transfer_status=(
+                    "positive"
+                    if assignment_kind == "transfer" and decision.improvement > 0
+                    else "non_positive"
+                    if assignment_kind == "transfer"
+                    else "not_applicable"
+                ),
             )
         )
         if decision.promoted and not self.round_open:
@@ -1056,6 +1265,22 @@ class ResearchLoopState:
             self.eligible_candidate_ids.add(node_id)
         return decision
 
+    def admit_provisional_candidate(self, node_id: str, score: float) -> None:
+        """Allow a small promising gain to enter Stage 4, not to auto-promote."""
+        if not self.round_open:
+            raise RuntimeError("there is no open research round")
+        self.eligible_candidate_ids.add(node_id)
+        for record in reversed(self.memory.records):
+            if record.node_id != node_id:
+                continue
+            record.provisional = True
+            record.eligible_for_promotion = True
+            record.status = "provisional_stage4"
+            break
+        if self.pending_candidate_score is None or score > self.pending_candidate_score:
+            self.pending_candidate_id = node_id
+            self.pending_candidate_score = score
+
     def accept_pending_candidate(
         self,
         *,
@@ -1072,7 +1297,7 @@ class ResearchLoopState:
         if self.incumbent_score is None:
             raise RuntimeError("incumbent must exist before final confirmation")
         confirmation_policy = PromotionPolicy(
-            min_improvement=self.policy.min_improvement,
+            min_improvement=self.config.final_promotion_min_primary_gain,
             required_seeds=self.config.final_confirmation_num_seeds,
             required_seed_wins=math.ceil(
                 self.config.final_confirmation_num_seeds / 2
@@ -1140,10 +1365,20 @@ class ResearchLoopState:
                 "score": self.provisional_candidate_score,
             },
             "candidates": [asdict(record) for record in records],
+            "candidate_attempts": [
+                asdict(item) for item in self.memory.round_attempts(round_number)
+            ],
+            "round_health": self.memory.round_health(round_number),
             "near_winners": [asdict(record) for record in near_winners],
             "diverse_frontier": [asdict(record) for record in self.memory.frontier],
             "recent_failed_hypotheses": self.memory.failed_hypotheses[-6:],
             "fingerprint_count": len(self.memory.fingerprints),
+            "adaptive_stop_state": {
+                "no_valid_rounds": self.no_valid_rounds,
+                "low_gain_rounds": self.low_gain_rounds,
+                "no_improvement_rounds": self.no_improvement_rounds,
+                "forced_stop_reason": self.forced_stop_reason,
+            },
         }
 
     @staticmethod
@@ -1220,11 +1455,28 @@ class ResearchLoopState:
             self.no_improvement_rounds = 0
         else:
             self.no_improvement_rounds += 1
+        health = self.memory.round_health(self.current_round)
+        self.last_round_valid_candidates = int(health["valid_candidates"])
+        self.last_round_best_gain = health["best_primary_gain"]
+        if self.last_round_valid_candidates <= 0:
+            self.no_valid_rounds += 1
+        else:
+            self.no_valid_rounds = 0
+        if (
+            self.last_round_best_gain is None
+            or self.last_round_best_gain < self.config.min_round_primary_gain
+        ):
+            self.low_gain_rounds += 1
+        else:
+            self.low_gain_rounds = 0
         self.round_open = False
 
     @property
     def should_stop(self) -> bool:
         return not self.round_open and (
-            self.current_round >= self.config.max_research_rounds
+            bool(self.forced_stop_reason)
+            or self.current_round >= self.config.max_research_rounds
             or self.no_improvement_rounds >= self.config.patience
+            or self.no_valid_rounds >= self.config.no_valid_round_patience
+            or self.low_gain_rounds >= self.config.low_gain_round_patience
         )

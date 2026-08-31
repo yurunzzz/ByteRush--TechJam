@@ -22,6 +22,7 @@ from rich.text import Text
 from rich.status import Status
 from rich.tree import Tree
 from .utils.config import load_task_desc, prep_agent_workspace, save_run, load_cfg
+from .utils.dashboard_snapshot import write_dashboard_snapshot
 from .agent_manager import AgentManager
 from pathlib import Path
 from .agent_manager import Stage
@@ -150,6 +151,12 @@ def perform_experiments_bfts(config_path: str):
 
             # Save the run as before
             save_run(cfg, journal, stage_name=f"stage_{stage.name}")
+
+            # The Streamlit dashboard reads this atomic, run-level snapshot.
+            # It is built from AgentManager's exact stage/journal ownership,
+            # rather than inferring stage labels from plans or file timestamps.
+            dashboard_snapshot = write_dashboard_snapshot(cfg, manager)
+            logger.info("Dashboard snapshot written to: %s", dashboard_snapshot)
 
         except Exception as e:
             print(f"Error in step callback: {e}")
