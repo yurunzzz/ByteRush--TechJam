@@ -1,61 +1,76 @@
-# ByteRush Research Console
+# ByteRush Competition Showcase
 
-This Streamlit dashboard is deliberately read-only. It watches the artifacts
-written by the AgentManager and never changes an experiment, protected data
-file, evaluator, or checkpoint.
+The Dashboard is now a frozen competition showcase rather than a live run
+selector. It joins the real server-side `experiments/` and `artifacts/` through
+the final model's `source_node_id`, rejects interrupted runs, and presents one
+auditable champion story.
 
-## Run on AutoDL
+## Data contract
 
-Install the light presentation dependencies once:
+The showcase builder accepts a ByteRush data root containing:
+
+```text
+experiments/                 canonical AgentManager snapshots and search nodes
+artifacts/                   verified final model, multi-seed metrics, submission
+```
+
+It never reads raw train/test data and never computes a test metric. A candidate
+is accepted only when:
+
+- the final manifest contains validation GAUC, nDCG@5, and Primary;
+- successful seed count meets the requested seed count;
+- `test_metrics_used_for_selection` and `test_metrics_computed` are both false;
+- model, checkpoint, submission, and submission metadata all exist;
+- the final `source_node_id` belongs to a settled experiment snapshot; and
+- the source node can be traced back to the scored FM root.
+
+## Build from the real AutoDL outputs
+
+The showcase code may live in a separate Git worktree. Point it at the original
+ByteRush directory instead of copying large artifacts into Git:
 
 ```bash
-cd /root/autodl-tmp/ByteRush
-source /root/miniconda3/etc/profile.d/conda.sh
-conda activate base
+cd /root/autodl-tmp/ByteRush-dashboard-showcase
+python dashboard/build_showcase.py \
+  --data-root /root/autodl-tmp/ByteRush
+```
+
+The command writes `dashboard/generated/showcase_manifest.json`. The generated
+file is an output and should normally remain untracked.
+
+## Launch
+
+```bash
+cd /root/autodl-tmp/ByteRush-dashboard-showcase
 python -m pip install -r dashboard/requirements.txt
+python -m streamlit run dashboard/app.py \
+  --server.address 0.0.0.0 \
+  --server.port 8501 \
+  --server.fileWatcherType none
 ```
 
-Launch the dashboard beside the experiment runner:
+Use `dashboard/showcase_config.yaml` for presentation copy and to pin the final
+artifact directory. Do not enter metric values in that file; scores always come
+from the verified artifact manifest.
+
+## Optional live technical appendix
+
+The original near-real-time run explorer remains available separately:
 
 ```bash
-cd /root/autodl-tmp/ByteRush
 export BYTERUSH_DATA_ROOT=/root/autodl-tmp/ByteRush
-source /root/miniconda3/etc/profile.d/conda.sh
-conda activate base
-python -m streamlit run dashboard/app.py --server.address 0.0.0.0 --server.port 8501
+python -m streamlit run dashboard/research_console.py \
+  --server.address 0.0.0.0 \
+  --server.port 8502 \
+  --server.fileWatcherType none
 ```
 
-The AgentManager writes one atomic `dashboard_snapshot.json` in each experiment
-directory after every saved step. That snapshot is the sole dashboard source:
+The competition Showcase is frozen and curated; the Research Console is the
+place to inspect every live or historic run.
 
-- stage number comes from the AgentManager stage definition, never keywords in
-  a hypothesis;
-- each node's parent, status, hypothesis, code, terminal output, metrics and
-  artifact paths share one node ID;
-- the stage cards count only nodes first created by that stage (parents carried
-  forward remain visible in the tree but are not counted twice);
-- the headline and detail metrics come from the same winning node; and
-- the evolution chart is built from the selected run summary in every snapshot,
-  not the separately maintained ledger.
-
-The dashboard rescans snapshots every 10 seconds. A new AgentManager result
-therefore updates its stage card, search-tree node, detail panel, and trend
-point together without export, conversion, or manual data entry.
-
-## Backfill existing runs
-
-For experiment directories created before the callback existed, generate the
-same schema from their saved `journal.json` files once:
+## Checks
 
 ```bash
-python dashboard/rebuild_snapshots.py --experiments experiments
+python -m unittest dashboard.test_showcase_loader
+python -m py_compile dashboard/app.py dashboard/build_showcase.py dashboard/showcase_loader.py
 ```
-
-Directories without a valid Journal remain intentionally absent from the
-dashboard; a truncated JSON log is never guessed or silently merged.
-
-## Local preview
-
-Copy `experiments/` (including generated snapshots) from AutoDL into the local
-repository, then run the same command. Alternatively set `BYTERUSH_DATA_ROOT`
-to any mounted copy of the remote ByteRush directory.
