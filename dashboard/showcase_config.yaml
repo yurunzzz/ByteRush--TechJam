@@ -1,0 +1,20 @@
+project:
+  name: ByteRush
+  subtitle: Autonomous ML Research Agent for Recommender Systems
+  competition: TikTok TechJam
+  tagline: From an FM baseline to a verified, submission-ready ranking model.
+
+showcase:
+  # This is an output directory, not a hand-entered score. The builder verifies
+  # every metric, seed, hash, source node, and submission file before display.
+  pinned_artifact: artifacts/comparison_current/final_model
+
+story:
+  winner_label: Wide & Deep
+  problem: Recommendation research is usually a slow manual loop of proposing, coding, training, evaluating, and deciding what to try next.
+  solution: ByteRush turns that loop into an autonomous, evidence-guided search while keeping model selection validation-only.
+  winner_summary: The winning Wide & Deep model combines a memorization path for frequent interactions with a nonlinear path for higher-order feature combinations.
+  takeaways:
+    - Diverse model roots prevented the search from being trapped in the original FM family.
+    - Controlled tuning promoted Wide & Deep before creative research continued around the new incumbent.
+    - Multi-seed verification confirmed stability before the model and submission were frozen.
