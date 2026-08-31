@@ -97,15 +97,18 @@ def inject_css() -> None:
         @keyframes slideReveal {{ from {{ opacity:.2; transform:translateY(22px); }} to {{ opacity:1; transform:translateY(0); }} }}
         @keyframes graphReveal {{ from {{ opacity:.15; transform:translateX(20px) scale(.985); }} to {{ opacity:1; transform:translateX(0) scale(1); }} }}
         .st-key-tree-frame-champion-path,.st-key-tree-frame-curated-evidence,.st-key-tree-frame-full-search {{ animation:graphReveal .65s ease both; }}
-        .show-nav {{ position:sticky; top:4.15rem; z-index:20; display:flex; align-items:center; justify-content:space-between;
-          gap:1rem; padding:.7rem 1rem; margin:0 auto 1rem; max-width:1480px; border:1px solid rgba(255,255,255,.1);
+        .st-key-persistent-nav {{ position:fixed; top:4.15rem; left:50%; transform:translateX(-50%); z-index:999;
+          width:min(calc(100vw - 2rem),1480px); }}
+        .st-key-persistent-nav > div {{ width:100%; }}
+        .show-nav {{ display:flex; align-items:center; justify-content:space-between; width:100%;
+          gap:1rem; padding:.7rem 1rem; margin:0; border:1px solid rgba(255,255,255,.1);
           border-radius:999px; background:rgba(7,16,31,.82); backdrop-filter:blur(18px); box-shadow:0 16px 50px rgba(0,0,0,.24); }}
         .show-brand {{ font-weight:900; font-size:1rem; letter-spacing:-.02em; }}
         .show-brand span {{ color:var(--cyan); }}
         .show-links {{ display:flex; gap:1.2rem; flex-wrap:wrap; }}
         .show-links a {{ color:#d3def0 !important; text-decoration:none; font-size:.82rem; font-weight:650; }}
         .show-links a:hover {{ color:var(--cyan) !important; }}
-        .slide-anchor {{ scroll-margin-top:5rem; }}
+        .slide-anchor {{ scroll-margin-top:8.25rem; }}
         .slide-index {{ position:absolute; right:2.2rem; bottom:1.55rem; color:#65758e; font-size:.75rem; letter-spacing:.14em; text-transform:uppercase; }}
         .eyebrow {{ color:var(--cyan); font-size:.86rem; font-weight:900; letter-spacing:.17em; text-transform:uppercase; }}
         .section-head {{ margin:.1rem 0 1.2rem; }}
@@ -182,18 +185,19 @@ def inject_css() -> None:
 
 
 def navigation() -> None:
-    st.markdown(
-        """
-        <div class="show-nav">
-          <div class="show-brand"><span>⚡</span> ByteRush!</div>
-          <div class="show-links">
-            <a href="#home">01 Home</a><a href="#impact">02 Results</a><a href="#agent">03 Agent</a>
-            <a href="#search">04 Search</a><a href="#selection">05 Selection</a><a href="#stability">06 Verification</a><a href="#evidence">07 Evidence</a>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    with st.container(key="persistent-nav"):
+        st.markdown(
+            """
+            <div class="show-nav">
+              <div class="show-brand"><span>⚡</span> ByteRush!</div>
+              <div class="show-links">
+                <a href="#home">01 Home</a><a href="#impact">02 Results</a><a href="#agent">03 Agent</a>
+                <a href="#search">04 Search</a><a href="#selection">05 Selection</a><a href="#stability">06 Verification</a><a href="#evidence">07 Evidence</a>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def slide_index(number: str, label: str) -> None:
