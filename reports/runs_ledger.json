@@ -970,6 +970,192 @@
       "stage_reached": "stage_4_ablation_studies_1_round_one",
       "run_started_utc": "2026-08-30T08:17:06.276855+00:00",
       "run_finished_utc": "2026-08-30T08:53:25.091795+00:00"
+    },
+    "2026-08-30_17-57-27_kuairand_bpr_gauc_aligned_attempt_0": {
+      "run": "2026-08-30_17-57-27_kuairand_bpr_gauc_aligned_attempt_0",
+      "start": "2026-08-30 17:57:27",
+      "sort_key": "2026-08-30T17:57:27",
+      "duration_s": 255.5,
+      "training_s": 28.3,
+      "llm_total_tokens": 54519,
+      "llm_calls": 16,
+      "models": {
+        "deepseek-v4-pro": {
+          "tokens": 28439,
+          "calls": 5
+        },
+        "deepseek-v4-flash-vision-exp": {
+          "tokens": 14118,
+          "calls": 2
+        },
+        "deepseek-v4-flash": {
+          "tokens": 11962,
+          "calls": 9
+        }
+      },
+      "executed_iters": 2,
+      "seed_evals": 0,
+      "gpu_peak_mib": 378.0,
+      "best_primary": 0.6016548275947571,
+      "best_gauc": 0.6673658490180969,
+      "best_ndcg": 0.5354001522064209,
+      "best_stage": 2,
+      "best_stage_exact": true,
+      "architecture": "embedding model \u00b7 BCE",
+      "stage_reached": "stage_2_baseline_tuning_1_closed_loop",
+      "run_started_utc": "2026-08-30T09:57:27.061247+00:00",
+      "run_finished_utc": "2026-08-30T10:01:42.545188+00:00"
+    },
+    "2026-08-30_22-11-14_kuairand_fm_validation_baseline_attempt_0": {
+      "run": "2026-08-30_22-11-14_kuairand_fm_validation_baseline_attempt_0",
+      "start": "2026-08-30 22:11:14",
+      "sort_key": "2026-08-30T22:11:14",
+      "duration_s": 4915.8,
+      "training_s": 1017.7,
+      "llm_total_tokens": 1470813,
+      "llm_calls": 257,
+      "models": {
+        "deepseek-v4-pro": {
+          "tokens": 1019049,
+          "calls": 72
+        },
+        "deepseek-v4-flash-vision-exp": {
+          "tokens": 199028,
+          "calls": 24
+        },
+        "deepseek-v4-flash": {
+          "tokens": 252736,
+          "calls": 161
+        }
+      },
+      "executed_iters": 46,
+      "seed_evals": 4,
+      "gpu_peak_mib": 5696.0,
+      "best_primary": 0.6043134331703186,
+      "best_gauc": 0.6710285544395447,
+      "best_ndcg": 0.536559522151947,
+      "best_stage": 4,
+      "best_stage_exact": false,
+      "architecture": "DIN target-attention \u00b7 BPR pairwise",
+      "stage_reached": "stage_4_ablation_studies_1_round_one_candidate_one",
+      "run_started_utc": "2026-08-30T14:11:14.112588+00:00",
+      "run_finished_utc": "2026-08-30T15:33:09.945906+00:00"
+    },
+    "2026-08-30_23-41-11_kuairand_fm_validation_baseline_attempt_0": {
+      "run": "2026-08-30_23-41-11_kuairand_fm_validation_baseline_attempt_0",
+      "start": "2026-08-30 23:41:11",
+      "sort_key": "2026-08-30T23:41:11",
+      "duration_s": 1981.9,
+      "training_s": 217.3,
+      "llm_total_tokens": 774476,
+      "llm_calls": 129,
+      "models": {
+        "deepseek-v4-pro": {
+          "tokens": 544090,
+          "calls": 37
+        },
+        "deepseek-v4-flash-vision-exp": {
+          "tokens": 113490,
+          "calls": 13
+        },
+        "deepseek-v4-flash": {
+          "tokens": 116896,
+          "calls": 79
+        }
+      },
+      "executed_iters": 25,
+      "seed_evals": 2,
+      "gpu_peak_mib": 466.0,
+      "best_primary": 0.6040681004524231,
+      "best_gauc": 0.6703839302062988,
+      "best_ndcg": 0.5370895862579346,
+      "best_stage": 1,
+      "best_stage_exact": true,
+      "architecture": "Embedding + MLP \u00b7 BPR pairwise",
+      "stage_reached": "stage_3_creative_research_1_round_one_multi_parent",
+      "run_started_utc": "2026-08-30T15:41:11.819294+00:00",
+      "run_finished_utc": "2026-08-30T16:14:13.708805+00:00"
+    },
+    "2026-08-31_09-52-40_kuairand_fm_validation_baseline_attempt_0": {
+      "run": "2026-08-31_09-52-40_kuairand_fm_validation_baseline_attempt_0",
+      "start": "2026-08-31 09:52:40",
+      "sort_key": "2026-08-31T09:52:40",
+      "duration_s": 10157.0,
+      "training_s": 1634.4,
+      "llm_total_tokens": 3174296,
+      "llm_calls": 446,
+      "models": {
+        "gpt-4.1-mini-2025-04-14": {
+          "tokens": 3174296,
+          "calls": 446
+        }
+      },
+      "executed_iters": 129,
+      "seed_evals": 2,
+      "gpu_peak_mib": 436.0,
+      "best_primary": 0.6043751239776611,
+      "best_gauc": 0.671159029006958,
+      "best_ndcg": 0.5371658205986023,
+      "best_stage": 1,
+      "best_stage_exact": true,
+      "architecture": "embedding model \u00b7 BCE",
+      "stage_reached": "stage_3_creative_research_1_round_two_multi_parent",
+      "run_started_utc": "2026-08-31T01:52:40.824043+00:00",
+      "run_finished_utc": "2026-08-31T04:41:57.806189+00:00"
+    },
+    "2026-08-31_14-06-30_kuairand_fm_validation_baseline_attempt_0": {
+      "run": "2026-08-31_14-06-30_kuairand_fm_validation_baseline_attempt_0",
+      "start": "2026-08-31 14:06:30",
+      "sort_key": "2026-08-31T14:06:30",
+      "duration_s": 10322.8,
+      "training_s": 2016.2,
+      "llm_total_tokens": 2970028,
+      "llm_calls": 499,
+      "models": {
+        "gpt-4.1-mini-2025-04-14": {
+          "tokens": 2970028,
+          "calls": 499
+        }
+      },
+      "executed_iters": 93,
+      "seed_evals": 8,
+      "gpu_peak_mib": 674.0,
+      "best_primary": 0.6043805480003357,
+      "best_gauc": 0.6710797548294067,
+      "best_ndcg": 0.5374079346656799,
+      "best_stage": 3,
+      "best_stage_exact": true,
+      "architecture": "Embedding + MLP \u00b7 BCE",
+      "stage_reached": "stage_3_creative_research_1_round_two_multi_parent",
+      "run_started_utc": "2026-08-31T06:06:30.278211+00:00",
+      "run_finished_utc": "2026-08-31T08:58:33.042383+00:00"
+    },
+    "2026-08-31_18-02-46_kuairand_fm_validation_baseline_attempt_0": {
+      "run": "2026-08-31_18-02-46_kuairand_fm_validation_baseline_attempt_0",
+      "start": "2026-08-31 18:02:46",
+      "sort_key": "2026-08-31T18:02:46",
+      "duration_s": 5319.0,
+      "training_s": 545.6,
+      "llm_total_tokens": 1310162,
+      "llm_calls": 338,
+      "models": {
+        "gpt-4.1-mini-2025-04-14": {
+          "tokens": 1310162,
+          "calls": 338
+        }
+      },
+      "executed_iters": 25,
+      "seed_evals": 17,
+      "gpu_peak_mib": 1686.0,
+      "best_primary": 0.6044924259185791,
+      "best_gauc": 0.6712708473205566,
+      "best_ndcg": 0.5373733639717102,
+      "best_stage": 4,
+      "best_stage_exact": false,
+      "architecture": "Wide&Deep \u00b7 BCE",
+      "stage_reached": "stage_4_final_incumbent_confirmation_1_configured_seeds",
+      "run_started_utc": "2026-08-31T10:02:46.254920+00:00",
+      "run_finished_utc": "2026-08-31T11:31:25.217612+00:00"
     }
   },
   "references": {
