@@ -229,8 +229,10 @@ def autonomous_candidate_prompt(
     feedback_text = (
         "\nConcrete rejection feedback for this slot:\n"
         + "\n".join(f"- {item}" for item in retry_feedback[-3:])
-        + "\nAddress the conflict with a substantively different implementation. "
-        "No replacement direction is prescribed.\n"
+        + "\nFor contract, smoke, or execution failures, repair the cited defect "
+        "while preserving any sound hypothesis. For duplicate or research-family "
+        "concentration conflicts, choose a substantively different implementation. "
+        "No replacement direction is prescribed in either case.\n"
         if retry_feedback
         else ""
     )
@@ -299,6 +301,13 @@ def autonomous_candidate_prompt(
         "- Evidence must name every enabled component. Use only curated literature "
         f"IDs [{evidence_ids}], stored validation references beginning validation:, "
         "or direct dependency references beginning dependency:.\n"
+        "- evidence must be a literal non-empty list. Every item must contain exactly "
+        "source_type, reference, and supports. source_type must be exactly one of "
+        "'literature', 'validation', or 'dependency', and must agree with reference. "
+        "supports must be a non-empty literal list of exact enabled component keys. "
+        "Shape example: {'source_type': 'dependency', "
+        "'reference': 'dependency:component_requires_input', "
+        "'supports': ['your_exact_component_key']}. Replace the component key.\n"
         "- Define literal FACTOR_SELECTION with considered_factor_ids, "
         "selected_factor_ids, selection_reason, rejected_reasons, and "
         "created_factor_cards. Consider at least one available card. Selecting no "
@@ -307,15 +316,26 @@ def autonomous_candidate_prompt(
         "with library_id, name, raw_fields, transform, output_fields, and state_policy; "
         "build_features must create every output and the guarded prediction path must "
         "consume it. Custom cards are limited to two custom_ snake_case IDs.\n"
+        "- A selected custom factor ID must be defined in created_factor_cards and have "
+        "a matching FEATURE_FACTORS entry. Never invent a custom ID only in selection. "
+        "Every output_fields name must also appear as an exact string literal inside "
+        "build_features; dynamic or helper-only field creation fails static preflight.\n"
         "- Any pairwise/listwise objective must form groups from encoded user IDs in "
         "x_tensor[:, 0] and use only same-user pairs. Any auxiliary target must come "
         "from a real train-window field, never from long_view or later-period logs.\n"
+        "- Inside CandidateModel.step, literally bind user_ids = x_tensor[:, 0], then "
+        "construct a same_user equality mask or explicit grouped indices before pair "
+        "selection and restrict every positive/negative pair to that relation. Merely "
+        "reading user_ids without constructing same-user groups is invalid.\n"
         "- Preserve the trusted split, evaluator, CandidateModel interfaces, checkpoint "
         "round-trip, CUDA placement, and validation-only feedback. Fit all learned "
         "feature state on train only and compute histories causally.\n"
         "- Keep a new prototype at or below 12 epochs and vectorize batch computation. "
         "Return only the concise plan and complete runnable code required by the "
         "global response format.\n"
+        "- Before returning, self-check the exact evidence schema and coverage, every "
+        "selected/custom factor ID, every literal factor output created and consumed, "
+        "and any same-user ranking groups. Fix violations before submitting code.\n"
         + factor_text
         + memory_text
         + feedback_text
