@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 import csv
+import json
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -84,6 +85,42 @@ def build_factor_context(
     failed_hypotheses: Iterable[str] = (),
 ) -> str:
     """Return a deterministic, leakage-aware context appended to Stage 3."""
+    root = Path(data_dir)
+    profile_path = root / "dataset_profile.json"
+    if profile_path.is_file():
+        profile = json.loads(profile_path.read_text())
+        if profile.get("storage") == "cache_npz":
+            components = sorted(
+                name
+                for name, enabled in _literal_mapping(
+                    incumbent_code, "ABLATION_COMPONENTS"
+                ).items()
+                if enabled is True
+            )
+            failed = list(failed_hypotheses)[-6:]
+            fields = profile.get("fields", ["user_id", "video_id"])
+            lines = [
+                "Trusted KuaiRand cache/factor context for this research round:",
+                f"- Dataset: {profile.get('dataset_name', 'KuaiRand bonus dataset')}",
+                f"- Round: {round_number}",
+                "- Permitted feedback: deterministic train and validation samples only.",
+                "- Test rows, labels, metrics, submission export, and prior-run artifacts are unavailable to candidate code.",
+                f"- Available categorical fields: {', '.join(map(str, fields))}",
+                "- Runtime splits are CachedSplit objects with users, items, labels, and history_end numpy arrays.",
+                "- The trusted encoder exposes dense int32 categorical IDs and long_view float32 targets.",
+                "- Raw Pure CSV columns, author/tab/duration fields, auxiliary outcomes, and raw-data builders are not available in this cache protocol.",
+                f"- Current registered components: {', '.join(components) or 'none'}",
+                "- Fit all learned state on train only and reuse it unchanged on validation.",
+                "- Do not infer or reconstruct held-out labels from cache metadata.",
+                "- Register every new model/factor block as a literal True ABLATION_COMPONENTS entry.",
+            ]
+            if failed:
+                lines.append("- Recent rejected hypotheses; do not repeat unchanged:")
+                lines.extend(f"  - {reason}" for reason in failed)
+            lines.append(
+                "- Propose one coherent executable change supported by the available cache fields and validation feedback."
+            )
+            return "\n".join(lines)
     dataset_dir = _dataset_dir(data_dir)
     files = {
         "interaction_log": "log_standard_4_08_to_4_21_pure.csv",

@@ -226,7 +226,13 @@ if __name__ == "__main__":
     idea = ideas[args.idea_idx]
 
     date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    idea_dir = f"experiments/{date}_{idea['Name']}_attempt_{args.attempt_id}"
+    experiment_root = os.environ.get(
+        "AI_SCIENTIST_EXPERIMENT_ROOT", "experiments"
+    )
+    idea_dir = osp.join(
+        experiment_root,
+        f"{date}_{idea['Name']}_attempt_{args.attempt_id}",
+    )
     print(f"Results will be saved in {idea_dir}")
     os.makedirs(idea_dir, exist_ok=True)
     iteration_limit = configured_iteration_limit(args.config)

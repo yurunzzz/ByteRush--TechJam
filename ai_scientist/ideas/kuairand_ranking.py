@@ -18,6 +18,7 @@ import torch
 from torch import nn
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DATASET_NAME = os.getenv("KUAIRAND_DATASET_NAME", "KuaiRand-1K")
 print(f"Using device: {DEVICE}", flush=True)
 
 execution_dir = Path.cwd()
@@ -266,7 +267,7 @@ def run_training():
         name: file_hash(input_dir / name) for name in ("data.py", "evaluate.py")
     }
     started = time.monotonic()
-    loaded = data_module.load(str(input_dir / "KuaiRand-Pure" / "data"))
+    loaded = data_module.load(str(input_dir / "data"))
     splits = {"train": loaded["train"], "valid": loaded["valid"]}
     del loaded
     encoded, feature_dimension, feature_state = build_features(splits)
@@ -367,7 +368,7 @@ def run_training():
     )
 
     experiment_data = {
-        "KuaiRand-Pure": {
+        DATASET_NAME: {
             "metrics": {
                 "validation primary": [primary],
                 "validation GAUC": [gauc],
@@ -381,6 +382,7 @@ def run_training():
             "ground_truth": [],
             "metadata": {
                 "metric_to_optimize": "validation primary",
+                "dataset": DATASET_NAME,
                 "maximize": True,
                 "best_epoch": best_epoch,
                 "seed": int(effective_config["seed"]),

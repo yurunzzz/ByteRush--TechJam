@@ -150,14 +150,14 @@ class AgentManager:
         }
         self.main_stage_goals: Dict[int, str] = {
             1: """
-                - Use the organizer-provided KuaiRand-Pure Starter Kit and FM implementation; do not rebuild the task from scratch
-                - Reproduce the official Random, Popularity, and FM validation baselines
+                - Use the configured KuaiRand bonus-dataset cache and supplied FM implementation; do not rebuild the task from scratch
+                - Reproduce the supplied FM validation baseline
                 - Treat long_view as the only relevance label and primary=(GAUC+nDCG@5)/2 as the selection metric
                 - Use only validation feedback; never expose test labels or test metrics to the research loop
-                - Preserve data.py, evaluate.py, the chronological split, row order, and submission schema
+                - Preserve data.py, evaluate.py, the frozen split, row order, and validation-only protocol
                 - If you are given \"Code To Use\", use it as the required starting point.""",
             2: """
-                - Tune the assigned fixed Stage 1 root on the fixed KuaiRand-Pure train/validation split; the controller applies the same budget to FM and each selected Stage 1B model family
+                - Tune the assigned fixed Stage 1 root on the configured KuaiRand train/validation cache; the controller applies the same budget to FM and each selected Stage 1B model family
                 - Change controlled hyperparameters such as learning rate, L2, epochs, batch size, patience, initialization, optimizer, and seed
                 - Test exactly one complete hyperparameter configuration in each experimental node; do not run a grid, sweep, or multiple configurations inside one node
                 - Train each new configuration for at most 12 epochs, including any early-stopping epochs
@@ -178,7 +178,7 @@ class AgentManager:
                 - Treat factor cards and prior results as optional evidence, not a required method menu; select, revise, or reject them according to the hypothesis
                 - Do not copy an earlier candidate unchanged or disguise the same implementation with renamed metadata; retries must address the concrete diversity conflict reported by the controller
                 - Keep every bundled change interpretable and evidence-linked; compare the complete candidate with the best valid parent under comparable compute
-                - Respect the encoded input contract: train_x and valid_x are dense integer feature-ID arrays with shape (rows, 5), not one-hot or scipy sparse matrices; use embedding lookup such as V[X], never X @ V
+                - Respect the encoded input contract: train_x and valid_x are dense integer feature-ID arrays with shape (rows, 2), not one-hot or scipy sparse matrices; use embedding lookup such as V[X], never X @ V
                 - Preserve CandidateModel's constructor plus step, predict, state_dict, and load_state_dict interfaces so the trusted validation loop can train and checkpoint the candidate
                 - Vectorize score and gradient computation over each batch; do not write Python loops over samples or feature rows
                 - Use at most 12 epochs for a new Stage 3 prototype until it proves runnable; only promising legal candidates may receive a larger budget
@@ -193,7 +193,7 @@ class AgentManager:
                 - Reject an ablation when disabling a declared component does not change the effective code path or feature schema
                 - Report each component's primary, GAUC, and nDCG@5 contribution, seed wins, uncertainty, and positive/neutral/harmful verdict
                 - Feed component and synergy evidence back as neutral validation observations for the next Stage 3 round
-                - Use only the same fixed KuaiRand-Pure train/validation split
+                - Use only the same configured KuaiRand train/validation cache
                 - Replicate the best legal configuration across seeds and report mean and standard deviation
                 - Keep the validation-best checkpoint rather than the last trained checkpoint""",
         }
@@ -536,11 +536,11 @@ Your research idea:\n\n
             1. Figure Analysis:
             {vlm_feedback}
 
-            2. Fixed benchmark: KuaiRand-Pure train/validation split
+            2. Fixed benchmark: configured KuaiRand train/validation cache
 
             Requirements for completion:
             1. Training curves should show stable convergence
-            2. Results should be reproducible on the fixed KuaiRand-Pure validation split
+            2. Results should be reproducible on the configured KuaiRand validation sample
             3. No major instabilities or issues in the plots
 
             Provide a detailed evaluation of completion status.

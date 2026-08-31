@@ -1,0 +1,9 @@
+{
+  "dataset_name": "KuaiRand-1K",
+  "storage": "cache_npz",
+  "selection_splits": ["train", "valid"],
+  "test_visible_to_agent": false,
+  "submission_export": false,
+  "fields": ["user_id", "video_id"],
+  "cache_environment_variable": "KUAIRAND_CACHE_PATH"
+}

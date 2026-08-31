@@ -97,6 +97,16 @@ def export_and_check_submission(
     """Use the organizer submission entry point for export and schema checking."""
     output_dir = Path(output_dir).resolve()
     starter_kit = Path(starter_kit).resolve()
+    profile_path = starter_kit / "dataset_profile.json"
+    if profile_path.is_file():
+        profile = json.loads(profile_path.read_text())
+        if not bool(profile.get("submission_export", True)):
+            return {
+                "skipped": True,
+                "reason": "dataset profile disables test/submission export",
+                "dataset": profile.get("dataset_name"),
+                "checked": False,
+            }
     submit_script = starter_kit / "submit.py"
     data_dir = starter_kit / "KuaiRand-Pure" / "data"
     if not submit_script.is_file():

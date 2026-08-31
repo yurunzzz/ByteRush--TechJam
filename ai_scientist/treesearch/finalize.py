@@ -35,7 +35,12 @@ def _validation_metrics(node: Any) -> dict[str, float] | None:
         return None
     try:
         data = np.load(files[0], allow_pickle=True).item()
-        metrics = data["KuaiRand-Pure"]["metrics"]
+        dataset_payload = next(
+            payload
+            for payload in data.values()
+            if isinstance(payload, dict) and "metrics" in payload
+        )
+        metrics = dataset_payload["metrics"]
         return {
             "GAUC": float(metrics["validation GAUC"][0]),
             "nDCG@5": float(metrics["validation nDCG@5"][0]),

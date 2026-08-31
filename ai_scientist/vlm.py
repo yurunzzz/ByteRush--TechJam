@@ -144,7 +144,7 @@ def get_response_from_vlm(
     if msg_history is None:
         msg_history = []
 
-    if model in AVAILABLE_VLMS:
+    if model in AVAILABLE_VLMS or model.startswith("gpt-"):
         # Convert single image path to list for consistent handling
         if isinstance(image_paths, str):
             image_paths = [image_paths]
@@ -194,7 +194,7 @@ def get_response_from_vlm(
 
 def create_client(model: str) -> tuple[Any, str]:
     """Create client for vision-language model."""
-    if model in [
+    if model.startswith("gpt-") or model in [
         "gpt-4o-2024-05-13",
         "gpt-4o-2024-08-06",
         "gpt-4o-2024-11-20",
@@ -279,7 +279,7 @@ def get_batch_responses_from_vlm(
     if msg_history is None:
         msg_history = []
 
-    if model in AVAILABLE_VLMS:
+    if model in AVAILABLE_VLMS or model.startswith("gpt-"):
         # Convert single image path to list
         if isinstance(image_paths, str):
             image_paths = [image_paths]

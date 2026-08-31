@@ -49,7 +49,12 @@ def main() -> int:
     if not artifact.exists():
         raise RuntimeError("V2 run did not create experiment_data.npy")
     experiment_data = np.load(artifact, allow_pickle=True).item()
-    metrics = experiment_data["KuaiRand-Pure"]["metrics"]
+    dataset_payload = next(
+        payload
+        for payload in experiment_data.values()
+        if isinstance(payload, dict) and "metrics" in payload
+    )
+    metrics = dataset_payload["metrics"]
     primary = float(metrics["validation primary"][-1])
     if not 0.59 <= primary <= 0.61:
         raise RuntimeError(f"FM baseline primary outside expected range: {primary}")

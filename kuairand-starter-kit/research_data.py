@@ -52,9 +52,14 @@ def build_schema_v2(splits, *, data_module, feature_state=None):
                 "item_ids": categorical_ids[:, 1],
             },
             "targets": {"long_view": long_view},
-            "users": list(users),
+            "users": users if isinstance(users, np.ndarray) else list(users),
             "row_indices": np.arange(len(long_view), dtype=np.int64),
         }
+        history_end = getattr(splits[split_name], "history_end", None)
+        if history_end is not None:
+            split_payloads[split_name]["inputs"]["history_end"] = np.asarray(
+                history_end, dtype=np.int32
+            )
     schema = {
         "schema_version": SCHEMA_VERSION,
         "splits": split_payloads,

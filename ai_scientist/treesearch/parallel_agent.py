@@ -483,17 +483,17 @@ class MinimalAgent:
         if "KuaiRand" in task_text and "nDCG@5" in task_text:
             return {
                 "Implementation guideline": [
-                    "Use only the fixed KuaiRand-Pure data exposed under ./input.",
+                    "Use only the configured KuaiRand cache exposed by trusted input/data.py.",
                     "Do not download, join, synthesize, or train on any external dataset.",
                     "The target is long_view. Optimize validation primary=(GAUC+nDCG@5)/2; higher is better.",
                     "Never evaluate test labels or print/store test metrics during research.",
-                    "Do not modify input/data.py, input/evaluate.py, the chronological split, row order, or submission schema.",
-                    "Start from input/run_fm_experiment.py and its JSON configuration contract.",
+                    "Do not modify input/data.py, input/evaluate.py, the frozen split, row order, or validation-only protocol.",
+                    "Start from the supplied editable candidate and its CONFIG contract.",
                     "Stage 2 may tune only allowed FM hyperparameters; Stage 3 may make controlled model changes while preserving this evaluation contract.",
                     "Extend the supplied candidate at its existing extension points; call trusted source helpers directly instead of duplicating their data or evaluation logic.",
                     "Preserve build_features(splits, feature_state=None), build_research_schema(splits, feature_state=None), create_model(feature_dimension, config=None), save_candidate_checkpoint, load_candidate_checkpoint, and run_training.",
-                    "Use trusted input/research_data.py schema v2 for structured inputs. Keep LegacyFMAdapter for unchanged FM behavior and final export compatibility.",
-                    "If the Agent independently chooses pairwise ranking, causal history, or auxiliary supervision, use the matching trusted helper in research_data.py instead of reimplementing it.",
+                    "Use trusted input/research_data.py schema v2 for structured inputs. Keep LegacyFMAdapter for unchanged FM behavior.",
+                    "The cache exposes only user_id, video_id, long_view, and history_end; do not assume Pure raw CSV fields or auxiliary labels exist.",
                     "Any new factor vocabulary, bucket, normalization statistic, or historical aggregate must be fitted from train only, returned as JSON-serializable feature_state, and reused unchanged for validation/test.",
                     "The existing checkpoint path must save model weights, full config, feature_state, and feature_dimension; do not replace it with a weights-only checkpoint.",
                     "When AI_SCIENTIST_INFERENCE_ONLY=1, importing the candidate must define its model/feature/checkpoint functions without loading data, training, evaluating, or writing artifacts.",
@@ -2083,7 +2083,7 @@ class ParallelAgent:
                         working_dir, child_node.term_out
                     )
                     child_node.parse_term_out = [
-                        "Dataset: KuaiRand-Pure\n",
+                        f"Dataset: {os.environ.get('KUAIRAND_DATASET_NAME', 'KuaiRand')}\n",
                         f"validation GAUC: {gauc:.9f}\n",
                         f"validation nDCG@5: {ndcg5:.9f}\n",
                         f"validation primary: {primary:.9f}\n",
