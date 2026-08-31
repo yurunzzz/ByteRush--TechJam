@@ -163,20 +163,22 @@ class ResearchLoopStateTests(unittest.TestCase):
         self.assertEqual(insights[0].mechanism_ids, ("cross_layer",))
         self.assertNotIn("test", insights[0].metrics)
 
-    def test_strict_config_schema_accepts_adaptive_transfer_settings(self):
+    def test_strict_config_schema_accepts_autonomous_diversity_settings(self):
         schema = OmegaConf.structured(ResearchLoopSettings)
         merged = OmegaConf.merge(
             schema,
             {
                 "min_valid_candidates_per_round": 3,
-                "transfer_base_ratio": 0.3,
+                "candidate_semantic_similarity_threshold": 0.8,
+                "max_candidates_per_research_family": 2,
                 "smoke_test_enabled": True,
                 "max_wall_clock_seconds": 19800,
             },
         )
 
         self.assertEqual(merged.min_valid_candidates_per_round, 3)
-        self.assertAlmostEqual(merged.transfer_base_ratio, 0.3)
+        self.assertAlmostEqual(merged.candidate_semantic_similarity_threshold, 0.8)
+        self.assertEqual(merged.max_candidates_per_research_family, 2)
         self.assertTrue(merged.smoke_test_enabled)
 
     def test_strict_config_schema_accepts_experience_top_k(self):
@@ -185,23 +187,18 @@ class ResearchLoopStateTests(unittest.TestCase):
 
         self.assertEqual(merged.experience_top_k, 5)
 
-    def test_strict_config_schema_accepts_stage3_elimination_and_topics(self):
+    def test_strict_config_schema_accepts_stage3_elimination_without_topics(self):
         schema = OmegaConf.structured(ResearchLoopSettings)
         merged = OmegaConf.merge(
             schema,
             {
                 "candidate_tuning_top_k": 2,
-                "initial_candidate_roles": [
-                    "causal_history_interest",
-                    "ranking_objective",
-                    "incumbent_extension",
-                ],
-                "reserved_candidate_role": "incumbent_extension",
+                "candidate_branches": 5,
             },
         )
 
         self.assertEqual(merged.candidate_tuning_top_k, 2)
-        self.assertEqual(merged.initial_candidate_roles[-1], "incumbent_extension")
+        self.assertEqual(merged.candidate_branches, 5)
 
     def test_strict_config_schema_accepts_multi_root_stage2(self):
         schema = OmegaConf.structured(ResearchLoopSettings)
@@ -258,6 +255,8 @@ class ResearchLoopStateTests(unittest.TestCase):
         self.assertEqual(config.candidate_tuning_iterations, 4)
         self.assertEqual(config.baseline_tuning_iterations, 24)
         self.assertEqual(config.finalist_num_seeds, 3)
+        with self.assertRaisesRegex(ValueError, "exactly 5"):
+            research_loop_config_from_mapping({"candidate_branches": 4})
 
     def test_duplicate_candidates_are_rejected(self):
         state = ResearchLoopState()
@@ -482,7 +481,8 @@ class ResearchLoopStateTests(unittest.TestCase):
             metrics={"GAUC": 0.723, "nDCG@5": 0.685, "primary": 0.704},
             principal_change="gated history diversity tower",
             role="causal_history_interest",
-            category="history_interest",
+            category="autonomous_research",
+            research_family="history_interest",
             factor_ids=["custom_history_diversity"],
             factor_selection_reason="active users show repetitive histories",
             factor_cards=[
@@ -502,6 +502,7 @@ class ResearchLoopStateTests(unittest.TestCase):
 
         self.assertEqual(summary["model_roles"], ["causal_history_interest"])
         self.assertAlmostEqual(summary["mean_gain"], 0.004)
+        self.assertEqual(state.memory.records[-1].category, "history_interest")
         self.assertEqual(
             summary["self_description"]["semantics"],
             "past-only diversity of recent interests",

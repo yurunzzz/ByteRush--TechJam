@@ -76,45 +76,6 @@ def _literal_sequence(code: str, variable: str) -> list[str]:
     return []
 
 
-def _unused_factor_groups(code: str) -> list[tuple[str, str]]:
-    lowered = code.lower()
-    groups = [
-        (
-            "temporal_context",
-            "hour-of-day, weekday, recency, and log-duration buckets from "
-            "date/hourmin/time_ms/duration_ms",
-        ),
-        (
-            "static_user_profile",
-            "user activity degree, creator/live status, registration age, and "
-            "follow/fan/friend ranges with explicit missing-value buckets",
-        ),
-        (
-            "static_video_metadata",
-            "video type, upload age/type, aspect ratio, music, and tag metadata",
-        ),
-        (
-            "causal_user_history",
-            "past exposure counts and recency from prediction-time-known fields; "
-            "outcome-based rates/watch summaries must be frozen from train only",
-        ),
-        (
-            "causal_affinity",
-            "past-only user-author, user-tag, and user-video-type affinity factors",
-        ),
-        (
-            "auxiliary_training_targets",
-            "click/like/follow/comment/forward and watch time used only as "
-            "train-window targets or train-window history, never from valid/test",
-        ),
-    ]
-    return [
-        group
-        for group in groups
-        if group[0] not in lowered and group[0].replace("_", " ") not in lowered
-    ]
-
-
 def build_factor_context(
     data_dir: str | Path,
     *,
@@ -142,9 +103,6 @@ def build_factor_context(
         if enabled is True
     )
     encoded_fields = _literal_sequence(incumbent_code, "FIELDS")
-    factor_groups = _unused_factor_groups(incumbent_code)
-    rotation = (max(1, round_number) - 1) % max(1, len(factor_groups))
-    prioritized = factor_groups[rotation:] + factor_groups[:rotation]
     failed = list(failed_hypotheses)[-6:]
 
     lines = [
@@ -164,9 +122,8 @@ def build_factor_context(
         "- Trusted research_data.py exposes schema v2: split -> inputs/targets/users plus leakage-safe same-user pairs, causal history, and train-only auxiliary-label builders.",
         "- LegacyFMAdapter converts schema v2 losslessly to the incumbent contract: encoded split -> (X int32 shape (N,F), y float32 shape (N,), users list), feature_dimension int, feature_state mapping.",
         "- Existing FM-family candidates may keep build_features returning the legacy view. Structured candidates may consume schema v2 internally but must preserve the public build_features/checkpoint/export contract.",
-        "- Prioritized unused factor directions:",
+        "- Raw columns and trusted builders are shared capabilities, not a priority list. The candidate may use none of them when another legal hypothesis is better supported.",
     ]
-    lines.extend(f"  {index}. {name}: {description}" for index, (name, description) in enumerate(prioritized[:4], 1))
     if failed:
         lines.append("- Recent rejected hypotheses; do not repeat unchanged:")
         lines.extend(f"  - {reason}" for reason in failed)
@@ -181,7 +138,7 @@ def build_factor_context(
             "  6. Treat video_features_statistic_pure.csv as unsafe unless every statistic is rebuilt from the train window with an explicit cutoff.",
             "  7. The random-exposure log is diagnostic-only and cannot replace validation or drive promotion.",
             "  8. Register each new model/factor block as a literal True ABLATION_COMPONENTS entry.",
-            "- Propose one principal algorithm/factor change in each sibling branch.",
+            "- Propose one coherent executable research change chosen from the incumbent and feedback; no algorithm family is assigned.",
         ]
     )
     return "\n".join(lines)

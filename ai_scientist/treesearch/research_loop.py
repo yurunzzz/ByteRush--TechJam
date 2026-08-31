@@ -888,12 +888,9 @@ class ResearchLoopConfig:
     stage2_num_seeds: int = 3
     stage2_root_top_k: int = 4
     max_component_regression: float = 0.001
-    candidate_branches: int = 8
-    stage3_incumbent_parent_slots: int = 2
-    stage3_frontier_parent_slots: int = 2
-    stage3_bootstrap_parent_slots: int = 1
-    initial_candidate_roles: tuple[str, ...] = ()
-    reserved_candidate_role: str = ""
+    candidate_branches: int = 5
+    candidate_semantic_similarity_threshold: float = 0.80
+    max_candidates_per_research_family: int = 2
     candidate_parallel_workers: int = 3
     stage3_generation_attempts: int = 16
     candidate_tuning_top_k: int = 2
@@ -910,18 +907,12 @@ class ResearchLoopConfig:
     ablation_synergy_pairs: int = 3
     min_valid_candidates_per_round: int = 3
     target_valid_candidates_per_round: int = 5
-    max_candidate_branches: int = 8
-    branch_growth_per_positive_round: int = 2
     max_repair_attempts_per_assignment: int = 2
     no_valid_round_patience: int = 2
     low_gain_round_patience: int = 3
     min_round_primary_gain: float = 0.0002
     provisional_min_primary_gain: float = 0.0005
     final_promotion_min_primary_gain: float = 0.001
-    transfer_base_ratio: float = 0.30
-    transfer_min_ratio: float = 0.15
-    transfer_max_ratio: float = 0.50
-    donor_max_primary_gap: float = 0.002
     smoke_test_enabled: bool = True
     smoke_test_timeout_seconds: int = 240
     max_wall_clock_seconds: int = 19800
@@ -939,10 +930,19 @@ def research_loop_config_from_mapping(raw: Any) -> ResearchLoopConfig:
             if callable(getter)
             else getattr(raw, item.name, item.default)
         )
-        if item.name in {"initial_candidate_roles", "stage1b_model_families"}:
+        if item.name == "stage1b_model_families":
             value = tuple(value or ())
         values[item.name] = value
-    return ResearchLoopConfig(**values)
+    config = ResearchLoopConfig(**values)
+    if config.candidate_branches != 5:
+        raise ValueError("candidate_branches must be exactly 5 for autonomous Stage 3")
+    if not 0.0 < config.candidate_semantic_similarity_threshold <= 1.0:
+        raise ValueError(
+            "candidate_semantic_similarity_threshold must be in (0, 1]"
+        )
+    if config.max_candidates_per_research_family < 1:
+        raise ValueError("max_candidates_per_research_family must be at least 1")
+    return config
 
 
 def estimate_max_experiment_runs(
@@ -1194,7 +1194,7 @@ class ResearchLoopState:
                 principal_change=principal_change,
                 components=list(components),
                 role=role,
-                category=category,
+                category=research_family or category,
                 improvement=decision.improvement,
                 factor_ids=list(factor_ids),
                 considered_factor_ids=list(considered_factor_ids or factor_ids),
@@ -1393,7 +1393,8 @@ class ResearchLoopState:
         if previous_round < 1:
             prefix = (
                 "Structured candidate experience: no previous Stage 3 round; "
-                "use the assigned Stage 1B/frontier parent without test feedback."
+                "start from the verified incumbent and choose autonomously without "
+                "test feedback."
             )
             if not self.memory.frontier:
                 return prefix
@@ -1418,8 +1419,9 @@ class ResearchLoopState:
         ]
         if near_winners:
             lines.append(
-                "- Transferable near-winner lessons; adapt one at a time to the "
-                "incumbent, do not copy an entire rejected candidate unchanged:"
+                "- Optional observations from successful non-winners. Use, revise, "
+                "or reject them based on the current incumbent; do not copy a "
+                "candidate unchanged:"
             )
             for record in near_winners:
                 deltas = record.metric_deltas
@@ -1435,7 +1437,7 @@ class ResearchLoopState:
                     f"decision={record.reason}."
                 )
         else:
-            lines.append("- No successful non-winning candidate is available for transfer.")
+            lines.append("- No successful non-winning observation is available.")
         if self.memory.failed_hypotheses:
             lines.append("- Recent rejected directions; do not repeat unchanged:")
             lines.extend(

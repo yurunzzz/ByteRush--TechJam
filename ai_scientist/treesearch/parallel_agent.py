@@ -14,6 +14,7 @@ from .candidate_contract import (
     extract_assignment_contract,
     config_assignment,
     literal_assignment,
+    model_family_from_code,
     normalize_candidate_metadata,
     rewrite_for_smoke_test,
     role_from_assignment,
@@ -492,7 +493,7 @@ class MinimalAgent:
                     "Extend the supplied candidate at its existing extension points; call trusted source helpers directly instead of duplicating their data or evaluation logic.",
                     "Preserve build_features(splits, feature_state=None), build_research_schema(splits, feature_state=None), create_model(feature_dimension, config=None), save_candidate_checkpoint, load_candidate_checkpoint, and run_training.",
                     "Use trusted input/research_data.py schema v2 for structured inputs. Keep LegacyFMAdapter for unchanged FM behavior and final export compatibility.",
-                    "Use research_data.same_user_pair_indices for pairwise ranking, attach_causal_history for past-only histories, and load_train_auxiliary_targets for real train-window auxiliary supervision.",
+                    "If the Agent independently chooses pairwise ranking, causal history, or auxiliary supervision, use the matching trusted helper in research_data.py instead of reimplementing it.",
                     "Any new factor vocabulary, bucket, normalization statistic, or historical aggregate must be fitted from train only, returned as JSON-serializable feature_state, and reused unchanged for validation/test.",
                     "The existing checkpoint path must save model weights, full config, feature_state, and feature_dimension; do not replace it with a weights-only checkpoint.",
                     "When AI_SCIENTIST_INFERENCE_ONLY=1, importing the candidate must define its model/feature/checkpoint functions without loading data, training, evaluating, or writing artifacts.",
@@ -1918,6 +1919,8 @@ class ParallelAgent:
                         child_node.parent = parent_node
 
             assignment = extract_assignment_contract(task_desc)
+            if assignment:
+                child_node.assignment_id = str(assignment.get("assignment_id", ""))
             is_research_candidate = bool(
                 assignment
                 and parent_node is not None
@@ -1928,23 +1931,50 @@ class ParallelAgent:
                 )
             )
             if is_research_candidate:
+                actual_parent_id = str(parent_node.id)
+                actual_parent_model_family = model_family_from_code(parent_node.code)
+                marker_parent_id = str(assignment.get("parent_node_id", ""))
+                marker_parent_model_family = str(
+                    assignment.get("parent_model_family", "")
+                )
+                provenance_reasons = []
+                if marker_parent_id != actual_parent_id:
+                    provenance_reasons.append(
+                        f"assignment parent {marker_parent_id!r} does not match "
+                        f"actual parent {actual_parent_id!r}"
+                    )
+                if marker_parent_model_family != actual_parent_model_family:
+                    provenance_reasons.append(
+                        "assignment parent_model_family "
+                        f"{marker_parent_model_family!r} does not match actual parent "
+                        f"family {actual_parent_model_family!r}"
+                    )
+                if provenance_reasons:
+                    child_node.is_buggy = True
+                    child_node.metric = WorstMetricValue()
+                    child_node.analysis = (
+                        "PREFLIGHT_REJECTED: " + "; ".join(provenance_reasons)
+                    )
+                    child_node.parse_exc_type = "CandidatePreflightError"
+                    child_node.parse_exc_info = {
+                        "message": child_node.analysis,
+                        "assignment_id": child_node.assignment_id,
+                    }
+                    print(child_node.analysis)
+                    return child_node.to_dict()
                 role = role_from_assignment(assignment)
                 child_node.code = normalize_candidate_metadata(
                     child_node.code,
                     role,
-                    expected_parent_id=str(assignment.get("parent_node_id", "")),
-                    expected_parent_model_family=str(
-                        assignment.get("parent_model_family", "fm")
-                    ),
+                    expected_parent_id=actual_parent_id,
+                    expected_parent_model_family=actual_parent_model_family,
                 )
                 preflight = validate_candidate_contract(
                     parent_node.code,
                     child_node.code,
                     role,
-                    expected_parent_id=str(assignment.get("parent_node_id", "")),
-                    expected_parent_model_family=str(
-                        assignment.get("parent_model_family", "fm")
-                    ),
+                    expected_parent_id=actual_parent_id,
+                    expected_parent_model_family=actual_parent_model_family,
                 )
                 if not preflight.valid:
                     child_node.is_buggy = True

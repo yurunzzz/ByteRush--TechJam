@@ -1,9 +1,12 @@
 import unittest
 
 from ai_scientist.treesearch.candidate_contract import (
+    AUTONOMOUS_STAGE3_ROLE,
     DEFAULT_CANDIDATE_ROLES,
     bootstrap_candidate_roles,
     build_assignment_marker,
+    candidate_implementation_signature,
+    candidate_semantic_similarity,
     candidate_semantic_signature,
     config_assignment,
     format_factor_change,
@@ -86,7 +89,18 @@ def create_model(feature_dimension, config=None):
     if component_enabled('din_attention'):
         return ('din', feature_dimension)
     return ('fm', feature_dimension)
-"""
+    """
+
+
+def autonomous_history_candidate(component="history_factor"):
+    return (
+        history_candidate(
+            role_name=AUTONOMOUS_STAGE3_ROLE.name,
+            component=component,
+        )
+        .replace("'group': 'history_interest'", "'group': 'autonomous_research'")
+        .replace("'category': 'factor_model'", "'category': 'open_choice'")
+    )
 
 def objective_candidate(role, step_body="", extra_code=""):
     component = (
@@ -171,6 +185,171 @@ class CandidateContractTests(unittest.TestCase):
         self.assertEqual(payload["parent_node_id"], "incumbent-123")
         restored = role_from_assignment(payload)
         self.assertEqual(restored.name, role.name)
+        self.assertFalse(restored.autonomous)
+
+    def test_autonomous_assignment_and_prompt_do_not_prescribe_direction(self):
+        prompt = AUTONOMOUS_STAGE3_ROLE.prompt(
+            2,
+            5,
+            retry_feedback=["too similar to accepted slot round1:autonomous:1"],
+            evidence_memory="validation observations",
+            parent_node_id="incumbent-1",
+            parent_model_family="fm",
+            assignment_id="round1:autonomous:2",
+            assignment_kind="autonomous",
+        )
+        payload = extract_assignment_contract(prompt)
+        restored = role_from_assignment(payload)
+
+        self.assertTrue(restored.autonomous)
+        self.assertEqual(payload["assignment_id"], "round1:autonomous:2")
+        self.assertNotIn("exploit", prompt.lower())
+        self.assertNotIn("donor", prompt.lower())
+        self.assertNotIn("required mechanism", prompt.lower())
+        self.assertIn("No scientific choice has been made", prompt)
+        self.assertTrue(prompt.rstrip().endswith(build_assignment_marker(
+            AUTONOMOUS_STAGE3_ROLE,
+            assignment_id="round1:autonomous:2",
+            assignment_kind="autonomous",
+            parent_node_id="incumbent-1",
+            parent_model_family="fm",
+        ).rstrip()))
+
+    def test_autonomous_normalizer_preserves_agent_scientific_declarations(self):
+        candidate = autonomous_history_candidate()
+        normalized = normalize_candidate_metadata(
+            candidate,
+            AUTONOMOUS_STAGE3_ROLE,
+            expected_parent_id="ignored",
+            expected_parent_model_family="fm",
+        )
+        self.assertEqual(normalized, candidate)
+
+    def test_autonomous_factor_candidate_passes_without_assigned_direction(self):
+        result = validate_candidate_contract(
+            BASE,
+            autonomous_history_candidate(),
+            AUTONOMOUS_STAGE3_ROLE,
+        )
+        self.assertTrue(result.valid, result.reasons)
+
+        over_budget = validate_candidate_contract(
+            BASE,
+            autonomous_history_candidate().replace("'epochs': 6", "'epochs': 13"),
+            AUTONOMOUS_STAGE3_ROLE,
+        )
+        self.assertFalse(over_budget.valid)
+        self.assertTrue(any("between 1 and 12" in reason for reason in over_budget.reasons))
+
+    def test_autonomous_family_change_requires_real_model_change(self):
+        candidate = autonomous_history_candidate().replace(
+            "'model_family': 'fm'", "'model_family': 'dcn'"
+        ).replace(
+            "    if component_enabled('din_attention'):\n"
+            "        return ('din', feature_dimension)\n"
+            "    return ('fm', feature_dimension)",
+            "    return ('fm', feature_dimension)",
+        )
+        result = validate_candidate_contract(
+            BASE, candidate, AUTONOMOUS_STAGE3_ROLE
+        )
+        self.assertFalse(result.valid)
+        self.assertIn(
+            "architecture candidate does not materially change create_model",
+            result.reasons,
+        )
+
+    def test_autonomous_ranking_loss_cannot_bypass_same_user_guard(self):
+        ranking_role = DEFAULT_CANDIDATE_ROLES[2]
+        candidate = objective_candidate(
+            ranking_role,
+            step_body="""
+        x_tensor = x
+        positive = y > 0
+        negative = y <= 0
+""",
+        )
+        candidate = (
+            candidate
+            .replace(f"'role': {ranking_role.name!r}", f"'role': {AUTONOMOUS_STAGE3_ROLE.name!r}")
+            .replace(f"'group': {ranking_role.group!r}", f"'group': {AUTONOMOUS_STAGE3_ROLE.group!r}")
+            .replace(f"'category': {ranking_role.category!r}", f"'category': {AUTONOMOUS_STAGE3_ROLE.category!r}")
+            .replace("'research_family': 'ranking_objective'", "'research_family': 'training_strategy'")
+        )
+        result = validate_candidate_contract(
+            BASE, candidate, AUTONOMOUS_STAGE3_ROLE
+        )
+        self.assertFalse(result.valid)
+        self.assertTrue(
+            any("x_tensor[:, 0]" in reason for reason in result.reasons),
+            result.reasons,
+        )
+
+    def test_implementation_signature_ignores_metadata_and_component_labels(self):
+        first = autonomous_history_candidate(component="history_factor")
+        second = (
+            first
+            .replace("'learning_rate': 0.001", "'learning_rate': 0.002")
+            .replace("history_factor", "renamed_factor")
+            .replace("'candidate_id': 'history_din'", "'candidate_id': 'renamed'")
+        )
+        changed = first.replace("return ('din', feature_dimension)", "return ('dcn', feature_dimension)")
+
+        self.assertEqual(
+            candidate_implementation_signature(first),
+            candidate_implementation_signature(second),
+        )
+        self.assertNotEqual(
+            candidate_implementation_signature(first),
+            candidate_implementation_signature(changed),
+        )
+        self.assertIsNone(candidate_implementation_signature("def broken("))
+
+    def test_semantic_similarity_catches_renamed_same_idea(self):
+        first = validate_candidate_contract(
+            BASE, autonomous_history_candidate(), AUTONOMOUS_STAGE3_ROLE
+        )
+        renamed = autonomous_history_candidate().replace(
+            "'causal_history_profile', 'din_target_attention'",
+            "'recent_profile_v2', 'target_gate_v2'",
+        )
+        second = validate_candidate_contract(
+            BASE, renamed, AUTONOMOUS_STAGE3_ROLE
+        )
+        relabeled = validate_candidate_contract(
+            BASE,
+            renamed.replace(
+                "'research_family': 'history_interest'",
+                "'research_family': 'feature_engineering'",
+            ),
+            AUTONOMOUS_STAGE3_ROLE,
+        )
+        synonymous = validate_candidate_contract(
+            BASE,
+            renamed
+            .replace(
+                "'past author affinity improves user-level ranking'",
+                "'viewer preference over prior creators improves ordering'",
+            )
+            .replace(
+                "'causal profile consumed by target attention'",
+                "'target-conditioned pooling reads earlier creator interactions'",
+            ),
+            AUTONOMOUS_STAGE3_ROLE,
+        )
+        different = validate_candidate_contract(
+            BASE,
+            renamed
+            .replace("'research_family': 'history_interest'", "'feature_engineering'")
+            .replace("'past author affinity improves user-level ranking'", "'static metadata improves unseen item representation'")
+            .replace("'causal profile consumed by target attention'", "'regularized static metadata residual'"),
+            AUTONOMOUS_STAGE3_ROLE,
+        )
+
+        self.assertGreaterEqual(candidate_semantic_similarity(first, second), 0.80)
+        self.assertGreaterEqual(candidate_semantic_similarity(first, relabeled), 0.80)
+        self.assertGreaterEqual(candidate_semantic_similarity(first, synonymous), 0.80)
+        self.assertLess(candidate_semantic_similarity(first, different), 0.80)
 
     def test_smoke_rewrite_limits_training_without_changing_mechanism(self):
         code = BASE.replace("'epochs': 6", "'epochs': 12, 'patience': 4")

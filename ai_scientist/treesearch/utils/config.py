@@ -79,12 +79,9 @@ class ResearchLoopSettings:
     stage2_num_seeds: int = 3
     stage2_root_top_k: int = 4
     max_component_regression: float = 0.001
-    candidate_branches: int = 8
-    stage3_incumbent_parent_slots: int = 2
-    stage3_frontier_parent_slots: int = 2
-    stage3_bootstrap_parent_slots: int = 1
-    initial_candidate_roles: list[str] = field(default_factory=list)
-    reserved_candidate_role: str = ""
+    candidate_branches: int = 5
+    candidate_semantic_similarity_threshold: float = 0.80
+    max_candidates_per_research_family: int = 2
     candidate_parallel_workers: int = 3
     stage3_generation_attempts: int = 16
     candidate_tuning_top_k: int = 2
@@ -101,18 +98,12 @@ class ResearchLoopSettings:
     ablation_synergy_pairs: int = 3
     min_valid_candidates_per_round: int = 3
     target_valid_candidates_per_round: int = 5
-    max_candidate_branches: int = 8
-    branch_growth_per_positive_round: int = 2
     max_repair_attempts_per_assignment: int = 2
     no_valid_round_patience: int = 2
     low_gain_round_patience: int = 3
     min_round_primary_gain: float = 0.0002
     provisional_min_primary_gain: float = 0.0005
     final_promotion_min_primary_gain: float = 0.001
-    transfer_base_ratio: float = 0.30
-    transfer_min_ratio: float = 0.15
-    transfer_max_ratio: float = 0.50
-    donor_max_primary_gap: float = 0.002
     smoke_test_enabled: bool = True
     smoke_test_timeout_seconds: int = 240
     max_wall_clock_seconds: int = 19800

@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field
 from itertools import combinations
 from pathlib import Path
 from statistics import mean
@@ -19,19 +19,19 @@ from typing import Any, Callable, Optional, Sequence
 from rich import print
 
 from .candidate_contract import (
+    AUTONOMOUS_STAGE3_ROLE,
     CandidateRole,
     bootstrap_candidate_roles,
+    candidate_implementation_signature,
+    candidate_semantic_similarity,
     candidate_semantic_signature,
     classify_contract_failures,
     component_guard_calls,
     config_assignment,
-    format_factor_change,
     literal_assignment,
     model_family_from_code,
     normalize_candidate_metadata,
-    research_family_for_role,
     validate_candidate_contract,
-    select_candidate_roles,
 )
 from .factor_context import build_factor_context
 from .factor_library import factor_library_prompt
@@ -459,7 +459,9 @@ class ClosedLoopRunner:
         self.bootstrap_node_ids: set[str] = set()
         self.memory_dir = self.output_dir.parent / "research_loop"
         self.generated_fingerprints: set[str] = set()
+        self.generated_implementation_signatures: set[str] = set()
         self.generated_semantic_signatures: set[str] = set()
+        self.generated_semantic_contracts: list[tuple[str, Any]] = []
         self.incumbent: Optional[EvaluatedConfiguration] = None
         self.started_at = time.monotonic()
         self.snapshot_index = 0
@@ -842,181 +844,6 @@ class ClosedLoopRunner:
         )
         return fm_control
 
-    def _generate_candidates_single_parent_legacy(
-        self, incumbent: Node, round_number: int
-    ) -> list[Node]:
-        """Compatibility implementation retained for old checkpoints only."""
-        roles = select_candidate_roles(
-            self.state.memory.direction_summary(),
-            round_number=round_number,
-            branch_count=self.config.candidate_branches,
-            preferred_role_names=self.config.initial_candidate_roles,
-            reserved_role_name=self.config.reserved_candidate_role,
-        )
-        role_by_name = {role.name: role for role in roles}
-        word = self._word(round_number)
-        stage, journal = self._new_stage(
-            name=f"3_creative_research_1_round_{word}",
-            goals=self.manager.main_stage_goals[3],
-            max_iterations=self.config.stage3_generation_attempts,
-        )
-        research_base = _clone_root(incumbent)
-        journal.append(research_base)
-        context = build_factor_context(
-            self.manager.cfg.data_dir,
-            incumbent_code=research_base.code,
-            round_number=round_number,
-            failed_hypotheses=self.state.memory.failed_hypotheses,
-        )
-        context += "\n\n" + self.state.experience_prompt(
-            before_round=round_number
-        )
-        context += (
-            "\nDirection evidence from previous rounds:\n"
-            + json.dumps(
-                self.state.memory.direction_summary(),
-                sort_keys=True,
-                ensure_ascii=True,
-            )
-        )
-        accepted: dict[str, Node] = {}
-        retry_feedback: dict[str, list[str]] = {
-            role.name: [] for role in roles
-        }
-        attempts = 0
-        seen_node_ids = {research_base.id}
-
-        def role_prompt(role: CandidateRole, index: int) -> str:
-            evidence_memory = (
-                "Local direction evidence: "
-                + self.state.memory.prompt_evidence(role.group)
-                + "\nCross-branch portfolio lessons: "
-                + self.state.memory.portfolio_lessons()
-            )
-            return role.prompt(
-                index,
-                len(roles),
-                retry_feedback=retry_feedback[role.name],
-                evidence_memory=evidence_memory,
-                factor_library_context=factor_library_prompt(
-                    role_group=role.group,
-                    role_category=role.category,
-                    observed_evidence=self.state.memory.factor_summary(),
-                    discovered_cards=self.state.memory.discovered_factor_cards(),
-                ),
-            )
-
-        with self._agent(
-            stage,
-            journal,
-            research_base=research_base,
-            task_context=context,
-            candidate_contexts=[
-                role_prompt(role, index)
-                for index, role in enumerate(roles, 1)
-            ],
-        ) as agent:
-            while attempts < self.config.stage3_generation_attempts:
-                pending = [role for role in roles if role.name not in accepted]
-                if not pending:
-                    break
-                assigned = pending[: min(
-                    self.config.stage3_generation_attempts - attempts,
-                    len(pending),
-                )]
-                agent.candidate_contexts = [
-                    role_prompt(role, roles.index(role) + 1)
-                    for role in assigned
-                ]
-                before = self._experiment_count(journal)
-                agent.step(
-                    self.exec_callback,
-                    max_nodes=len(assigned),
-                )
-                after = self._experiment_count(journal)
-                added = after - before
-                if added <= 0:
-                    break
-                attempts += added
-                self._notify(stage, journal)
-                new_nodes = [
-                    node for node in journal.nodes if node.id not in seen_node_ids
-                ]
-                for expected_role, node in zip(assigned, new_nodes):
-                    seen_node_ids.add(node.id)
-                    if _node_score(node) is None:
-                        detail = str(getattr(node, "analysis", "execution failed"))
-                        reason = f"execution failed: {detail[:300]}"
-                        retry_feedback[expected_role.name].append(reason)
-                        self.state.memory.failed_hypotheses.append(
-                            f"{expected_role.name}: {reason}"
-                        )
-                        continue
-                    node.code = normalize_candidate_metadata(
-                        node.code,
-                        expected_role,
-                        expected_parent_id=research_base.id,
-                        expected_parent_model_family=model_family_from_code(
-                            research_base.code
-                        ),
-                    )
-                    manifest = literal_assignment(node.code, "RESEARCH_MANIFEST")
-                    role_name = (
-                        manifest.get("role") if isinstance(manifest, dict) else None
-                    )
-                    role = role_by_name.get(str(role_name))
-                    if role is None or role.name != expected_role.name:
-                        reason = (
-                            f"expected role {expected_role.name!r}, received "
-                            f"manifest role {role_name!r}"
-                        )
-                        retry_feedback[expected_role.name].append(reason)
-                        self.state.memory.failed_hypotheses.append(reason)
-                        print(f"[yellow]Rejected Stage 3 candidate: {reason}[/yellow]")
-                        continue
-                    contract = validate_candidate_contract(
-                        research_base.code,
-                        node.code,
-                        role,
-                    )
-                    if not contract.valid:
-                        reason = "; ".join(contract.reasons)
-                        retry_feedback[role.name].append(reason)
-                        self.state.memory.failed_hypotheses.append(
-                            f"{role.name}: {reason}"
-                        )
-                        print(f"[yellow]Rejected Stage 3 candidate: {reason}[/yellow]")
-                        continue
-                    semantic_signature = candidate_semantic_signature(contract)
-                    if semantic_signature in self.generated_semantic_signatures:
-                        reason = "semantic duplicate of an earlier mechanism/factor bundle"
-                        retry_feedback[role.name].append(reason)
-                        self.state.memory.failed_hypotheses.append(
-                            f"{role.name}: {reason}"
-                        )
-                        continue
-                    fingerprint = candidate_fingerprint(node.code)
-                    if fingerprint in self.generated_fingerprints:
-                        reason = "duplicate code fingerprint"
-                        retry_feedback[role.name].append(reason)
-                        self.state.memory.failed_hypotheses.append(
-                            f"{role.name}: {reason}"
-                        )
-                        continue
-                    self.generated_fingerprints.add(fingerprint)
-                    self.generated_semantic_signatures.add(semantic_signature)
-                    accepted[role.name] = node
-                    self.candidate_role_by_node_id[node.id] = role
-                    self.candidate_origin_by_node_id[node.id] = (stage, journal)
-                    print(
-                        f"[green]Accepted {role.group}/{role.name} candidate "
-                        f"{node.id}[/green]"
-                    )
-                    factor_change = format_factor_change(contract)
-                    if factor_change:
-                        print(f"[cyan]Generated factors:\n{factor_change}[/cyan]")
-        return [accepted[role.name] for role in roles if role.name in accepted]
-
     def _manifest_metadata(self, node: Node) -> dict[str, str]:
         manifest = literal_assignment(node.code, "RESEARCH_MANIFEST")
         if not isinstance(manifest, dict):
@@ -1086,44 +913,6 @@ class ClosedLoopRunner:
         }
         return json.dumps(payload, sort_keys=True, ensure_ascii=True)
 
-    @staticmethod
-    def _transfer_symbol_context(code: str, *, max_chars: int = 12000) -> str:
-        """Extract compact executable donor symbols instead of copying a whole model."""
-        try:
-            tree = ast.parse(code)
-        except (SyntaxError, TypeError):
-            return code[:max_chars]
-        snippets = []
-        for statement in tree.body:
-            name = getattr(statement, "name", "")
-            if isinstance(statement, (ast.ClassDef, ast.FunctionDef)) and (
-                name in {"build_features", "create_model", "train_model"}
-                or "model" in name.lower()
-                or "loss" in name.lower()
-            ):
-                snippets.append(ast.unparse(statement))
-        return "\n\n".join(snippets)[:max_chars]
-
-    def _donor_context(self, assignment: CandidateAssignment) -> str:
-        if assignment.donor is None or assignment.donor_insight is None:
-            return ""
-        insight = assignment.donor_insight
-        payload = {
-            "donor_candidate_id": insight.donor_node_id,
-            "donor_model_family": insight.donor_model_family,
-            "mechanism_ids": list(insight.mechanism_ids),
-            "components": list(insight.components),
-            "principal_change": insight.principal_change,
-            "validation_metrics": dict(insight.metrics),
-            "validation_deltas": dict(insight.metric_deltas),
-            "confidence": insight.confidence,
-        }
-        return (
-            json.dumps(payload, indent=2, sort_keys=True)
-            + "\nDonor implementation symbols (reference only):\n"
-            + self._transfer_symbol_context(assignment.donor.code)
-        )
-
     def _record_generation_attempt(
         self,
         assignment: CandidateAssignment,
@@ -1166,6 +955,11 @@ class ClosedLoopRunner:
     ) -> list[Node]:
         if not assignments:
             return []
+        assignment_ids = [item.assignment_id for item in assignments]
+        if any(not assignment_id for assignment_id in assignment_ids):
+            raise ValueError("candidate assignments require non-empty assignment_id values")
+        if len(set(assignment_ids)) != len(assignment_ids):
+            raise ValueError("candidate assignment_id values must be unique")
         stage, journal = self._new_stage(
             name=stage_name,
             goals=(
@@ -1211,22 +1005,30 @@ class ClosedLoopRunner:
                 "- A valid root need not beat FM; it enters the diverse frontier for later search.\n"
             )
         accepted: dict[str, Node] = {}
-        retry_feedback = {item.role.name: [] for item in normalized}
-        role_index = {
-            item.role.name: index for index, item in enumerate(normalized, 1)
+        accepted_family_counts: dict[str, int] = {}
+        retry_feedback = {item.assignment_id: [] for item in normalized}
+        slot_index = {
+            item.assignment_id: index for index, item in enumerate(normalized, 1)
         }
         seen_node_ids = set(parents_by_id)
         attempts = 0
 
         def prompt_for(item: CandidateAssignment, index: int) -> str:
+            evidence_memory = (
+                self.state.memory.portfolio_lessons()
+                if item.role.autonomous
+                else (
+                    "Parent source: "
+                    + item.source
+                    + "\n"
+                    + self.state.memory.prompt_evidence(item.role.group)
+                )
+            )
             return item.role.prompt(
                 index,
                 len(normalized),
-                retry_feedback=retry_feedback[item.role.name],
-                evidence_memory=(
-                    "Parent source: " + item.source + "\n"
-                    + self.state.memory.prompt_evidence(item.role.group)
-                ),
+                retry_feedback=retry_feedback[item.assignment_id],
+                evidence_memory=evidence_memory,
                 factor_library_context=factor_library_prompt(
                     role_group=item.role.group,
                     role_category=item.role.category,
@@ -1237,11 +1039,13 @@ class ClosedLoopRunner:
                 parent_model_family=item.parent_model_family,
                 assignment_id=item.assignment_id,
                 assignment_kind=item.assignment_kind,
-                donor_context=self._donor_context(item),
+                donor_context="",
             )
 
         assignment_attempts = {item.assignment_id: 0 for item in normalized}
-        exhausted: set[str] = set()
+        max_attempts_per_assignment = 1 + max(
+            0, int(self.config.max_repair_attempts_per_assignment)
+        )
         target_valid = (
             len(normalized)
             if stage1b
@@ -1256,61 +1060,95 @@ class ClosedLoopRunner:
             research_base=normalized[0].parent,
             research_bases=[item.parent for item in normalized],
             task_context=base_context,
+            num_workers=min(
+                len(normalized),
+                max(1, int(self.config.candidate_parallel_workers)),
+            ),
             candidate_contexts=[
                 prompt_for(item, index)
                 for index, item in enumerate(normalized, 1)
             ],
         ) as agent:
+            worker_capacity = max(1, int(getattr(agent, "num_workers", 1)))
+            max_search_workers = getattr(agent, "max_search_workers", None)
+            if max_search_workers is not None:
+                worker_capacity = min(worker_capacity, max(1, int(max_search_workers)))
             while attempts < max_attempts:
                 pending = [
                     item
                     for item in normalized
-                    if item.role.name not in accepted
-                    and item.assignment_id not in exhausted
+                    if item.assignment_id not in accepted
+                    and assignment_attempts[item.assignment_id]
+                    < max_attempts_per_assignment
                 ]
                 if not pending or len(accepted) >= target_valid:
                     break
-                assigned = pending[: min(max_attempts - attempts, len(pending))]
+                pending.sort(
+                    key=lambda item: (
+                        assignment_attempts[item.assignment_id],
+                        slot_index[item.assignment_id],
+                    )
+                )
+                assigned = pending[
+                    : min(max_attempts - attempts, worker_capacity, len(pending))
+                ]
                 for item in assigned:
                     assignment_attempts[item.assignment_id] += 1
                 agent.research_base_nodes = [item.parent for item in assigned]
                 agent.research_base_node = assigned[0].parent
                 agent.candidate_contexts = [
-                    prompt_for(item, role_index[item.role.name]) for item in assigned
+                    prompt_for(item, slot_index[item.assignment_id]) for item in assigned
                 ]
-                before = self._experiment_count(journal)
                 returned_nodes = agent.step(
                     self.exec_callback, max_nodes=len(assigned)
                 )
-                added = self._experiment_count(journal) - before
-                if added <= 0 and not returned_nodes:
-                    break
-                attempts += max(added, len(assigned))
+                attempts += len(assigned)
                 self._notify(stage, journal)
                 if not isinstance(returned_nodes, list):
                     returned_nodes = [
                         node for node in journal.nodes if node.id not in seen_node_ids
                     ]
-                padded_nodes = list(returned_nodes) + [None] * max(
-                    0, len(assigned) - len(returned_nodes)
+                if len(returned_nodes) > len(assigned):
+                    raise RuntimeError("worker returned more candidates than assigned slots")
+                seen_node_ids.update(
+                    node.id for node in returned_nodes if node is not None
                 )
-                for expected, node in zip(assigned, padded_nodes):
+                returned_assignment_ids = [
+                    node.assignment_id
+                    for node in returned_nodes
+                    if node is not None and node.assignment_id
+                ]
+                if len(returned_assignment_ids) != len(set(returned_assignment_ids)):
+                    raise RuntimeError("worker returned duplicate candidate assignment IDs")
+                assigned_ids = {item.assignment_id for item in assigned}
+                unexpected_ids = set(returned_assignment_ids) - assigned_ids
+                if unexpected_ids:
+                    raise RuntimeError(
+                        "worker returned candidates for unassigned slots: "
+                        + ", ".join(sorted(unexpected_ids))
+                    )
+                nodes_by_assignment_id = {
+                    node.assignment_id: node
+                    for node in returned_nodes
+                    if node is not None
+                    and node.assignment_id in assigned_ids
+                }
+                for expected in assigned:
+                    node = nodes_by_assignment_id.get(expected.assignment_id)
                     if node is None:
-                        reason = "worker returned no candidate"
-                        retry_feedback[expected.role.name].append(reason)
+                        reason = "worker returned no candidate with the assigned ID"
+                        retry_feedback[expected.assignment_id].append(reason)
                         self._record_generation_attempt(
                             expected,
                             round_number=round_number,
                             status="worker_failed",
                             reason=reason,
                         )
-                        if assignment_attempts[expected.assignment_id] > self.config.max_repair_attempts_per_assignment:
-                            exhausted.add(expected.assignment_id)
                         continue
                     seen_node_ids.add(node.id)
                     if _node_score(node) is None:
                         reason = str(node.analysis or "execution failed")
-                        retry_feedback[expected.role.name].append(reason)
+                        retry_feedback[expected.assignment_id].append(reason)
                         self._record_generation_attempt(
                             expected,
                             round_number=round_number,
@@ -1324,8 +1162,6 @@ class ClosedLoopRunner:
                             reason=reason,
                             node_id=node.id,
                         )
-                        if assignment_attempts[expected.assignment_id] > self.config.max_repair_attempts_per_assignment:
-                            exhausted.add(expected.assignment_id)
                         continue
                     node.code = normalize_candidate_metadata(
                         node.code,
@@ -1342,9 +1178,9 @@ class ClosedLoopRunner:
                     )
                     if not contract.valid:
                         reason = "; ".join(contract.reasons)
-                        retry_feedback[expected.role.name].append(reason)
+                        retry_feedback[expected.assignment_id].append(reason)
                         self.state.memory.failed_hypotheses.append(
-                            f"{expected.role.name}: {reason}"
+                            f"{expected.assignment_id}: {reason}"
                         )
                         self._record_generation_attempt(
                             expected,
@@ -1354,8 +1190,6 @@ class ClosedLoopRunner:
                             node_id=node.id,
                         )
                         print(f"[yellow]Rejected candidate: {reason}[/yellow]")
-                        if assignment_attempts[expected.assignment_id] > self.config.max_repair_attempts_per_assignment:
-                            exhausted.add(expected.assignment_id)
                         continue
                     if stage1b:
                         config = config_assignment(node.code) or {}
@@ -1365,9 +1199,9 @@ class ClosedLoopRunner:
                                 "Stage 1B CONFIG must use a literal max_epochs/epochs <= "
                                 f"{self.config.stage1b_max_epochs}"
                             )
-                            retry_feedback[expected.role.name].append(reason)
+                            retry_feedback[expected.assignment_id].append(reason)
                             self.state.memory.failed_hypotheses.append(
-                                f"{expected.role.name}: {reason}"
+                                f"{expected.assignment_id}: {reason}"
                             )
                             self._record_generation_attempt(
                                 expected,
@@ -1377,22 +1211,14 @@ class ClosedLoopRunner:
                                 node_id=node.id,
                             )
                             continue
-                    signature = candidate_semantic_signature(contract)
                     fingerprint = candidate_fingerprint(node.code)
-                    if signature in self.generated_semantic_signatures:
-                        reason = "semantic duplicate"
-                        retry_feedback[expected.role.name].append(reason)
-                        self._record_generation_attempt(
-                            expected,
-                            round_number=round_number,
-                            status="duplicate",
-                            reason=reason,
-                            node_id=node.id,
-                        )
-                        continue
+                    implementation_signature = candidate_implementation_signature(
+                        node.code
+                    )
+                    signature = candidate_semantic_signature(contract)
                     if fingerprint in self.generated_fingerprints:
-                        reason = "code duplicate"
-                        retry_feedback[expected.role.name].append(reason)
+                        reason = "exact code duplicate of an accepted candidate"
+                        retry_feedback[expected.assignment_id].append(reason)
                         self._record_generation_attempt(
                             expected,
                             round_number=round_number,
@@ -1401,9 +1227,133 @@ class ClosedLoopRunner:
                             node_id=node.id,
                         )
                         continue
+                    if (
+                        implementation_signature is not None
+                        and implementation_signature
+                        in self.generated_implementation_signatures
+                    ):
+                        reason = (
+                            "implementation duplicate after ignoring CONFIG and "
+                            "declarative metadata"
+                        )
+                        retry_feedback[expected.assignment_id].append(reason)
+                        self._record_generation_attempt(
+                            expected,
+                            round_number=round_number,
+                            status="duplicate",
+                            reason=reason,
+                            node_id=node.id,
+                        )
+                        continue
+                    if signature in self.generated_semantic_signatures:
+                        reason = "semantic duplicate of an accepted mechanism declaration"
+                        retry_feedback[expected.assignment_id].append(reason)
+                        self._record_generation_attempt(
+                            expected,
+                            round_number=round_number,
+                            status="duplicate",
+                            reason=reason,
+                            node_id=node.id,
+                        )
+                        continue
+                    if not stage1b:
+                        threshold = min(
+                            1.0,
+                            max(
+                                0.0,
+                                float(
+                                    self.config.candidate_semantic_similarity_threshold
+                                ),
+                            ),
+                        )
+                        similarities = [
+                            (
+                                assignment_id,
+                                accepted_contract,
+                                candidate_semantic_similarity(
+                                    contract, accepted_contract
+                                ),
+                            )
+                            for assignment_id, accepted_contract
+                            in self.generated_semantic_contracts
+                        ]
+                        if similarities:
+                            conflict_id, conflict, similarity = max(
+                                similarities, key=lambda item: item[2]
+                            )
+                            if similarity >= threshold:
+                                shared = [
+                                    name
+                                    for name in (
+                                        "model_family",
+                                        "research_family",
+                                        "loss_family",
+                                    )
+                                    if contract.manifest.get(name)
+                                    == conflict.manifest.get(name)
+                                ]
+                                reason = (
+                                    f"too similar to accepted slot {conflict_id}: "
+                                    f"semantic similarity {similarity:.3f} >= "
+                                    f"{threshold:.3f}; shared declarations="
+                                    f"{','.join(shared) or 'mechanism/factors/symbols'}. "
+                                    "Choose a substantively different hypothesis; "
+                                    "no replacement direction is prescribed"
+                                )
+                                retry_feedback[expected.assignment_id].append(reason)
+                                self.state.memory.failed_hypotheses.append(
+                                    f"{expected.assignment_id}: {reason}"
+                                )
+                                self._record_generation_attempt(
+                                    expected,
+                                    round_number=round_number,
+                                    status="near_duplicate",
+                                    reason=reason,
+                                    node_id=node.id,
+                                )
+                                continue
+                        research_family = str(
+                            contract.manifest.get("research_family", "")
+                        )
+                        family_cap = max(
+                            1, int(self.config.max_candidates_per_research_family)
+                        )
+                        if accepted_family_counts.get(research_family, 0) >= family_cap:
+                            reason = (
+                                f"research_family {research_family!r} already has "
+                                f"{family_cap} accepted candidates in this round. "
+                                "Choose a substantively different hypothesis; no "
+                                "replacement direction is prescribed"
+                            )
+                            retry_feedback[expected.assignment_id].append(reason)
+                            self.state.memory.failed_hypotheses.append(
+                                f"{expected.assignment_id}: {reason}"
+                            )
+                            self._record_generation_attempt(
+                                expected,
+                                round_number=round_number,
+                                status="family_concentration",
+                                reason=reason,
+                                node_id=node.id,
+                            )
+                            continue
                     self.generated_semantic_signatures.add(signature)
                     self.generated_fingerprints.add(fingerprint)
-                    accepted[expected.role.name] = node
+                    if implementation_signature is not None:
+                        self.generated_implementation_signatures.add(
+                            implementation_signature
+                        )
+                    if not stage1b:
+                        self.generated_semantic_contracts.append(
+                            (expected.assignment_id, contract)
+                        )
+                    accepted[expected.assignment_id] = node
+                    research_family = str(
+                        contract.manifest.get("research_family", "")
+                    )
+                    accepted_family_counts[research_family] = (
+                        accepted_family_counts.get(research_family, 0) + 1
+                    )
                     self.candidate_role_by_node_id[node.id] = expected.role
                     self.candidate_origin_by_node_id[node.id] = (stage, journal)
                     self.candidate_parent_by_node_id[node.id] = expected.parent
@@ -1424,14 +1374,14 @@ class ClosedLoopRunner:
                     if stage1b:
                         self.bootstrap_node_ids.add(node.id)
                     print(
-                        f"[green]Accepted {expected.role.name} from "
+                        f"[green]Accepted {expected.assignment_id} from "
                         f"{expected.source}/{expected.parent_model_family}: {node.id}[/green]"
                     )
         self._save_memory()
         return [
-            accepted[item.role.name]
+            accepted[item.assignment_id]
             for item in normalized
-            if item.role.name in accepted
+            if item.assignment_id in accepted
         ]
 
     def _run_stage1b(self, baseline: Node) -> list[Node]:
@@ -1506,7 +1456,7 @@ class ClosedLoopRunner:
                     principal_change=_principal_change(node),
                     components=_extract_enabled_ablation_components(node.code),
                     role=role.name if role else metadata["role"],
-                    category=role.group if role else "architecture_exploration",
+                    category=metadata["research_family"] or "architecture",
                     improvement=(
                         score - baseline_score if baseline_score is not None else 0.0
                     ),
@@ -1533,227 +1483,29 @@ class ClosedLoopRunner:
         self._save_memory()
         return roots
 
-    def _stage3_parent_pool(self) -> list[tuple[Node, str]]:
-        if self.incumbent is None:
-            raise RuntimeError("Stage 3 requires an incumbent")
-        pool: list[tuple[Node, str]] = []
-        pool.extend(
-            (self.incumbent.node, "incumbent")
-            for _ in range(max(0, self.config.stage3_incumbent_parent_slots))
-        )
-        used_frontier_nodes: set[str] = set()
-
-        def select_records(records, count):
-            selected = []
-            seen_families = set()
-            for record in sorted(records, key=lambda item: item.score, reverse=True):
-                node = self.frontier_nodes_by_id.get(record.node_id)
-                if (
-                    node is None
-                    or record.node_id in used_frontier_nodes
-                    or record.model_family in seen_families
-                ):
-                    continue
-                selected.append((node, record.source_stage))
-                seen_families.add(record.model_family)
-                used_frontier_nodes.add(record.node_id)
-                if len(selected) >= count:
-                    break
-            return selected
-
-        non_bootstrap = [
-            item for item in self.state.memory.frontier
-            if item.node_id not in self.bootstrap_node_ids
-        ]
-        pool.extend(
-            select_records(
-                non_bootstrap or self.state.memory.frontier,
-                max(0, self.config.stage3_frontier_parent_slots),
-            )
-        )
-        bootstrap = [
-            item for item in self.state.memory.frontier
-            if item.node_id in self.bootstrap_node_ids
-        ]
-        pool.extend(
-            select_records(
-                bootstrap,
-                max(0, self.config.stage3_bootstrap_parent_slots),
-            )
-        )
-        all_frontier = select_records(
-            self.state.memory.frontier,
-            self.config.candidate_branches,
-        )
-        fill_index = 0
-        while len(pool) < self.config.candidate_branches:
-            if all_frontier:
-                pool.append(all_frontier[fill_index % len(all_frontier)])
-                fill_index += 1
-            else:
-                pool.append((self.incumbent.node, "incumbent_fallback"))
-        return pool[: self.config.candidate_branches]
-
     def _generate_candidates(self, incumbent: Node, round_number: int) -> list[Node]:
         branch_count = int(self.config.candidate_branches)
-        if (
-            self.state.last_round_valid_candidates
-            >= self.config.min_valid_candidates_per_round
-            and self.state.last_round_best_gain is not None
-            and self.state.last_round_best_gain >= self.config.min_round_primary_gain
-        ):
-            branch_count = min(
-                int(self.config.max_candidate_branches),
-                branch_count + int(self.config.branch_growth_per_positive_round),
-            )
-        roles = select_candidate_roles(
-            self.state.memory.direction_summary(),
-            round_number=round_number,
-            branch_count=branch_count,
-            preferred_role_names=self.config.initial_candidate_roles,
-            reserved_role_name=self.config.reserved_candidate_role,
-        )
-        donors = self.state.memory.transferable_insights(
-            incumbent_node_id=incumbent.id,
-            limit=branch_count,
-            max_primary_gap=self.config.donor_max_primary_gap,
-        )
-        recent_transfer_attempts = [
-            item
-            for item in self.state.memory.attempts[-20:]
-            if item.assignment_kind == "transfer"
-        ]
-        recent_transfer_records = [
-            item
-            for item in self.state.memory.records[-20:]
-            if item.assignment_kind == "transfer"
-        ]
-        recent_transfer_successes = sum(
-            item.transfer_status == "positive" for item in recent_transfer_records
-        )
-        transfer_ratio = float(self.config.transfer_base_ratio)
-        if recent_transfer_records:
-            success_rate = recent_transfer_successes / len(recent_transfer_records)
-            if success_rate >= 0.5:
-                transfer_ratio += 0.10
-            elif success_rate == 0:
-                transfer_ratio -= 0.10
-        elif len(recent_transfer_attempts) >= 2 and not any(
-            item.status == "accepted" for item in recent_transfer_attempts
-        ):
-            transfer_ratio -= 0.10
-        transfer_ratio = min(
-            float(self.config.transfer_max_ratio),
-            max(float(self.config.transfer_min_ratio), transfer_ratio),
-        )
-        transfer_count = min(
-            len(donors),
-            max(1, round(branch_count * transfer_ratio)) if donors else 0,
-        )
-        exploit_count = max(1, round(branch_count * 0.5))
-        exploit_count = min(exploit_count, branch_count - transfer_count)
-        explore_count = max(0, branch_count - exploit_count - transfer_count)
-
-        assignments: list[CandidateAssignment] = []
-        role_cursor = 0
         incumbent_family = model_family_from_code(incumbent.code)
-        for index in range(exploit_count):
-            role = roles[role_cursor % len(roles)]
-            role_cursor += 1
-            constrained_role = replace(
-                role,
-                allowed_model_families=(incumbent_family,),
+        assignments = [
+            CandidateAssignment(
+                AUTONOMOUS_STAGE3_ROLE,
+                incumbent,
+                incumbent_family,
+                "verified_incumbent",
+                assignment_id=f"round{round_number}:autonomous:{index}",
+                assignment_kind="autonomous",
             )
-            assignments.append(
-                CandidateAssignment(
-                    constrained_role,
-                    incumbent,
-                    incumbent_family,
-                    "verified_incumbent",
-                    assignment_id=f"round{round_number}:exploit:{index + 1}",
-                    assignment_kind="exploit",
-                )
-            )
-
-        for index, insight in enumerate(donors[:transfer_count], 1):
-            donor = self.frontier_nodes_by_id.get(insight.donor_node_id)
-            if donor is None:
-                continue
-            mechanism_text = ", ".join(insight.mechanism_ids)
-            transfer_role = CandidateRole(
-                name=(
-                    f"cross_parent_transfer_{insight.donor_model_family}_{index}"
-                ),
-                group="evidence_combination",
-                category="evidence_synthesis",
-                objective=(
-                    f"Keep the {incumbent_family} incumbent as the base and transfer "
-                    f"exactly one donor mechanism ({mechanism_text}) from the "
-                    f"{insight.donor_model_family} candidate. Preserve every unrelated "
-                    "base path and make the transferred component independently ablatable."
-                ),
-                required_evidence=(
-                    "Declare the donor candidate ID and transferred mechanism; show "
-                    "the exact guarded base-code path that consumes the transfer."
-                ),
-                allowed_model_families=(incumbent_family,),
-                allowed_loss_families=(
-                    "pointwise_bce",
-                    "hybrid_bce_bpr",
-                    "pairwise_bpr",
-                    "listwise_softmax",
-                    "multitask",
-                    "censored_watch_time",
-                ),
-            )
-            assignments.append(
-                CandidateAssignment(
-                    transfer_role,
-                    incumbent,
-                    incumbent_family,
-                    f"donor:{insight.donor_node_id}",
-                    assignment_id=f"round{round_number}:transfer:{index}",
-                    assignment_kind="transfer",
-                    donor=donor,
-                    donor_insight=insight,
-                )
-            )
-
-        exploratory_parents = [
-            item for item in self._stage3_parent_pool()
-            if item[0].id != incumbent.id
+            for index in range(1, branch_count + 1)
         ]
-        for index in range(explore_count):
-            role = roles[role_cursor % len(roles)]
-            role_cursor += 1
-            if exploratory_parents:
-                parent, source = exploratory_parents[index % len(exploratory_parents)]
-            else:
-                parent, source = incumbent, "incumbent_exploration_fallback"
-            parent_family = model_family_from_code(parent.code)
-            constrained_role = replace(
-                role,
-                allowed_model_families=(parent_family,),
-            )
-            assignments.append(
-                CandidateAssignment(
-                    constrained_role,
-                    parent,
-                    parent_family,
-                    source,
-                    assignment_id=f"round{round_number}:explore:{index + 1}",
-                    assignment_kind="explore",
-                )
-            )
         print(
-            f"[cyan]Adaptive Stage 3 portfolio: branches={len(assignments)}, "
-            f"exploit={exploit_count}, transfer={transfer_count}, "
-            f"explore={explore_count}, transfer_ratio={transfer_ratio:.2f}[/cyan]"
+            f"[cyan]Autonomous Stage 3: {len(assignments)} independent slots, "
+            f"shared incumbent={incumbent.id}, post-generation diversity gates enabled"
+            "[/cyan]"
         )
         return self._generate_assigned_candidates(
             assignments,
             stage_name=(
-                f"3_creative_research_1_round_{self._word(round_number)}_multi_parent"
+                f"3_creative_research_1_round_{self._word(round_number)}_autonomous"
             ),
             round_number=round_number,
             max_attempts=self.config.stage3_generation_attempts,
@@ -2076,7 +1828,10 @@ class ClosedLoopRunner:
                 candidate_id=promoted.candidate_id,
             )
 
-        category = promoted.role.group if promoted.role else ""
+        category = (
+            self._manifest_metadata(promoted.node)["research_family"]
+            or (promoted.role.group if promoted.role else "")
+        )
         full_metrics = full_result.metric_means
         for component, result in single_results.items():
             contribution = full_result.score - result.score
@@ -2415,6 +2170,7 @@ class ClosedLoopRunner:
                 ) = _factor_selection(result.node)
                 artifact = _candidate_artifacts(result.node)
                 assignment = self.candidate_assignment_by_node_id.get(candidate_id)
+                metadata = self._manifest_metadata(result.node)
                 donor_insight = (
                     assignment.donor_insight if assignment is not None else None
                 )
@@ -2430,17 +2186,17 @@ class ClosedLoopRunner:
                         result.node.code
                     ),
                     role=role.name if role else "",
-                    category=role.group if role else "",
+                    category=metadata["research_family"] or (role.group if role else ""),
                     factor_ids=factor_ids,
                     considered_factor_ids=considered_factor_ids,
                     factor_selection_reason=factor_selection_reason,
                     factor_rejected_reasons=factor_rejected_reasons,
                     factor_cards=factor_cards,
-                    model_family=self._manifest_metadata(result.node)["model_family"],
-                    research_family=self._manifest_metadata(result.node)["research_family"],
-                    loss_family=self._manifest_metadata(result.node)["loss_family"],
-                    parent_node_id=self._manifest_metadata(result.node)["parent_node_id"],
-                    parent_model_family=self._manifest_metadata(result.node)["parent_model_family"],
+                    model_family=metadata["model_family"],
+                    research_family=metadata["research_family"],
+                    loss_family=metadata["loss_family"],
+                    parent_node_id=metadata["parent_node_id"],
+                    parent_model_family=metadata["parent_model_family"],
                     source_stage=result.stage_name,
                     source_phase="stage3",
                     code_path=artifact["code_path"],
@@ -2451,7 +2207,7 @@ class ClosedLoopRunner:
                     artifacts_valid=bool(artifact["valid"]),
                     assignment_id=(assignment.assignment_id if assignment else ""),
                     assignment_kind=(
-                        assignment.assignment_kind if assignment else "exploit"
+                        assignment.assignment_kind if assignment else "autonomous"
                     ),
                     base_parent_id=(assignment.parent.id if assignment else ""),
                     donor_candidate_id=(

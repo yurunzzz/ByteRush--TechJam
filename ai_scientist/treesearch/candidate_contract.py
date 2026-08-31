@@ -3,12 +3,17 @@ from __future__ import annotations
 
 import ast
 import copy
+import hashlib
 import json
 import math
+import re
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
 from .factor_library import FACTOR_IDS
+
+
+MAX_RESEARCH_PROTOTYPE_EPOCHS = 12
 
 
 @dataclass(frozen=True)
@@ -20,6 +25,7 @@ class CandidateRole:
     required_evidence: str
     allowed_model_families: tuple[str, ...] = ()
     allowed_loss_families: tuple[str, ...] = ()
+    autonomous: bool = False
 
     def prompt(
         self,
@@ -35,6 +41,19 @@ class CandidateRole:
         assignment_kind: str = "exploit",
         donor_context: str = "",
     ) -> str:
+        if self.autonomous:
+            return autonomous_candidate_prompt(
+                self,
+                index=index,
+                total=total,
+                retry_feedback=retry_feedback,
+                evidence_memory=evidence_memory,
+                factor_library_context=factor_library_context,
+                parent_node_id=parent_node_id,
+                parent_model_family=parent_model_family,
+                assignment_id=assignment_id,
+                assignment_kind=assignment_kind,
+            )
         evidence_ids = ", ".join(CURATED_EVIDENCE)
         base_name = self.name.split("_alternative_", 1)[0]
         techniques = TECHNIQUE_CATALOG.get(base_name, ())
@@ -193,6 +212,119 @@ class CandidateRole:
         )
 
 
+def autonomous_candidate_prompt(
+    role: CandidateRole,
+    *,
+    index: int,
+    total: int,
+    retry_feedback: Sequence[str] = (),
+    evidence_memory: str = "",
+    factor_library_context: str = "",
+    parent_node_id: str = "",
+    parent_model_family: str = "fm",
+    assignment_id: str = "",
+    assignment_kind: str = "autonomous",
+) -> str:
+    """Render one open Stage 3 assignment without choosing its science."""
+    feedback_text = (
+        "\nConcrete rejection feedback for this slot:\n"
+        + "\n".join(f"- {item}" for item in retry_feedback[-3:])
+        + "\nAddress the conflict with a substantively different implementation. "
+        "No replacement direction is prescribed.\n"
+        if retry_feedback
+        else ""
+    )
+    memory_text = (
+        "\nValidation-only feedback available to every autonomous slot:\n"
+        + evidence_memory.strip()
+        + "\n"
+        if evidence_memory.strip()
+        else ""
+    )
+    factor_text = (
+        "\nOptional factor cards available to every autonomous slot:\n"
+        + factor_library_context.strip()
+        + "\nThese cards are capabilities, not priorities. Select none, one, or at "
+        "most two when they are needed by your hypothesis; another legal mechanism "
+        "may be chosen instead.\n"
+        if factor_library_context.strip()
+        else ""
+    )
+    assignment_marker = build_assignment_marker(
+        role,
+        assignment_id=assignment_id or f"autonomous:{index}:{parent_node_id}",
+        assignment_kind=assignment_kind,
+        parent_node_id=parent_node_id,
+        parent_model_family=parent_model_family,
+    )
+    evidence_ids = ", ".join(sorted(CURATED_EVIDENCE))
+    model_families = ", ".join(sorted(ALLOWED_MODEL_FAMILIES))
+    research_families = ", ".join(sorted(ALLOWED_RESEARCH_FAMILIES))
+    loss_families = ", ".join(sorted(ALLOWED_LOSS_FAMILIES))
+    return (
+        f"Autonomous candidate slot {index}/{total}\n"
+        "No scientific choice has been made for this slot. Inspect the current "
+        "incumbent and shared validation feedback, then independently choose one "
+        "coherent, evidence-backed hypothesis and implement it completely. You may "
+        "change features, architecture, objective, loss/training behavior, or another "
+        "legal mechanism when your reasoning supports it. Do not submit a metadata- "
+        "or CONFIG-only variation.\n"
+        "\nDiversity is checked after generation. Do not imitate another candidate or "
+        "rename metadata around the same implementation. A rejected retry reports the "
+        "specific conflict but never assigns the replacement idea.\n"
+        "\nRequired literal code contract:\n"
+        "- Define RESEARCH_MANIFEST with candidate_id, role, group, category, "
+        "model_family, research_family, loss_family, parent_node_id, "
+        "parent_model_family, input_schema_version, hypothesis, mechanism, "
+        "mechanism_ids, modified_symbols, expected_metric, tunable_parameters, "
+        "ablation_components, combination_compatibility, change_scope, "
+        "component_dependencies, and evidence.\n"
+        f"- Use the neutral assignment identity 'role': {role.name!r}, "
+        f"'group': {role.group!r}, and 'category': {role.category!r}. These values "
+        "identify the slot and do not specify its research direction.\n"
+        f"- Use exactly 'parent_node_id': {parent_node_id!r}, "
+        f"'parent_model_family': {parent_model_family!r}, and "
+        "'input_schema_version': 2.\n"
+        "- Self-declare the scientific taxonomy that matches the implementation. "
+        f"model_family must be one of [{model_families}]; research_family one of "
+        f"[{research_families}]; loss_family one of [{loss_families}]. The taxonomy "
+        "is for validation and diversity accounting, not an instruction to choose a "
+        "particular family.\n"
+        "- hypothesis and mechanism must be concrete. mechanism_ids and "
+        "modified_symbols must be non-empty literal snake_case string lists that "
+        "describe the real implementation.\n"
+        "- Define literal ABLATION_COMPONENTS and guard every enabled component in "
+        "its executable path with component_enabled(name). Keep components "
+        "independently switchable and list the same names in the manifest.\n"
+        "- Evidence must name every enabled component. Use only curated literature "
+        f"IDs [{evidence_ids}], stored validation references beginning validation:, "
+        "or direct dependency references beginning dependency:.\n"
+        "- Define literal FACTOR_SELECTION with considered_factor_ids, "
+        "selected_factor_ids, selection_reason, rejected_reasons, and "
+        "created_factor_cards. Consider at least one available card. Selecting no "
+        "factor is valid with explicit rejection reasons.\n"
+        "- If factors are selected, define matching literal FEATURE_FACTORS entries "
+        "with library_id, name, raw_fields, transform, output_fields, and state_policy; "
+        "build_features must create every output and the guarded prediction path must "
+        "consume it. Custom cards are limited to two custom_ snake_case IDs.\n"
+        "- Any pairwise/listwise objective must form groups from encoded user IDs in "
+        "x_tensor[:, 0] and use only same-user pairs. Any auxiliary target must come "
+        "from a real train-window field, never from long_view or later-period logs.\n"
+        "- Preserve the trusted split, evaluator, CandidateModel interfaces, checkpoint "
+        "round-trip, CUDA placement, and validation-only feedback. Fit all learned "
+        "feature state on train only and compute histories causally.\n"
+        "- Keep a new prototype at or below 12 epochs and vectorize batch computation. "
+        "Return only the concise plan and complete runnable code required by the "
+        "global response format.\n"
+        + factor_text
+        + memory_text
+        + feedback_text
+        + "\nMachine-readable assignment marker; this must remain the final line of "
+        "the assignment:\n"
+        + assignment_marker
+    )
+
+
 DEFAULT_CANDIDATE_ROLES: tuple[CandidateRole, ...] = (
     CandidateRole(
         "causal_history_interest",
@@ -288,13 +420,24 @@ ALLOWED_LOSS_FAMILIES = frozenset(
 ALLOWED_RESEARCH_FAMILIES = frozenset(
     {
         "architecture",
+        "feature_engineering",
         "history_interest",
         "ranking_objective",
         "auxiliary_objective",
         "context_interaction",
         "temporal_interaction",
+        "training_strategy",
         "evidence_synthesis",
     }
+)
+
+AUTONOMOUS_STAGE3_ROLE = CandidateRole(
+    name="autonomous_stage3",
+    group="autonomous_research",
+    category="open_choice",
+    objective="Independently choose and implement one evidence-backed research hypothesis.",
+    required_evidence="The declared hypothesis must match executable code and legal evidence.",
+    autonomous=True,
 )
 
 
@@ -458,6 +601,7 @@ def build_assignment_marker(
     payload = {
         "assignment_id": assignment_id,
         "assignment_kind": assignment_kind,
+        "autonomous": role.autonomous,
         "role": role.name,
         "group": role.group,
         "category": role.category,
@@ -501,6 +645,7 @@ def role_from_assignment(payload: Mapping[str, Any]) -> CandidateRole:
         allowed_loss_families=tuple(
             map(str, payload.get("allowed_loss_families", ()) or ())
         ),
+        autonomous=payload.get("autonomous") is True,
     )
 
 
@@ -726,6 +871,8 @@ def normalize_candidate_metadata(
     implementation does not match the assigned role.
     """
     if _tree(candidate_code) is None:
+        return candidate_code
+    if role.autonomous:
         return candidate_code
     components = literal_assignment(candidate_code, "ABLATION_COMPONENTS")
     enabled = sorted(
@@ -1411,6 +1558,25 @@ def validate_candidate_contract(
     expected_parent_model_family: str | None = None,
 ) -> CandidateContractResult:
     reasons: list[str] = []
+    candidate_config = config_assignment(candidate_code) or {}
+    epochs = candidate_config.get(
+        "max_epochs", candidate_config.get("epochs")
+    )
+    if (
+        isinstance(epochs, bool)
+        or not isinstance(epochs, int)
+        or not 1 <= epochs <= MAX_RESEARCH_PROTOTYPE_EPOCHS
+    ):
+        reasons.append(
+            "CONFIG must use a literal max_epochs/epochs integer between 1 and "
+            f"{MAX_RESEARCH_PROTOTYPE_EPOCHS}"
+        )
+    model_family = ""
+    research_family = ""
+    loss_family = ""
+    parent_family = str(
+        expected_parent_model_family or model_family_from_code(base_code)
+    )
     manifest = literal_assignment(candidate_code, "RESEARCH_MANIFEST")
     if not isinstance(manifest, Mapping):
         manifest = {}
@@ -1439,11 +1605,11 @@ def validate_candidate_contract(
                 f"model_family {model_family!r} violates role family constraint "
                 f"{role.allowed_model_families!r}"
             )
-        parent_family = str(
-            expected_parent_model_family
-            or model_family_from_code(base_code)
-        )
-        if role.group != "architecture_exploration" and model_family != parent_family:
+        if (
+            not role.autonomous
+            and role.group != "architecture_exploration"
+            and model_family != parent_family
+        ):
             reasons.append(
                 "non-architecture candidate changed model family from "
                 f"{parent_family!r} to {model_family!r}"
@@ -1462,13 +1628,15 @@ def validate_candidate_contract(
         if manifest.get("input_schema_version") != 2:
             reasons.append("input_schema_version must be literal integer 2")
         research_family = str(manifest.get("research_family", ""))
-        expected_research_family = research_family_for_role(role)
         if research_family not in ALLOWED_RESEARCH_FAMILIES:
             reasons.append(f"unsupported research_family: {research_family!r}")
-        elif research_family != expected_research_family:
+        elif (
+            not role.autonomous
+            and research_family != research_family_for_role(role)
+        ):
             reasons.append(
                 f"research_family {research_family!r} does not match role family "
-                f"{expected_research_family!r}"
+                f"{research_family_for_role(role)!r}"
             )
         loss_family = str(manifest.get("loss_family", ""))
         if loss_family not in ALLOWED_LOSS_FAMILIES:
@@ -1488,6 +1656,17 @@ def validate_candidate_contract(
             for item in mechanism_ids
         ):
             reasons.append("mechanism_ids must contain lowercase snake_case identifiers")
+        for field_name in ("hypothesis", "mechanism"):
+            value = manifest.get(field_name)
+            if not isinstance(value, str) or not value.strip():
+                reasons.append(f"manifest {field_name} must be a non-empty string")
+        modified_symbols = manifest.get("modified_symbols", [])
+        if (
+            not isinstance(modified_symbols, (list, tuple))
+            or not modified_symbols
+            or any(not isinstance(item, str) or not item.strip() for item in modified_symbols)
+        ):
+            reasons.append("manifest modified_symbols must be a non-empty string sequence")
 
     components = literal_assignment(candidate_code, "ABLATION_COMPONENTS")
     enabled = (
@@ -1571,7 +1750,11 @@ def validate_candidate_contract(
         reasons.append(
             "candidate changes only CONFIG or metadata; tuning is not a research branch"
         )
-    if role.group == "architecture_exploration":
+    architecture_change = role.group == "architecture_exploration" or (
+        role.autonomous
+        and (research_family == "architecture" or model_family != parent_family)
+    )
+    if architecture_change:
         base_model = function_dump(base_code, "create_model")
         candidate_model = function_dump(candidate_code, "create_model")
         if candidate_model is None or candidate_model == base_model:
@@ -1680,10 +1863,11 @@ def validate_candidate_contract(
                     + ", ".join(sorted(missing_rejections))
                 )
 
-    needs_factor_code = role.category in {"factor_data", "factor_model"} or bool(
-        selected_factor_ids
+    assigned_factor_role = (
+        not role.autonomous and role.category in {"factor_data", "factor_model"}
     )
-    if role.category in {"factor_data", "factor_model"} and not selected_factor_ids:
+    needs_factor_code = assigned_factor_role or bool(selected_factor_ids)
+    if assigned_factor_role and not selected_factor_ids:
         reasons.append("factor candidate must select at least one library factor")
     if needs_factor_code:
         if not factors:
@@ -1718,9 +1902,10 @@ def validate_candidate_contract(
             reasons.append("factor candidate does not materially change build_features")
         builder_fields = _function_string_constants(candidate_code, "build_features")
         declared_outputs = {
-            str(output)
+            output
             for factor in factors
             for output in factor.get("output_fields", [])
+            if isinstance(output, str) and output
         }
         missing_outputs = declared_outputs - builder_fields
         if missing_outputs:
@@ -1728,7 +1913,7 @@ def validate_candidate_contract(
                 "declared factor outputs not created literally in build_features: "
                 + ", ".join(sorted(missing_outputs))
             )
-        if role.category == "factor_model":
+        if not role.autonomous and role.category == "factor_model":
             base_model = function_dump(base_code, "create_model")
             candidate_model = function_dump(candidate_code, "create_model")
             if candidate_model is None or candidate_model == base_model:
@@ -1737,9 +1922,21 @@ def validate_candidate_contract(
                 )
 
     base_role_name = role.name.split("_alternative_", 1)[0]
-    if base_role_name == "ranking_objective":
+    ranking_loss = loss_family in {
+        "hybrid_bce_bpr",
+        "pairwise_bpr",
+        "listwise_softmax",
+    }
+    auxiliary_loss = loss_family in {"multitask", "censored_watch_time"}
+    if base_role_name == "ranking_objective" or (
+        role.autonomous
+        and (research_family == "ranking_objective" or ranking_loss)
+    ):
         reasons.extend(_ranking_objective_reasons(candidate_code))
-    elif base_role_name == "auxiliary_objective":
+    if base_role_name == "auxiliary_objective" or (
+        role.autonomous
+        and (research_family == "auxiliary_objective" or auxiliary_loss)
+    ):
         reasons.extend(_auxiliary_objective_reasons(candidate_code))
 
     return CandidateContractResult(
@@ -1751,21 +1948,227 @@ def validate_candidate_contract(
     )
 
 
+_IMPLEMENTATION_METADATA = {
+    "CONFIG",
+    "RESEARCH_MANIFEST",
+    "FEATURE_FACTORS",
+    "FACTOR_SELECTION",
+    "ABLATION_COMPONENTS",
+}
+
+
+class _ComponentLabelNormalizer(ast.NodeTransformer):
+    """Alpha-normalize guard labels without changing guard topology."""
+
+    def __init__(self) -> None:
+        self.labels: dict[str, str] = {}
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:
+        node = self.generic_visit(node)
+        if (
+            isinstance(node.func, ast.Name)
+            and node.func.id == "component_enabled"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            label = node.args[0].value
+            normalized = self.labels.setdefault(label, f"component_{len(self.labels)}")
+            node.args[0] = ast.Constant(value=normalized)
+        return node
+
+
+def candidate_implementation_signature(code: str) -> str | None:
+    """Hash executable AST while ignoring configuration and declarative labels."""
+    tree = _tree(code)
+    if tree is None:
+        return None
+    body = []
+    for statement in tree.body:
+        assigned: set[str] = set()
+        if isinstance(statement, ast.Assign):
+            assigned = {
+                target.id for target in statement.targets if isinstance(target, ast.Name)
+            }
+        elif isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+            assigned = {statement.target.id}
+        if assigned & _IMPLEMENTATION_METADATA:
+            continue
+        if (
+            isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Constant)
+            and isinstance(statement.value.value, str)
+        ):
+            continue
+        body.append(statement)
+    tree.body = body
+    tree = _ComponentLabelNormalizer().visit(tree)
+    ast.fix_missing_locations(tree)
+    canonical = ast.dump(tree, include_attributes=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+_SEMANTIC_STOP_WORDS = {
+    "a",
+    "an",
+    "and",
+    "candidate",
+    "for",
+    "from",
+    "improve",
+    "improves",
+    "mechanism",
+    "model",
+    "of",
+    "or",
+    "ranking",
+    "the",
+    "this",
+    "to",
+    "validation",
+    "with",
+}
+
+
+def _semantic_tokens(values: Iterable[Any]) -> set[str]:
+    tokens: set[str] = set()
+    for value in values:
+        for token in re.findall(r"[a-z0-9]+", str(value).lower()):
+            if token not in _SEMANTIC_STOP_WORDS:
+                tokens.add(token)
+    return tokens
+
+
+_EXECUTABLE_SURFACES = (
+    "build_features",
+    "build_research_schema",
+    "create_model",
+    "forward",
+    "predict",
+    "run_training",
+    "step",
+    "train_model",
+)
+
+
+def _semantic_surface_symbols(values: Iterable[Any]) -> set[str]:
+    surfaces: set[str] = set()
+    for value in values:
+        text = str(value).lower()
+        matched = {name for name in _EXECUTABLE_SURFACES if name in text}
+        surfaces.update(matched or {"helper"})
+    return surfaces
+
+
+def _jaccard(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    return len(left & right) / len(left | right)
+
+
 def candidate_semantic_signature(result: CandidateContractResult) -> str:
-    """Fingerprint mechanisms rather than surface code or prose wording."""
+    """Fingerprint declared science without lineage or surface component labels."""
     payload = {
         "model_family": str(result.manifest.get("model_family", "")),
         "research_family": str(result.manifest.get("research_family", "")),
         "loss_family": str(result.manifest.get("loss_family", "")),
-        "parent_model_family": str(result.manifest.get("parent_model_family", "")),
-        "input_schema_version": result.manifest.get("input_schema_version"),
         "mechanism_ids": sorted(map(str, result.manifest.get("mechanism_ids", []))),
-        "factors": sorted(str(item.get("name", "")) for item in result.feature_factors),
         "factor_library_ids": sorted(
-            map(str, result.factor_selection.get("selected_factor_ids", []))
+            {
+                *map(str, result.factor_selection.get("selected_factor_ids", [])),
+                *(
+                    str(item.get("library_id", ""))
+                    for item in result.feature_factors
+                    if item.get("library_id")
+                ),
+            }
+        ),
+        "modified_symbols": sorted(
+            map(str, result.manifest.get("modified_symbols", []))
         ),
     }
     return json.dumps(payload, sort_keys=True, ensure_ascii=True)
+
+
+def candidate_semantic_similarity(
+    left: CandidateContractResult,
+    right: CandidateContractResult,
+) -> float:
+    """Return weighted similarity of two self-declared research mechanisms."""
+    left_families = {
+        f"model:{left.manifest.get('model_family', '')}",
+        f"research:{left.manifest.get('research_family', '')}",
+        f"loss:{left.manifest.get('loss_family', '')}",
+    }
+    right_families = {
+        f"model:{right.manifest.get('model_family', '')}",
+        f"research:{right.manifest.get('research_family', '')}",
+        f"loss:{right.manifest.get('loss_family', '')}",
+    }
+    left_ids = _semantic_tokens(left.manifest.get("mechanism_ids", []))
+    right_ids = _semantic_tokens(right.manifest.get("mechanism_ids", []))
+    left_text = _semantic_tokens(
+        (
+            left.manifest.get("hypothesis", ""),
+            left.manifest.get("mechanism", ""),
+            left.manifest.get("change_scope", ""),
+        )
+    )
+    right_text = _semantic_tokens(
+        (
+            right.manifest.get("hypothesis", ""),
+            right.manifest.get("mechanism", ""),
+            right.manifest.get("change_scope", ""),
+        )
+    )
+    left_factors = _semantic_tokens(
+        [*left.factor_selection.get("selected_factor_ids", [])]
+        + [
+            item.get("library_id", "") or item.get("name", "")
+            for item in left.feature_factors
+        ]
+    )
+    right_factors = _semantic_tokens(
+        [*right.factor_selection.get("selected_factor_ids", [])]
+        + [
+            item.get("library_id", "") or item.get("name", "")
+            for item in right.feature_factors
+        ]
+    )
+    left_symbols = _semantic_surface_symbols(
+        left.manifest.get("modified_symbols", [])
+    )
+    right_symbols = _semantic_surface_symbols(
+        right.manifest.get("modified_symbols", [])
+    )
+    mechanism_similarity = max(
+        _jaccard(left_ids, right_ids),
+        _jaccard(left_text, right_text),
+    )
+    weighted_similarity = min(
+        1.0,
+        max(
+            0.0,
+            0.35 * _jaccard(left_families, right_families)
+            + 0.40 * mechanism_similarity
+            + 0.15 * _jaccard(left_factors, right_factors)
+            + 0.10 * _jaccard(left_symbols, right_symbols),
+        ),
+    )
+    same_structural_direction = (
+        all(
+            left.manifest.get(name)
+            and left.manifest.get(name) == right.manifest.get(name)
+            for name in ("model_family", "research_family", "loss_family")
+        )
+        and left_factors == right_factors
+        and _jaccard(left_symbols, right_symbols) >= 0.80
+    )
+    return max(
+        weighted_similarity,
+        mechanism_similarity,
+        1.0 if same_structural_direction else 0.0,
+    )
 
 
 def format_factor_change(result: CandidateContractResult) -> str:

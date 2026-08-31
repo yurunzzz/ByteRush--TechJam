@@ -167,7 +167,7 @@ class AgentManager:
                 - Use no external training dataset, Hugging Face dataset, or test-derived signal
                 - Select configurations only by validation primary and record GAUC and nDCG@5 separately.""",
             3: """
-                - Follow the assigned research role for this branch; sibling roles provide diversity and may be reallocated in later rounds from validation and ablation evidence
+                - Start from the current verified incumbent and independently choose one coherent research hypothesis from the supplied validation feedback and constraints; no algorithm direction is assigned
                 - A candidate may be one coherent evidence-backed bundle containing a central model change plus its required factors, embeddings, objectives, and training mechanisms
                 - Do not use a CONFIG-only hyperparameter change as a research candidate; every valid branch must materially change features, model computation, loss, or training behavior
                 - When a model mechanism requires corresponding factors, implement factor extraction, encoding/embedding, and the consuming model path together in this branch
@@ -175,8 +175,8 @@ class AgentManager:
                 - Declare a literal RESEARCH_MANIFEST and, for feature work, FEATURE_FACTORS with raw fields, transformations, output fields, and frozen state policy
                 - Register and guard every new component independently so Stage 4 can measure both component contribution and important pairwise synergy
                 - A valid experiment must finish training, emit finite validation GAUC, nDCG@5, and primary, and preserve the trusted evaluation contract
-                - Use only the assigned role-specific technique menu and evidence memory; do not copy unrelated methods into this branch
-                - The global method catalog is routed across sibling branches by the controller, so preserve the assigned mechanism instead of proposing another direction
+                - Treat factor cards and prior results as optional evidence, not a required method menu; select, revise, or reject them according to the hypothesis
+                - Do not copy an earlier candidate unchanged or disguise the same implementation with renamed metadata; retries must address the concrete diversity conflict reported by the controller
                 - Keep every bundled change interpretable and evidence-linked; compare the complete candidate with the best valid parent under comparable compute
                 - Respect the encoded input contract: train_x and valid_x are dense integer feature-ID arrays with shape (rows, 5), not one-hot or scipy sparse matrices; use embedding lookup such as V[X], never X @ V
                 - Preserve CandidateModel's constructor plus step, predict, state_dict, and load_state_dict interfaces so the trusted validation loop can train and checkpoint the candidate
@@ -192,7 +192,7 @@ class AgentManager:
                 - Run bounded pairwise joint ablations for the most important component pairs and estimate their synergy
                 - Reject an ablation when disabling a declared component does not change the effective code path or feature schema
                 - Report each component's primary, GAUC, and nDCG@5 contribution, seed wins, uncertainty, and positive/neutral/harmful verdict
-                - Feed component and synergy evidence into the next Stage 3 direction portfolio and combination prompt
+                - Feed component and synergy evidence back as neutral validation observations for the next Stage 3 round
                 - Use only the same fixed KuaiRand-Pure train/validation split
                 - Replicate the best legal configuration across seeds and report mean and standard deviation
                 - Keep the validation-best checkpoint rather than the last trained checkpoint""",

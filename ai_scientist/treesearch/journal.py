@@ -132,6 +132,7 @@ class Node(DataClassJsonMixin):
     ctime: float = field(default_factory=lambda: time.time(), kw_only=True)
     parent: Optional["Node"] = field(default=None, kw_only=True)
     children: set["Node"] = field(default_factory=set, kw_only=True)
+    assignment_id: str = field(default="", kw_only=True)
     exp_results_dir: str = field(default=None, kw_only=True)  # type: ignore
 
     # ---- execution info ----
@@ -298,6 +299,7 @@ class Node(DataClassJsonMixin):
             "plot_plan": self.plot_plan,
             "step": self.step,
             "id": self.id,
+            "assignment_id": self.assignment_id,
             "ctime": self.ctime,
             "_term_out": self._term_out,
             "parse_metrics_plan": self.parse_metrics_plan,

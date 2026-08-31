@@ -50,12 +50,12 @@
     "tab_posrate_min": 0.004,
     "tab_posrate_max": 0.489
   },
-  "priors_for_agent": [
-    "Cold-start negligible (unseen video/author ~0.01%): do NOT spend capacity on content/ID-fallback features.",
-    "nDCG@5 is structurally capped (~27% all-negative users, nDCG=0 in the mean): optimize GAUC, not nDCG.",
-    "tab positive-rate spans an order of magnitude: prioritize tab x user / tab x video crosses; pure user-side first-order terms cannot change within-user order.",
-    "Pointwise logloss is misaligned with the ranking metric: try within-user pairwise/BPR first.",
-    "Any temporal or statistical feature MUST be built causally from strictly-earlier events only (no valid/test labels, no future)."
+  "observations_for_agent": [
+    "Validation unseen video and author rates are approximately 0.01%.",
+    "About 27% of users have no positive validation item and receive nDCG@5=0 under the official convention.",
+    "Training tab-level positive rates range from approximately 0.004 to 0.489.",
+    "The baseline trains with pointwise logloss; the official metrics evaluate within-user ordering.",
+    "Any chosen temporal or statistical feature must use strictly earlier permitted events only, with no validation/test labels or future data."
   ],
   "provenance": "Computed from the official data.py loader; population-level only, no per-id tables. Ceilings cross-checked against baseline_scores.json oracle_ceiling."
 }

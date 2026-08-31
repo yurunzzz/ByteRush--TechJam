@@ -64,22 +64,10 @@ agent:
     stage2_root_top_k: 4
     # A primary winner may not sacrifice either component by more than this.
     max_component_regression: 0.001
-    # Match the proven dbcab71 run while retaining evidence-guided selection.
+    # Five independent agents share the verified incumbent and choose their own science.
     candidate_branches: 5
-    max_candidate_branches: 8
-    branch_growth_per_positive_round: 2
-    # Two champion branches, two validation-successful frontier branches, and
-    # one Stage-1B architecture root form each multi-parent Stage-3 portfolio.
-    stage3_incumbent_parent_slots: 2
-    stage3_frontier_parent_slots: 2
-    stage3_bootstrap_parent_slots: 1
-    initial_candidate_roles:
-      - causal_history_interest
-      - ranking_objective
-      - auxiliary_objective
-      - context_interaction
-      - incumbent_extension
-    reserved_candidate_role: incumbent_extension
+    candidate_semantic_similarity_threshold: 0.80
+    max_candidates_per_research_family: 2
     candidate_parallel_workers: 2
     # The stricter candidate contract needs two spare attempts beyond dbcab71.
     # Three first attempts plus two contract/debug retries.
@@ -90,12 +78,6 @@ agent:
     no_valid_round_patience: 2
     low_gain_round_patience: 3
     min_round_primary_gain: 0.0002
-    # Explicit transfer starts at 30%; positive transfer outcomes increase it,
-    # repeated failures reduce it, always within these bounds.
-    transfer_base_ratio: 0.30
-    transfer_min_ratio: 0.15
-    transfer_max_ratio: 0.50
-    donor_max_primary_gap: 0.002
     smoke_test_enabled: true
     smoke_test_timeout_seconds: 240
     # Reuse the generation score for 3 -> 2 elimination. Top 2 get one

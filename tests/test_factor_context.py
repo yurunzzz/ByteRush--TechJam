@@ -29,6 +29,14 @@ class FactorContextTests(unittest.TestCase):
                 ),
                 round_number=1,
             )
+            next_round_context = build_factor_context(
+                Path(tmp),
+                incumbent_code=(
+                    "FIELDS = ['user_id', 'video_id']\n"
+                    "ABLATION_COMPONENTS = {'history': True}\n"
+                ),
+                round_number=2,
+            )
 
         self.assertIn("user_active_degree", context)
         self.assertIn("Current registered components: history", context)
@@ -43,6 +51,12 @@ class FactorContextTests(unittest.TestCase):
         self.assertIn("not automatically present in splits", context)
         self.assertIn("never apply a numpy index array directly to a Python list", context)
         self.assertIn("X int32 shape (N,F)", context)
+        self.assertNotIn("Prioritized", context)
+        self.assertIn("not a priority list", context)
+        self.assertEqual(
+            context.replace("- Round: 1", "- Round: 2"),
+            next_round_context,
+        )
 
 
 if __name__ == "__main__":
