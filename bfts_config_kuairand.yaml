@@ -34,8 +34,8 @@ agent:
   stages:
     stage1_max_iters: 2
     stage2_max_iters: 2
-    stage3_max_iters: 30
-    stage4_max_iters: 15
+    stage3_max_iters: 7
+    stage4_max_iters: 3
   steps: 1
   k_fold_validation: 1
   multi_seed_eval:
@@ -44,8 +44,8 @@ agent:
     enabled: true
     # This is a safety ceiling. Adaptive convergence normally stops earlier;
     # productive directions may use more rounds while gains remain positive.
-    max_research_rounds: 10
-    patience: 4
+    max_research_rounds: 1
+    patience: 1
     stage1_validation_iterations: 2
     # Stage 1A remains the official FM control. Stage 1B creates cheap,
     # schema-v2-compatible non-FM roots. Stage 2 tunes the FM control and the
@@ -71,7 +71,7 @@ agent:
     candidate_parallel_workers: 2
     # The stricter candidate contract needs two spare attempts beyond dbcab71.
     # Three first attempts plus two contract/debug retries.
-    stage3_generation_attempts: 30
+    stage3_generation_attempts: 7
     min_valid_candidates_per_round: 3
     target_valid_candidates_per_round: 5
     max_repair_attempts_per_assignment: 2
@@ -82,11 +82,11 @@ agent:
     smoke_test_timeout_seconds: 240
     # Reuse the generation score for 3 -> 2 elimination. Top 2 get one
     # targeted correction; the fixed Top 1 gets most of the parameter budget.
-    candidate_tuning_top_k: 3
+    candidate_tuning_top_k: 2
     candidate_tuning_iterations: 1
-    candidate_refinement_top_k: 2
-    candidate_refinement_iterations: 4
-    candidate_finalist_top_k: 2
+    candidate_refinement_top_k: 1
+    candidate_refinement_iterations: 1
+    candidate_finalist_top_k: 1
     finalist_top_k: 1
     # Two screening seeds precede ablation; final confirmation uses five.
     finalist_num_seeds: 2
@@ -96,9 +96,9 @@ agent:
     # Preserve parallel Stage 3 execution while avoiding simultaneous
     # PyTorch/CUDA initialization spikes on the single competition GPU.
     stage3_startup_stagger_seconds: 8
-    final_confirmation_num_seeds: 5
-    ablation_candidate_top_k: 2
-    ablation_synergy_pairs: 1
+    final_confirmation_num_seeds: 2
+    ablation_candidate_top_k: 1
+    ablation_synergy_pairs: 0
     provisional_min_primary_gain: 0.0005
     final_promotion_min_primary_gain: 0.001
     # A safety cutoff, not a runtime target. The loop stops earlier when
@@ -116,7 +116,7 @@ agent:
     min_primary_gain: 0.002
     num_seeds: 1
     min_successful_seeds: 1
-    max_components: 15
+    max_components: 3
   final_model_dir: artifacts/comparison_current/final_model
   expose_prediction: false
   data_preview: false
