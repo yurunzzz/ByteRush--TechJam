@@ -75,6 +75,10 @@ def query(
     messages = opt_messages_to_list(system_message, user_message)
 
     if func_spec is not None:
+        if filtered_kwargs.get("model", "").startswith("gpt-5.6"):
+            # GPT-5.6 Chat Completions permits forced tools only when its
+            # reasoning layer is disabled for that structured call.
+            filtered_kwargs["reasoning_effort"] = "none"
         filtered_kwargs["tools"] = [func_spec.as_openai_tool_dict]
         # force the model to use the function
         filtered_kwargs["tool_choice"] = func_spec.openai_tool_choice_dict

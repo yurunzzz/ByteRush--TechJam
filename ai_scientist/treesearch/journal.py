@@ -31,6 +31,15 @@ _SUMMARY_SUCCESS_CHAR_BUDGET = 38000
 _SUMMARY_FAILURE_CHAR_BUDGET = 14000
 
 
+def _serializable_path(value: str | os.PathLike[str]) -> str:
+    """Prefer repo-relative paths, but preserve valid external run roots."""
+    resolved = Path(value).resolve()
+    try:
+        return str(resolved.relative_to(Path.cwd().resolve()))
+    except ValueError:
+        return str(resolved)
+
+
 def _trim_summary_text(value: Any, limit: int) -> str:
     """Keep both the conclusion and context while enforcing an exact char limit."""
     text = "" if value is None else str(value)
@@ -314,7 +323,7 @@ class Node(DataClassJsonMixin):
             "exc_stack": self.exc_stack,
             "analysis": self.analysis,
             "exp_results_dir": (
-                str(Path(self.exp_results_dir).resolve().relative_to(os.getcwd()))
+                _serializable_path(self.exp_results_dir)
                 if self.exp_results_dir
                 else None
             ),
@@ -336,10 +345,7 @@ class Node(DataClassJsonMixin):
             "plots_generated": self.plots_generated,
             "plots": self.plots,
             "plot_paths": (
-                [
-                    str(Path(p).resolve().relative_to(os.getcwd()))
-                    for p in self.plot_paths
-                ]
+                [_serializable_path(p) for p in self.plot_paths]
                 if self.plot_paths
                 else []
             ),
@@ -347,11 +353,7 @@ class Node(DataClassJsonMixin):
                 {
                     **analysis,
                     "plot_path": (
-                        str(
-                            Path(analysis["plot_path"])
-                            .resolve()
-                            .relative_to(os.getcwd())
-                        )
+                        _serializable_path(analysis["plot_path"])
                         if analysis.get("plot_path")
                         else None
                     ),
