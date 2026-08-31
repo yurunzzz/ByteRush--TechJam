@@ -1,288 +1,537 @@
-"""ByteRush Autonomous ML Research Agent dashboard.
+"""ByteRush 16:9 competition showcase.
 
-Launch on AutoDL:
-    BYTERUSH_DATA_ROOT=/root/autodl-tmp/ByteRush streamlit run dashboard/app.py
+Build first, then launch:
+    python dashboard/build_showcase.py --data-root /root/autodl-tmp/ByteRush
+    streamlit run dashboard/app.py
 """
 
 from __future__ import annotations
 
+import html
 import os
-import re
+import sys
+from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 import plotly.graph_objects as go
 import streamlit as st
 
-try:
-    from streamlit_autorefresh import st_autorefresh
-except ImportError:  # Kept optional so a copied dashboard still opens without it.
-    st_autorefresh = None
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
-from data_loader import (
-    STAGE_META,
-    ExperimentNode,
-    TreeSnapshot,
-    artifact_files,
-    best_node,
-    find_latest_trees,
-    load_overview,
-    project_root,
-    stage_stats,
+from showcase_loader import ShowcaseBuildError, load_showcase_payload
+
+
+st.set_page_config(
+    page_title="ByteRush! · Autonomous Recommendation Research",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+STAGE_COLORS = {1: "#57d7ef", 2: "#86e7c1", 3: "#ae94f4", 4: "#ffbd4a"}
+SLIDE_KEYS = (
+    "slide-01-hero", "slide-02-impact", "slide-03-agent", "slide-04-search",
+    "slide-05-selection", "slide-06-stability", "slide-07-evidence",
 )
 
 
-st.set_page_config(page_title="ByteRush Research Console", page_icon="⚡", layout="wide", initial_sidebar_state="collapsed")
+def _manifest_path() -> Path:
+    configured = os.getenv("BYTERUSH_SHOWCASE_MANIFEST")
+    return Path(configured).expanduser().resolve() if configured else SCRIPT_DIR / "generated" / "showcase_manifest.json"
 
 
-def _root() -> Path:
-    configured = os.getenv("BYTERUSH_DATA_ROOT")
-    return Path(configured).expanduser().resolve() if configured else project_root()
+@st.cache_data(show_spinner=False)
+def _load(path: str) -> dict[str, Any]:
+    return load_showcase_payload(Path(path))
 
 
-@st.cache_data(ttl=60, show_spinner=False)
-def load_dashboard(root_string: str):
-    root = Path(root_string)
-    return load_overview(root)
+def _metric(value: float | None, digits: int = 6) -> str:
+    return f"{value:.{digits}f}" if value is not None else "—"
 
 
-@st.cache_data(ttl=60, show_spinner=False)
-def load_selected_trees(root_string: str, run_id: str | None):
-    return find_latest_trees(Path(root_string) / "experiments", run_id)
+def _delta(value: float | None, digits: int = 6) -> str:
+    return f"{value:+.{digits}f}" if value is not None else "—"
 
 
-def fmt_metric(value: float | None) -> str:
-    return f"{value:.4f}" if value is not None else "—"
+def _percent(value: float | None) -> str:
+    return f"{value:+.3%}" if value is not None else "—"
 
 
-def fmt_delta(value: float | None) -> str:
-    return f"{value:+.4f}" if value is not None else "—"
-
-
-def relative_delta(value: float | None, baseline: float | None) -> str:
-    if value is None or baseline in (None, 0):
-        return "—"
-    return f"{(value - baseline) / baseline:+.2%}"
+def _safe(text: Any) -> str:
+    return html.escape(str(text or ""))
 
 
 def inject_css() -> None:
+    slide_selectors = ",".join(f".st-key-{key}" for key in SLIDE_KEYS)
     st.markdown(
-        """
+        f"""
         <style>
-        .stApp { background: radial-gradient(circle at 5% 0%, #172554 0%, #080d1d 36%, #020617 100%); color: #e5eefb; }
-        header[data-testid="stHeader"] { background: rgba(2,6,23,.55); }
-        [data-testid="stMetric"] { background: linear-gradient(145deg, rgba(30,41,59,.88), rgba(15,23,42,.74)); border: 1px solid rgba(148,163,184,.18); padding: 1rem; border-radius: 16px; }
-        [data-testid="stMetricLabel"] { color: #a5b4fc; }
-        .hero { padding: .4rem 0 1rem 0; }
-        .hero h1 { margin: 0; font-size: 2.25rem; letter-spacing: -.04em; }
-        .hero p { margin: .35rem 0 0; color: #9fb0ca; font-size: 1.02rem; }
-        .stage-card { min-height: 178px; padding: 1.15rem; border-radius: 18px; border: 1px solid rgba(148,163,184,.16); background: linear-gradient(155deg, rgba(30,41,59,.8), rgba(15,23,42,.7)); }
-        .stage-kicker { color: #93c5fd; font-size: .76rem; letter-spacing: .1em; text-transform: uppercase; }
-        .stage-title { font-size: 1.08rem; font-weight: 700; margin: .24rem 0 .55rem; }
-        .stage-value { font-size: 1.42rem; font-weight: 700; color: #f8fafc; }
-        .stage-caption { color: #aab9cf; font-size: .86rem; line-height: 1.42; margin-top: .7rem; }
-        .good { color: #4ade80; } .bad { color: #fb7185; } .gold { color: #fbbf24; }
-        div[data-testid="stExpander"] { border-color: rgba(148,163,184,.2); }
+        :root {{
+          --ink:#edf5ff; --muted:#a9b8cf; --panel:rgba(13,23,46,.84);
+          --cyan:#57d7ef; --mint:#86e7c1; --lilac:#ae94f4; --gold:#ffbd4a;
+        }}
+        html {{ scroll-behavior:smooth; scroll-snap-type:y proximity; }}
+        .stApp {{
+          background:
+            radial-gradient(circle at 8% 0%,rgba(87,215,239,.12),transparent 27%),
+            radial-gradient(circle at 90% 8%,rgba(174,148,244,.13),transparent 28%),
+            linear-gradient(155deg,#07111f 0%,#090e1b 52%,#050811 100%);
+          color:var(--ink);
+        }}
+        header[data-testid="stHeader"] {{ background:rgba(5,9,18,.58); backdrop-filter:blur(16px); }}
+        .block-container {{ max-width:1540px; padding-top:4.15rem; padding-bottom:5rem; }}
+        {slide_selectors} {{
+          position:relative; width:100%; aspect-ratio:16/9; min-height:760px; margin:1.8rem 0 3rem;
+          padding:clamp(1.8rem,3vw,3.5rem); border:1px solid rgba(255,255,255,.1); border-radius:30px;
+          background:linear-gradient(145deg,rgba(12,23,44,.9),rgba(7,13,27,.84));
+          box-shadow:0 34px 90px rgba(0,0,0,.3); scroll-snap-align:start; overflow:hidden;
+          animation:slideReveal .7s cubic-bezier(.2,.7,.2,1) both;
+        }}
+        .st-key-slide-01-hero {{ background:
+          radial-gradient(circle at 83% 20%,rgba(134,231,193,.17),transparent 28%),
+          radial-gradient(circle at 12% 5%,rgba(87,215,239,.12),transparent 30%),
+          linear-gradient(135deg,rgba(19,38,70,.96),rgba(11,18,37,.9)); }}
+        @keyframes slideReveal {{ from {{ opacity:.2; transform:translateY(22px); }} to {{ opacity:1; transform:translateY(0); }} }}
+        @keyframes graphReveal {{ from {{ opacity:.15; transform:translateX(20px) scale(.985); }} to {{ opacity:1; transform:translateX(0) scale(1); }} }}
+        .st-key-tree-frame-champion-path,.st-key-tree-frame-curated-evidence,.st-key-tree-frame-full-search {{ animation:graphReveal .65s ease both; }}
+        .show-nav {{ position:sticky; top:4.15rem; z-index:20; display:flex; align-items:center; justify-content:space-between;
+          gap:1rem; padding:.7rem 1rem; margin:0 auto 1rem; max-width:1480px; border:1px solid rgba(255,255,255,.1);
+          border-radius:999px; background:rgba(7,16,31,.82); backdrop-filter:blur(18px); box-shadow:0 16px 50px rgba(0,0,0,.24); }}
+        .show-brand {{ font-weight:900; font-size:1rem; letter-spacing:-.02em; }}
+        .show-brand span {{ color:var(--cyan); }}
+        .show-links {{ display:flex; gap:1.2rem; flex-wrap:wrap; }}
+        .show-links a {{ color:#d3def0 !important; text-decoration:none; font-size:.82rem; font-weight:650; }}
+        .show-links a:hover {{ color:var(--cyan) !important; }}
+        .slide-anchor {{ scroll-margin-top:5rem; }}
+        .slide-index {{ position:absolute; right:2.2rem; bottom:1.55rem; color:#65758e; font-size:.75rem; letter-spacing:.14em; text-transform:uppercase; }}
+        .eyebrow {{ color:var(--cyan); font-size:.86rem; font-weight:900; letter-spacing:.17em; text-transform:uppercase; }}
+        .section-head {{ margin:.1rem 0 1.2rem; }}
+        .section-head h2 {{ font-size:clamp(2.1rem,3.1vw,3.4rem); line-height:1.04; letter-spacing:-.05em; margin:.45rem 0 .65rem; }}
+        .section-head p {{ color:var(--muted); max-width:980px; font-size:1.08rem; line-height:1.58; margin:0; }}
+        .team-word {{
+          display:inline-block; margin:.45rem 0 0; font-family:Impact,"Arial Black","Avenir Next Condensed",sans-serif;
+          font-size:clamp(6.8rem,13vw,12.8rem); line-height:.86; font-style:italic; letter-spacing:-.065em;
+          background:linear-gradient(105deg,#ffffff 4%,#7cecff 36%,#a5f3d2 62%,#c9b8ff 90%);
+          -webkit-background-clip:text; color:transparent; filter:drop-shadow(0 0 28px rgba(87,215,239,.2)); transform:skewX(-4deg);
+        }}
+        .team-word span {{ color:var(--gold); -webkit-text-fill-color:var(--gold); text-shadow:0 0 30px rgba(255,189,74,.35); }}
+        .hero-subtitle {{ margin:.9rem 0 0; max-width:940px; font-size:clamp(1.25rem,2vw,2rem); color:#dce8f9; font-weight:650; letter-spacing:-.02em; }}
+        .hero-tagline {{ margin:.55rem 0 1.25rem; color:#9fb0c7; font-size:1rem; }}
+        .pills {{ display:flex; flex-wrap:wrap; gap:.58rem; margin-top:1rem; }}
+        .pill {{ padding:.47rem .75rem; border-radius:999px; font-size:.78rem; color:#dce8fb; border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.05); }}
+        .hero-metrics {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1rem; margin-top:1.7rem; }}
+        .hero-metric {{ padding:1.18rem 1.35rem; border:1px solid rgba(255,255,255,.11); border-radius:22px;
+          background:linear-gradient(145deg,rgba(19,35,65,.9),rgba(10,19,38,.75)); box-shadow:inset 0 1px rgba(255,255,255,.04); }}
+        .hero-metric .label {{ color:#a6b6cc; font-size:.8rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }}
+        .hero-metric .value {{ color:#fff; font-size:clamp(2.2rem,3.5vw,3.8rem); line-height:1; font-weight:900; margin:.42rem 0 .55rem; letter-spacing:-.055em; }}
+        .hero-metric .jump {{ color:var(--mint); font-size:1.08rem; font-weight:850; }}
+        .hero-metric .jump strong {{ display:inline-block; margin-left:.35rem; padding:.13rem .42rem; border-radius:8px; background:rgba(134,231,193,.1); color:#b7f7dc; }}
+        .hero-metric .baseline {{ color:#8192aa; font-size:.76rem; margin-top:.35rem; }}
+        .stage-grid {{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1rem; margin-top:2rem; }}
+        .stage-card {{ position:relative; min-height:300px; padding:1.55rem; border-radius:24px; border:1px solid rgba(255,255,255,.1); background:var(--panel); overflow:hidden; }}
+        .stage-card:before {{ content:""; position:absolute; inset:0 auto 0 0; width:4px; background:var(--accent); }}
+        .stage-card .num {{ color:var(--accent); font-size:.82rem; font-weight:900; letter-spacing:.14em; text-transform:uppercase; }}
+        .stage-card h3 {{ font-size:1.42rem; margin:.7rem 0 1.8rem; }}
+        .stage-card .big {{ font-size:2.45rem; font-weight:900; color:#fff; }}
+        .stage-card .small {{ color:var(--muted); font-size:.94rem; line-height:1.62; margin-top:.8rem; }}
+        .impact-copy {{ padding:1.4rem 1.5rem; border-radius:22px; background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.08); }}
+        .impact-copy h3 {{ font-size:1.45rem; margin:.1rem 0 .8rem; }}
+        .impact-copy p {{ color:#b6c4d8; font-size:1.02rem; line-height:1.68; }}
+        .baseline-chip {{ display:inline-flex; margin-top:.7rem; padding:.65rem .8rem; border-radius:12px; background:rgba(87,215,239,.08); color:#bceffc; font-weight:800; }}
+        .axis-note {{ color:#72839c; font-size:.76rem; margin-top:-.7rem; }}
+        .search-stat-row {{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.8rem; margin-top:-.1rem; }}
+        .search-stat {{ padding:.72rem .9rem; border-radius:14px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.07); }}
+        .search-stat b {{ color:var(--gold); font-size:1.45rem; margin-right:.35rem; }}
+        .search-stat span {{ color:#9fb0c7; font-size:.82rem; }}
+        .selection-track {{ display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:.75rem; margin-top:2rem; align-items:stretch; }}
+        .selection-step {{ position:relative; padding:1.3rem 1.15rem; min-height:300px; border-radius:22px; background:var(--panel); border:1px solid rgba(255,255,255,.1); }}
+        .selection-step:not(:last-child):after {{ content:"→"; position:absolute; z-index:3; right:-1rem; top:44%; color:var(--cyan); font-size:1.45rem; font-weight:900; }}
+        .selection-step .icon {{ font-size:2rem; }}
+        .selection-step .stage {{ color:var(--accent); font-size:.75rem; font-weight:900; letter-spacing:.13em; text-transform:uppercase; margin-top:.8rem; }}
+        .selection-step h3 {{ font-size:1.18rem; margin:.45rem 0 .7rem; }}
+        .selection-step .score {{ color:#fff; font-size:1.72rem; font-weight:900; letter-spacing:-.04em; }}
+        .selection-step .why {{ color:#9fb0c7; font-size:.85rem; line-height:1.55; margin-top:.7rem; }}
+        .selection-verdict {{ margin-top:1.15rem; padding:1rem 1.2rem; border-radius:17px; background:linear-gradient(90deg,rgba(134,231,193,.1),rgba(174,148,244,.08)); border:1px solid rgba(134,231,193,.16); color:#d8f8e9; font-size:1rem; }}
+        .proof-grid {{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.9rem; }}
+        .proof {{ padding:1.05rem; border-radius:17px; border:1px solid rgba(134,231,193,.18); background:rgba(9,31,37,.52); }}
+        .proof b {{ display:block; color:var(--mint); font-size:1rem; margin-bottom:.35rem; }}
+        .proof span {{ color:#aebdd0; font-size:.82rem; line-height:1.45; }}
+        .footer {{ color:#70819a; font-size:.78rem; margin-top:.6rem; }}
+        [data-testid="stMetric"] {{ background:rgba(15,27,50,.72); border:1px solid rgba(255,255,255,.08); padding:.85rem 1rem; border-radius:16px; }}
+        [data-testid="stMetricLabel"] {{ color:#b9c8dc; font-size:1rem; }}
+        [data-testid="stMetricValue"] {{ color:#fff; font-size:2rem; }}
+        [data-testid="stMetricDelta"] {{ color:var(--mint); font-size:.92rem; }}
+        div[data-testid="stExpander"] {{ border:1px solid rgba(255,255,255,.09); border-radius:14px; background:rgba(12,20,40,.55); }}
+        [data-testid="stDataFrame"] {{ border:1px solid rgba(255,255,255,.08); border-radius:15px; overflow:hidden; font-size:.9rem; }}
+        div[role="radiogroup"] label {{ font-size:1rem !important; font-weight:750; }}
+        @media (max-width:1000px) {{
+          {slide_selectors} {{ aspect-ratio:auto; min-height:auto; overflow:visible; }}
+          .hero-metrics,.stage-grid,.proof-grid {{ grid-template-columns:1fr 1fr; }}
+          .selection-track {{ grid-template-columns:1fr 1fr; }}
+          .selection-step:not(:last-child):after {{ display:none; }}
+          .show-links {{ display:none; }}
+        }}
+        @media (max-width:620px) {{ .hero-metrics,.stage-grid,.proof-grid,.selection-track {{ grid-template-columns:1fr; }} .team-word {{ font-size:5.2rem; }} }}
         </style>
         """,
         unsafe_allow_html=True,
     )
 
 
-def stage_card(stage: str, tree: TreeSnapshot | None, baseline: float | None) -> None:
-    meta = STAGE_META[stage]
-    stats = stage_stats(stage, tree, baseline)
-    best = stats["best"]
-    if stage == "baseline":
-        headline = f"Primary {fmt_metric(baseline)}"
-        supporting = "Pipeline verified" if tree else "Reference result loaded from run ledger"
-    elif stage == "tuning":
-        headline = f"{stats['total']} experiments · {stats['success']} succeeded"
-        supporting = f"Best {fmt_metric(best.primary if best else None)} · {relative_delta(best.primary if best else None, baseline)} vs baseline"
-    elif stage == "creative":
-        headline = f"{stats['success']} / {stats['total']} experiments"
-        supporting = f"Best: {best.label if best else 'Awaiting result'} · {relative_delta(best.primary if best else None, baseline)}"
-    else:
-        components = set()
-        for node in (tree.nodes if tree else []):
-            if node.ablation_name:
-                components.add(node.ablation_name)
-            for component in re.findall(r'["\']([\w-]+(?:component|loss))["\']\s*:\s*True', node.code):
-                components.add(component)
-        headline = f"{len(components)} components verified"
-        supporting = f"Key contribution {fmt_delta(stats['delta'])} Primary" if stats["delta"] is not None else "Awaiting ablation evidence"
+def navigation() -> None:
     st.markdown(
-        f"""
-        <div class="stage-card">
-          <div class="stage-kicker">{meta['label']}</div>
-          <div class="stage-title">{headline}</div>
-          <div class="{'good' if stats['success'] else 'gold'}">{supporting}</div>
-          <div class="stage-caption">{meta['description']}</div>
+        """
+        <div class="show-nav">
+          <div class="show-brand"><span>⚡</span> ByteRush!</div>
+          <div class="show-links">
+            <a href="#home">01 Home</a><a href="#impact">02 Results</a><a href="#agent">03 Agent</a>
+            <a href="#search">04 Search</a><a href="#selection">05 Selection</a><a href="#stability">06 Verification</a><a href="#evidence">07 Evidence</a>
+          </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
 
-def make_tree_figure(tree: TreeSnapshot, selected_uid: str | None) -> go.Figure:
-    lookup = {node.uid: node for node in tree.nodes}
+def slide_index(number: str, label: str) -> None:
+    st.markdown(f"<div class='slide-index'>{_safe(number)} · {_safe(label)}</div>", unsafe_allow_html=True)
+
+
+def section_head(anchor: str, eyebrow: str, title: str, description: str) -> None:
+    st.markdown(
+        f"<div id='{anchor}' class='slide-anchor section-head'><div class='eyebrow'>{_safe(eyebrow)}</div>"
+        f"<h2>{_safe(title)}</h2><p>{_safe(description)}</p></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def hero(payload: dict[str, Any]) -> None:
+    project, winner, selection = payload["project"], payload["winner"], payload["selection"]
+    final, delta, relative, baseline = winner["final"], winner["delta"], winner["relative_delta"], winner["baseline"]
+    st.markdown(
+        f"""
+        <div id="home" class="slide-anchor">
+          <div class="eyebrow">{_safe(project['competition'])} · Final research showcase</div>
+          <div class="team-word">ByteRush<span>!</span></div>
+          <div class="hero-subtitle">{_safe(project['subtitle'])}</div>
+          <div class="hero-tagline">{_safe(project['tagline'])}</div>
+          <div class="pills">
+            <span class="pill">✓ Validation-only selection</span><span class="pill">✓ {selection['successful_seed_count']}-seed verified</span>
+            <span class="pill">✓ 170,588 predictions ready</span><span class="pill">🏆 {_safe(winner['label'])}</span>
+          </div>
+          <div class="hero-metrics">
+            <div class="hero-metric"><div class="label">Primary · Frozen winner</div><div class="value">{_metric(final['primary'])}</div><div class="jump">↑ {_delta(delta['primary'])}<strong>{_percent(relative['primary'])}</strong></div><div class="baseline">FM baseline {_metric(baseline['primary'])}</div></div>
+            <div class="hero-metric"><div class="label">GAUC · Global ranking</div><div class="value">{_metric(final['GAUC'])}</div><div class="jump">↑ {_delta(delta['GAUC'])}</div><div class="baseline">FM baseline {_metric(baseline['GAUC'])}</div></div>
+            <div class="hero-metric"><div class="label">nDCG@5 · Top-five quality</div><div class="value">{_metric(final['nDCG@5'])}</div><div class="jump">↑ {_delta(delta['nDCG@5'])}</div><div class="baseline">FM baseline {_metric(baseline['nDCG@5'])}</div></div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def metric_comparison(payload: dict[str, Any]) -> go.Figure:
+    winner = payload["winner"]
+    names, keys = ["GAUC", "nDCG@5", "Primary"], ["GAUC", "nDCG@5", "primary"]
+    baseline = [winner["baseline"][key] for key in keys]
+    final = [winner["final"][key] for key in keys]
     fig = go.Figure()
-    for source_uid, target_uid in tree.edges:
-        source, target = lookup[source_uid], lookup[target_uid]
-        fig.add_trace(go.Scatter(x=[source.x, target.x], y=[-source.y, -target.y], mode="lines", line={"color": "rgba(148,163,184,.42)", "width": 1.8}, hoverinfo="skip", showlegend=False))
-    colors = {"succeeded": "#34d399", "failed": "#fb7185", "pending": "#94a3b8", "running": "#cbd5e1"}
-    symbols = {"succeeded": "circle", "failed": "x", "pending": "circle", "running": "circle"}
-    for status in ("succeeded", "failed", "pending", "running"):
-        group = [node for node in tree.nodes if node.status == status]
-        if not group:
-            continue
-        sizes = [22 + max(0, ((node.primary or 0.60) - 0.59) * 1500) for node in group]
-        fig.add_trace(
-            go.Scatter(
-                x=[node.x for node in group], y=[-node.y for node in group], mode="markers+text",
-                text=[node.label for node in group], textposition="bottom center", cliponaxis=False,
-                textfont={"size": 11, "color": "#dbeafe"},
-                customdata=[[node.uid, node.primary, node.gauc, node.ndcg] for node in group],
-                marker={"size": sizes, "color": colors[status], "symbol": symbols[status], "line": {"color": ["#fbbf24" if node.is_best else "#60a5fa" if status == "running" else "#0f172a" for node in group], "width": [4 if node.is_best or status == "running" else 2 for node in group]}},
-                name=status.title(),
-                hovertemplate="<b>%{text}</b><br>Primary %{customdata[1]:.4f}<extra></extra>",
-            )
+    fig.add_trace(go.Bar(
+        name="FM baseline", x=names, y=baseline, marker_color="#5f718c",
+        text=[_metric(value) for value in baseline], textposition="outside", textfont={"size": 18, "color": "#c7d2e3"},
+    ))
+    fig.add_trace(go.Bar(
+        name=winner["label"], x=names, y=final, marker_color=["#57d7ef", "#ae94f4", "#86e7c1"],
+        text=[_metric(value) for value in final], textposition="outside", textfont={"size": 20, "color": "#ffffff"},
+    ))
+    for index, key in enumerate(keys):
+        fig.add_annotation(
+            x=names[index], y=final[index], yshift=34, text=f"<b>↑ {_delta(winner['delta'][key])}</b>",
+            showarrow=False, font={"size": 17, "color": "#a7f3d0"},
         )
-    best = next((node for node in tree.nodes if node.is_best), None)
-    if best:
-        fig.add_trace(go.Scatter(x=[best.x], y=[-best.y + .045], mode="text", text=["★ Best"], textfont={"size": 13, "color": "#fbbf24"}, hoverinfo="skip", showlegend=False))
     fig.update_layout(
-        height=600, margin={"l": 15, "r": 15, "t": 35, "b": 50}, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(15,23,42,.35)",
-        xaxis={"visible": False, "range": [-.08, 1.08]}, yaxis={"visible": False, "range": [-1.12, .13], "scaleanchor": None},
-        legend={"orientation": "h", "y": 1.09, "x": 0}, clickmode="event+select",
+        barmode="group", height=500, margin={"l": 20, "r": 25, "t": 55, "b": 30},
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(8,16,34,.45)",
+        font={"color": "#e7effb", "size": 18}, legend={"orientation": "h", "y": 1.12, "font": {"size": 18}},
+        yaxis={"range": [min(baseline + final) - .003, max(baseline + final) + .008], "gridcolor": "rgba(255,255,255,.09)", "tickformat": ".3f", "tickfont": {"size": 17}},
+        xaxis={"gridcolor": "rgba(255,255,255,0)", "tickfont": {"size": 20, "color": "#f2f6fc"}},
+        hoverlabel={"font": {"size": 16}, "bgcolor": "#111d35"},
     )
     return fig
 
 
-def node_detail(node: ExperimentNode, baseline: float | None) -> None:
-    st.markdown(f"### {node.label}")
-    status_icon = {"succeeded": "🟢 Succeeded", "failed": "🔴 Failed", "pending": "⚪ Pending", "running": "🔵 Running"}[node.status]
-    st.caption(f"{status_icon} · {STAGE_META[node.stage]['label']} · node {node.index}")
-    cols = st.columns(3)
-    cols[0].metric("GAUC", fmt_metric(node.gauc))
-    cols[1].metric("nDCG@5", fmt_metric(node.ndcg))
-    cols[2].metric("Primary", fmt_metric(node.primary), relative_delta(node.primary, baseline))
-    st.markdown("#### Research hypothesis")
-    st.write(node.plan or "No research hypothesis was persisted for this node.")
-    st.markdown("#### Modification")
-    modification = node.hyperparam_name or node.ablation_name or node.label
-    st.code(modification, language="text")
-    st.markdown("#### Agent conclusion")
-    st.write(node.analysis or node.error_info or "The agent has not yet written a conclusion.")
-    artifacts = artifact_files(node)
-    st.markdown("#### Artifacts")
-    code = node.code or (artifacts["solution"].read_text(encoding="utf-8", errors="replace") if artifacts["solution"] else "")
-    with st.expander("View generated code", expanded=False):
-        st.code(code or "No code snapshot was available.", language="python")
-        if code:
-            st.download_button("Download generated code", code, file_name=f"byterush_node_{node.index}.py", mime="text/x-python")
-    with st.expander("View execution log", expanded=False):
-        st.code(node.terminal_output or node.error_info or "No terminal output was persisted.", language="text")
-        if node.terminal_output:
-            st.download_button("Download execution log", node.terminal_output, file_name=f"byterush_node_{node.index}.log", mime="text/plain")
-    if artifacts["config"]:
-        config_text = artifacts["config"].read_text(encoding="utf-8", errors="replace")
-        with st.expander("View configuration", expanded=False):
-            st.code(config_text, language="yaml")
-            st.download_button("Download configuration", config_text, file_name="config.yaml", mime="text/yaml")
-    if artifacts["checkpoint"]:
-        st.download_button("Download checkpoint", artifacts["checkpoint"].read_bytes(), file_name=artifacts["checkpoint"].name, mime="application/octet-stream")
-    if node.index != 0:
-        st.caption("Parent experiment: use the connecting edge in the search tree to inspect the source node.")
-
-
-def evolution_chart(ledger: list[dict], baseline: float | None) -> go.Figure:
-    rows = ledger[-30:]
+def seed_figure(payload: dict[str, Any]) -> go.Figure:
+    metrics = payload["winner"]["metrics"]
     fig = go.Figure()
-    series = (("primary", "Primary", "#60a5fa"), ("gauc", "GAUC", "#34d399"), ("ndcg", "nDCG@5", "#c084fc"))
-    for key, label, color in series:
-        filtered = [(index + 1, row) for index, row in enumerate(rows) if row.get(key) is not None]
-        fig.add_trace(go.Scatter(x=[item[0] for item in filtered], y=[item[1][key] for item in filtered], mode="lines+markers", name=label, line={"color": color, "width": 2}, marker={"size": 7}, text=[item[1]["label"] for item in filtered], hovertemplate="<b>%{fullData.name}</b><br>%{text}<br>%{y:.4f}<extra></extra>"))
-    if baseline is not None:
-        fig.add_hline(y=baseline, line_dash="dash", line_color="#fbbf24", annotation_text=f"Baseline {baseline:.4f}", annotation_font_color="#fbbf24")
-    fig.update_layout(height=410, margin={"l": 10, "r": 10, "t": 35, "b": 10}, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(15,23,42,.35)", xaxis_title="Experiment sequence", yaxis_title="Validation score", hovermode="x unified", legend={"orientation": "h", "y": 1.12, "x": 0}, xaxis={"gridcolor": "rgba(148,163,184,.12)"}, yaxis={"gridcolor": "rgba(148,163,184,.12)"})
+    palette = {"GAUC": "#57d7ef", "nDCG@5": "#ae94f4", "primary": "#86e7c1"}
+    for name in ("GAUC", "nDCG@5", "primary"):
+        values = metrics[name]["values"]
+        fig.add_trace(go.Scatter(
+            x=list(range(1, len(values) + 1)), y=values, mode="lines+markers", name="Primary" if name == "primary" else name,
+            line={"color": palette[name], "width": 3}, marker={"size": 12, "line": {"color": "#f8fafc", "width": 1}},
+            hovertemplate=f"<b>{name}</b><br>Seed %{{x}} · %{{y:.6f}}<extra></extra>",
+        ))
+    fig.update_layout(
+        height=380, margin={"l": 20, "r": 20, "t": 35, "b": 35}, paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(8,16,34,.45)", font={"color": "#e7effb", "size": 18},
+        xaxis={"title": {"text": "Independent verification seed", "font": {"size": 19}}, "dtick": 1, "tickfont": {"size": 17}, "gridcolor": "rgba(255,255,255,.09)"},
+        yaxis={"title": {"text": "Validation score", "font": {"size": 19}}, "tickfont": {"size": 17}, "gridcolor": "rgba(255,255,255,.09)"},
+        legend={"orientation": "h", "y": 1.12, "font": {"size": 18}}, hovermode="x unified", hoverlabel={"font": {"size": 16}},
+    )
     return fig
+
+
+def _tree_subset(payload: dict[str, Any], mode: str) -> tuple[list[dict[str, Any]], list[list[str]]]:
+    search = payload["search"]
+    all_nodes = {node["id"]: node for node in search["nodes"]}
+    if mode == "Champion path":
+        keep = set(search["champion_path"])
+    elif mode == "Curated evidence":
+        ranked = sorted(
+            (node for node in all_nodes.values() if node["status"] == "succeeded" and node["primary"] is not None),
+            key=lambda node: node["primary"], reverse=True,
+        )[:18]
+        keep = set(search["champion_path"]) | {node["id"] for node in ranked}
+        changed = True
+        while changed:
+            changed = False
+            for node_id in list(keep):
+                parent = all_nodes.get(node_id, {}).get("parent_id")
+                if parent and parent in all_nodes and parent not in keep:
+                    keep.add(parent)
+                    changed = True
+    else:
+        keep = set(all_nodes)
+    nodes = [node for node in all_nodes.values() if node["id"] in keep]
+    edges = [edge for edge in search["edges"] if edge[0] in keep and edge[1] in keep]
+    return nodes, edges
+
+
+def _tree_icon(node: dict[str, Any], mode: str) -> tuple[str, str] | None:
+    if node["is_final"]:
+        return "🏆", "Frozen winner"
+    if not node.get("parent_id"):
+        return "🧭", "FM baseline"
+    if mode == "Champion path":
+        if node["stage_number"] == 1:
+            return "🌱", "Wide & Deep root"
+        if node["stage_number"] == 2:
+            return "🎛️", "Tuned incumbent"
+        if node["stage_number"] == 3:
+            return "🧪", "Research candidate"
+    return None
+
+
+def search_tree(payload: dict[str, Any], mode: str) -> go.Figure:
+    nodes, edges = _tree_subset(payload, mode)
+    by_stage: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for node in nodes:
+        by_stage[int(node["stage_number"])].append(node)
+    position: dict[str, tuple[float, float]] = {}
+    for stage, members in by_stage.items():
+        members.sort(key=lambda node: (not node["is_champion_path"], -(node["primary"] or 0), node["id"]))
+        for index, node in enumerate(members):
+            position[node["id"]] = (stage, (index + 1) / (len(members) + 1))
+    lookup = {node["id"]: node for node in nodes}
+    fig = go.Figure()
+    for parent, child in edges:
+        if parent not in position or child not in position:
+            continue
+        x0, y0 = position[parent]
+        x1, y1 = position[child]
+        highlighted = lookup[parent]["is_champion_path"] and lookup[child]["is_champion_path"]
+        fig.add_trace(go.Scatter(
+            x=[x0, x1], y=[y0, y1], mode="lines", hoverinfo="skip", showlegend=False,
+            line={"color": "rgba(134,231,193,.86)" if highlighted else "rgba(148,163,184,.25)", "width": 4 if highlighted else 1.6},
+        ))
+    for stage in sorted(by_stage):
+        members = by_stage[stage]
+        fig.add_trace(go.Scatter(
+            x=[position[node["id"]][0] for node in members], y=[position[node["id"]][1] for node in members], mode="markers",
+            name=f"Stage {stage}", customdata=[[node["label"], node["primary"], node["gauc"], node["ndcg"], node["status"], node["id"][:8]] for node in members],
+            marker={
+                "size": [38 if node["is_final"] else 31 if node["is_champion_path"] else 17 for node in members],
+                "color": ["#ffbd4a" if node["is_final"] else STAGE_COLORS.get(stage, "#94a3b8") for node in members],
+                "symbol": ["diamond" if node["is_final"] else "x" if node["status"] == "failed" else "circle" for node in members],
+                "line": {"color": "#f8fafc", "width": [4 if node["is_final"] else 2 for node in members]},
+                "opacity": [.34 if node["status"] == "failed" else 1 for node in members],
+            },
+            hovertemplate="<b>%{customdata[0]}</b><br>Primary <b>%{customdata[1]:.6f}</b><br>GAUC %{customdata[2]:.6f}<br>nDCG@5 %{customdata[3]:.6f}<br>%{customdata[4]} · %{customdata[5]}<extra></extra>",
+        ))
+    icons = [(node, _tree_icon(node, mode)) for node in nodes]
+    icons = [(node, icon) for node, icon in icons if icon is not None and (mode == "Champion path" or node["is_final"] or not node.get("parent_id"))]
+    if icons:
+        fig.add_trace(go.Scatter(
+            x=[position[node["id"]][0] for node, _ in icons], y=[position[node["id"]][1] for node, _ in icons],
+            mode="text", text=[icon[0] for _, icon in icons], textfont={"size": 17}, hoverinfo="skip", showlegend=False,
+        ))
+        for node, icon in icons:
+            x, y = position[node["id"]]
+            fig.add_annotation(
+                x=x, y=min(y + .105, .97), text=f"<b>{icon[1]}</b><br><span style='color:#a9b8cf'>{_metric(node['primary'])}</span>",
+                showarrow=False, bgcolor="rgba(7,16,31,.86)", bordercolor=STAGE_COLORS.get(node["stage_number"], "#ffbd4a"),
+                borderwidth=1, borderpad=5, font={"size": 14, "color": "#f7fbff"},
+            )
+    fig.update_layout(
+        height=360, margin={"l": 15, "r": 15, "t": 42, "b": 35}, paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(8,16,34,.48)", font={"color": "#e7effb", "size": 18},
+        xaxis={"tickmode": "array", "tickvals": [1, 2, 3, 4], "ticktext": ["Diverse roots", "Tuning", "Research", "Verification"], "range": [.72, 4.28], "gridcolor": "rgba(255,255,255,.08)", "tickfont": {"size": 19, "color": "#dce8f9"}},
+        yaxis={"visible": False, "range": [0, 1.06]}, legend={"orientation": "h", "y": 1.12, "font": {"color": "#e7effb", "size": 17}},
+        hoverlabel={"font": {"size": 16}, "bgcolor": "#111d35"}, transition={"duration": 650, "easing": "cubic-in-out"}, uirevision="byterush-search-tree",
+    )
+    return fig
+
+
+def stage_cards(payload: dict[str, Any]) -> None:
+    descriptions = {
+        "baseline": "Verify the FM reference, then open diverse MLP, Wide & Deep, and DCN research roots.",
+        "tuning": "Allocate controlled trials to promising roots and promote the strongest validated candidate.",
+        "creative": "Challenge the incumbent with new objectives, features, and cross-parent transfers.",
+        "ablation": "Repeat independent seeds, test stability, then freeze the model and submission artifacts.",
+    }
+    cards = []
+    for index, stage in enumerate(payload["search"]["stages"], 1):
+        accent = STAGE_COLORS.get(index, "#94a3b8")
+        cards.append(
+            f"<div class='stage-card' style='--accent:{accent}'><div class='num'>{_safe(stage['eyebrow'])}</div>"
+            f"<h3>{_safe(stage['title'])}</h3><div class='big'>{stage['succeeded']}<span style='font-size:1rem;color:#91a3bb'> / {stage['total']} succeeded</span></div>"
+            f"<div class='small'>{_safe(descriptions.get(stage['key'], ''))}</div></div>"
+        )
+    st.markdown("<div class='stage-grid'>" + "".join(cards) + "</div>", unsafe_allow_html=True)
+
+
+def selection_story(payload: dict[str, Any]) -> None:
+    search, winner = payload["search"], payload["winner"]
+    lookup = {node["id"]: node for node in search["nodes"]}
+    path = [lookup[node_id] for node_id in search["champion_path"] if node_id in lookup]
+    baseline = path[0]
+    diverse = next((node for node in path[1:] if node["stage_number"] == 1), path[1])
+    tuned = next((node for node in path if node["stage_number"] == 2), diverse)
+    final = path[-1]
+    creative = next(stage for stage in search["stages"] if stage["key"] == "creative")
+    steps = [
+        ("🧭", "Stage 1A", "Lock the reference", baseline["primary"], "Run the organizer-aligned FM pipeline to create the protected comparison point.", 1),
+        ("🌱", "Stage 1B", "Open diverse roots", diverse["primary"], "Compare FM, MLP, Wide & Deep, and DCN. Wide & Deep becomes the strongest root.", 1),
+        ("🎛️", "Stage 2", "Promote after tuning", tuned["primary"], "Controlled hyperparameter trials improve the Wide & Deep root and make it the incumbent.", 2),
+        ("🧪", "Stage 3", "Challenge the incumbent", None, f"{creative['succeeded']} of {creative['total']} creative trials succeed, but none beats the promotion gate.", 3),
+        ("🏆", "Stage 4", "Verify and freeze", final["primary"], f"{payload['selection']['successful_seed_count']} independent seeds confirm stability; model and submission are frozen.", 4),
+    ]
+    cards = []
+    for icon, stage, title, score, why, number in steps:
+        score_text = _metric(score) if score is not None else "Incumbent held"
+        cards.append(
+            f"<div class='selection-step' style='--accent:{STAGE_COLORS[number]}'><div class='icon'>{icon}</div><div class='stage'>{stage}</div>"
+            f"<h3>{_safe(title)}</h3><div class='score'>{_safe(score_text)}</div><div class='why'>{_safe(why)}</div></div>"
+        )
+    st.markdown(
+        "<div class='selection-track'>" + "".join(cards) + "</div>"
+        f"<div class='selection-verdict'><b>Selection verdict:</b> {_safe(winner['label'])} wins because it delivers the highest promoted validation result, survives Stage 3 challenges, and remains stable across multi-seed verification—not because of a single lucky score.</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def evidence_table(payload: dict[str, Any]) -> None:
+    rows = [{
+        "Stage": f"Stage {node['stage_number']}", "Candidate": node["label"], "Primary": node["primary"],
+        "GAUC": node["gauc"], "nDCG@5": node["ndcg"], "Champion": "Yes" if node["is_champion_path"] else "No",
+    } for node in payload["search"]["top_candidates"][:6]]
+    st.dataframe(rows, width="stretch", hide_index=True, height=255, column_config={
+        "Primary": st.column_config.NumberColumn(format="%.6f"), "GAUC": st.column_config.NumberColumn(format="%.6f"),
+        "nDCG@5": st.column_config.NumberColumn(format="%.6f"),
+    })
 
 
 def main() -> None:
     inject_css()
-    if st_autorefresh:
-        st_autorefresh(interval=60_000, key="byterush-artifact-watch")
-    root = _root()
-    history_baseline, ledger, runs = load_dashboard(str(root))
-    run_ids = [record["run_id"] for record in runs]
-    selected_run_id = st.selectbox(
-        "Dashboard run",
-        run_ids,
-        format_func=lambda run_id: next(
-            f"{run_id} · {len(record['stage_keys'])}/4 stages · Primary {fmt_metric(record['primary'])}"
-            for record in runs if record["run_id"] == run_id
-        ),
-        help="Every card, tree node, detail drawer, and headline below is scoped to this one atomic AgentManager snapshot.",
-    ) if run_ids else None
-    selected_run = next((record for record in runs if record["run_id"] == selected_run_id), {})
-    baseline = selected_run.get("baseline_primary") if selected_run else history_baseline
-    trees = load_selected_trees(str(root), selected_run_id)
-    top_best = best_node(trees)
-    # All four headline numbers must come from the selected run's winning node.
-    best_primary = selected_run.get("primary") or (top_best.primary if top_best else None)
-    best_gauc = selected_run.get("gauc") or (top_best.gauc if top_best else None)
-    best_ndcg = selected_run.get("ndcg") or (top_best.ndcg if top_best else None)
-    st.markdown("<div class='hero'><h1>⚡ ByteRush Research Console</h1><p>Autonomous ML research for KuaiRand recommendation — hypotheses, code, validation evidence, and reproducible artifacts in one view.</p></div>", unsafe_allow_html=True)
-    if not (root / "experiments").exists() and not ledger:
-        st.error(f"No experiment artifacts found under {root}. Set BYTERUSH_DATA_ROOT to the ByteRush repository on AutoDL.")
+    try:
+        payload = _load(str(_manifest_path()))
+    except ShowcaseBuildError as exc:
+        st.error(str(exc))
+        st.code(
+            "python dashboard/build_showcase.py --data-root /root/autodl-tmp/ByteRush\n"
+            "python -m streamlit run dashboard/app.py --server.address 127.0.0.1 --server.port 18501 --server.fileWatcherType none",
+            language="bash",
+        )
         return
-    metrics = st.columns(4)
-    metrics[0].metric("Best Primary", fmt_metric(best_primary), relative_delta(best_primary, baseline))
-    metrics[1].metric("Best GAUC", fmt_metric(best_gauc))
-    metrics[2].metric("Best nDCG@5", fmt_metric(best_ndcg))
-    metrics[3].metric("Relative baseline lift", relative_delta(best_primary, baseline), f"baseline {fmt_metric(baseline)}")
-    st.markdown("### Four-stage research loop")
-    stage_columns = st.columns(4)
-    for column, stage in zip(stage_columns, STAGE_META):
-        with column:
-            stage_card(stage, trees.get(stage), baseline)
-    st.markdown("### Experiment search tree")
-    available_stages = [stage for stage in ("baseline", "tuning", "creative", "ablation") if stage in trees]
-    if not available_stages:
-        st.info("The AgentManager has not written a tree snapshot yet. The dashboard will populate automatically after the first saved step.")
-    else:
-        stage = st.selectbox("Tree stage", available_stages, format_func=lambda value: STAGE_META[value]["label"], index=len(available_stages) - 1)
-        tree = trees[stage]
-        left, right = st.columns([1.58, 1])
+
+    navigation()
+    story = payload.get("story") or {}
+
+    with st.container(key="slide-01-hero"):
+        hero(payload)
+        slide_index("01", "Opening")
+
+    with st.container(key="slide-02-impact"):
+        section_head("impact", "Measured impact", "The gain that matters.", "All three values come from the same five-seed frozen model under the protected validation protocol. Larger text and explicit deltas make the improvement immediately readable.")
+        left, right = st.columns([1.55, .85], vertical_alignment="center")
         with left:
-            st.caption("Green = succeeded · red = failed · gray = not executed · blue ring = in progress · ★ = current stage best. Node size follows Primary.")
-            selected_uid = st.session_state.get("selected_node")
-            fig = make_tree_figure(tree, selected_uid)
-            try:
-                event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", key=f"tree-{stage}")
-                if event and event.selection.points:
-                    st.session_state.selected_node = event.selection.points[-1]["customdata"][0]
-            except TypeError:
-                st.plotly_chart(fig, use_container_width=True, key=f"tree-{stage}")
-            labels = {node.uid: f"{node.label} · {fmt_metric(node.primary)}" for node in tree.nodes}
-            chosen_uid = st.selectbox("Select experiment details", list(labels), format_func=lambda uid: labels[uid], key=f"node-picker-{stage}")
-            if chosen_uid:
-                st.session_state.selected_node = chosen_uid
+            st.plotly_chart(metric_comparison(payload), width="stretch", key="metric-comparison", config={"displaylogo": False})
+            st.markdown("<div class='axis-note'>Focused y-axis reveals small but meaningful ranking improvements; exact values are printed above every bar.</div>", unsafe_allow_html=True)
         with right:
-            selected_uid = st.session_state.get("selected_node")
-            selected = next((node for node in tree.nodes if node.uid == selected_uid), tree.nodes[0] if tree.nodes else None)
-            if selected:
-                node_detail(selected, baseline)
-    st.markdown("### Metric evolution")
-    st.caption("Each point is the best validation result recorded for a completed run. The dotted line is the protected FM baseline.")
-    st.plotly_chart(evolution_chart(ledger, baseline), use_container_width=True)
-    st.markdown("### Integrity & runtime evidence")
-    integrity = st.columns(4)
-    integrity[0].success("Validation-only selection")
-    integrity[1].success("Protected evaluator retained")
-    integrity[2].success("Artifacts checkpointed")
-    integrity[3].info(f"{len(ledger)} recorded runs")
-    st.caption(f"Data root: {root} · AgentManager writes an atomic dashboard snapshot after every experiment step; the page refreshes it every 60 seconds.")
+            st.markdown(
+                f"<div class='impact-copy'><h3>Why this is credible</h3><p>{_safe(story.get('problem'))}</p><p>{_safe(story.get('solution'))}</p>"
+                f"<div class='baseline-chip'>FM Primary {_metric(payload['winner']['baseline']['primary'])} → {_metric(payload['winner']['final']['primary'])}</div></div>",
+                unsafe_allow_html=True,
+            )
+        slide_index("02", "Results")
+
+    with st.container(key="slide-03-agent"):
+        section_head("agent", "Autonomous research loop", "Four stages. One evidence trail.", "The Agent broadens the search space, concentrates budget on promising roots, challenges the incumbent, and only freezes a model after stability verification.")
+        stage_cards(payload)
+        slide_index("03", "Agent loop")
+
+    with st.container(key="slide-04-search"):
+        section_head("search", "Search provenance", "Watch the evidence expand.", "Switch between the exact champion ancestry, the strongest supporting candidates, and the full search. Colored icons mark the meaningful start, promotion, and frozen end states.")
+        mode = st.segmented_control("Tree detail", ["Champion path", "Curated evidence", "Full search"], default="Champion path", label_visibility="collapsed") or "Champion path"
+        tree_key = mode.lower().replace(" ", "-")
+        with st.container(key=f"tree-frame-{tree_key}"):
+            st.plotly_chart(search_tree(payload, mode), width="stretch", key="search-tree-canvas", config={"displaylogo": False, "scrollZoom": False})
+        stats = payload["search"]
+        st.markdown(
+            f"<div class='search-stat-row'><div class='search-stat'><b>{stats['total_nodes']}</b><span>generated nodes</span></div>"
+            f"<div class='search-stat'><b>{stats['successful_nodes']}</b><span>successful experiments</span></div>"
+            f"<div class='search-stat'><b>{stats['failed_nodes']}</b><span>failed safely</span></div>"
+            f"<div class='search-stat'><b>{stats['research_rounds']}</b><span>research rounds</span></div></div>",
+            unsafe_allow_html=True,
+        )
+        slide_index("04", "Search tree")
+
+    with st.container(key="slide-05-selection"):
+        section_head("selection", "Champion decision", f"How the Agent selected {payload['winner']['label']}.", "This is the actual promotion logic: establish FM, compare model families, tune the best root, test creative challengers, then require multi-seed confirmation before freezing.")
+        selection_story(payload)
+        slide_index("05", "Selection logic")
+
+    with st.container(key="slide-06-stability"):
+        section_head("stability", "Final verification", "Stable across independent seeds.", "The champion was not frozen after one lucky run. Stage 4 repeated training and compared GAUC, nDCG@5, and Primary together.")
+        st.plotly_chart(seed_figure(payload), width="stretch", key="seed-stability", config={"displaylogo": False})
+        stability = st.columns(3)
+        for column, name in zip(stability, ("GAUC", "nDCG@5", "primary")):
+            metric = payload["winner"]["metrics"][name]
+            column.metric("Primary" if name == "primary" else name, _metric(metric["mean"]), f"σ {_metric(metric['std'])}")
+        slide_index("06", "Verification")
+
+    with st.container(key="slide-07-evidence"):
+        section_head("evidence", "Audit trail", "A result the judges can inspect.", "The narrative stays concise, while every score remains traceable to a run, source node, frozen model, checkpoint, and submission hash.")
+        integrity = payload["integrity"]
+        st.markdown(
+            f"<div class='proof-grid'><div class='proof'><b>Validation-only</b><span>No test metric entered model selection.</span></div>"
+            f"<div class='proof'><b>{integrity['successful_seed_count']} verified seeds</b><span>Stability checked before freezing.</span></div>"
+            f"<div class='proof'><b>{integrity['submission_rows']:,} predictions</b><span>Submission ready; hidden labels untouched.</span></div>"
+            f"<div class='proof'><b>SHA-256 evidence</b><span>Model, checkpoint, and CSV are fingerprinted.</span></div></div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown("### Leading validated candidates")
+        evidence_table(payload)
+        with st.expander("Reproducibility paths and hashes"):
+            st.json({"run": payload["selection"], "files": payload["files"], "integrity": payload["integrity"]}, expanded=True)
+        st.markdown(
+            f"<div class='footer'>Frozen showcase · run {_safe(payload['selection']['run_id'])} · source node {_safe(payload['selection']['source_node_id'][:12])} · validation-only metrics</div>",
+            unsafe_allow_html=True,
+        )
+        slide_index("07", "Evidence")
 
 
 if __name__ == "__main__":
