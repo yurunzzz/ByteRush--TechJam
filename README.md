@@ -325,6 +325,22 @@ The required submission schema is:
 row_id,user_id,video_id,score
 ```
 
+### 3.6 Launch the dashboard visualization
+
+From the repository root, install the dashboard dependencies and start the Streamlit app:
+
+```bash
+python -m pip install -r dashboard/requirements.txt
+python -m streamlit run dashboard/app.py \
+  --server.address 127.0.0.1 \
+  --server.port 8501 \
+  --server.fileWatcherType none
+```
+
+Open <http://127.0.0.1:8501> in a browser. Press `Ctrl+C` in the terminal to stop the dashboard.
+
+The dashboard presents our best model, metric improvements, Agent workflow, search process, and final verification results.
+
 ## 4. A brief reflection on your solution's limitations and what you would improve given more time
 
 The current system has completed the full workflow from the smoke test and Stage 1/1B/2 through the adaptive Stage 3/4 loop, final-model freezing, and submission validation. However, it still has several limitations.
