@@ -13,7 +13,7 @@ from rich.logging import RichHandler
 import logging
 
 from . import tree_export
-from . import copytree, preproc_data, serialize
+from . import code_diff, copytree, preproc_data, serialize
 
 shutup.mute_warnings()
 logging.basicConfig(
@@ -304,6 +304,19 @@ def save_run(cfg: Config, journal, stage_name: str = None):
     except Exception as e:
         print(f"Error saving journal: {e}")
         raise
+
+    # Add explicit code diffs without changing the backward-compatible journal.
+    # Logging failures must never invalidate an otherwise successful experiment.
+    try:
+        journal_path = save_dir / "journal.json"
+        stage_diff_path = code_diff.write_stage_sidecar(journal_path)
+        run_root = code_diff.find_experiment_root(cfg.log_dir)
+        if run_root is not None:
+            code_diff.write_run_logs(run_root)
+        logger.info("Saved explicit code diffs to %s", stage_diff_path)
+    except Exception as e:
+        logger.warning("Could not generate explicit code-diff log: %s", e)
+
     # save config
     try:
         OmegaConf.save(config=cfg, f=save_dir / "config.yaml")
