@@ -1,5 +1,5 @@
 {
-  "dataset_name": "KuaiRand-1K",
+  "dataset_name": "KuaiRand-27K",
   "storage": "cache_npz",
   "selection_splits": ["train", "valid"],
   "test_visible_to_agent": false,

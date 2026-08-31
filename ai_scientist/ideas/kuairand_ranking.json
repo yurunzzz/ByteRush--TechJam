@@ -1,10 +1,10 @@
 [
   {
-    "Name": "kuairand_1k_validation_research",
-    "Title": "Autonomous Improvement of Long-View Ranking on KuaiRand-1K",
+    "Name": "kuairand_27k_validation_research",
+    "Title": "Autonomous Improvement of Long-View Ranking on KuaiRand-27K",
     "Short Hypothesis": "A validation-only autonomous experiment loop can reliably reproduce the organizer FM baseline before attempting controlled ranking improvements.",
     "Related Work": "Factorization Machines provide the organizer baseline. AI Scientist-v2 provides staged experiment management and tree search. The initial deployment focuses on a trustworthy connection between them.",
-    "Abstract": "Build an autonomous research workflow on the trusted KuaiRand-1K cache. The first stage must reproduce a Factorization Machine baseline using long_view as the relevance label and validation primary=(GAUC+nDCG@5)/2 as the only node-selection score. Candidate code receives deterministic train/validation samples with user_id, video_id, and history_end only; no test data, prior-run artifact, external training dataset, or submission feedback is exposed. Later stages may tune the fixed FM and autonomously explore controlled ranking improvements after the baseline connection is verified.",
+    "Abstract": "Build an autonomous research workflow on the trusted KuaiRand-27K cache. The first stage must reproduce a Factorization Machine baseline using long_view as the relevance label and validation primary=(GAUC+nDCG@5)/2 as the only node-selection score. Candidate code receives deterministic train/validation samples with user_id, video_id, and history_end only; no test data, prior-run artifact, external training dataset, or submission feedback is exposed. Later stages may tune the fixed FM and autonomously explore controlled ranking improvements after the baseline connection is verified.",
     "Experiments": [
       "Execute the supplied editable CandidateModel program directly as the Stage 1 baseline; do not replace it with or invoke the legacy run_fm_experiment.py CLI.",
       "Verify finite predictions, the official validation GAUC and nDCG@5, primary computation, early stopping, checkpoint creation, and protected-file hashes.",

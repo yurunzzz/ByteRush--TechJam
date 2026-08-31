@@ -18,7 +18,7 @@ import torch
 from torch import nn
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-DATASET_NAME = os.getenv("KUAIRAND_DATASET_NAME", "KuaiRand-1K")
+DATASET_NAME = os.getenv("KUAIRAND_DATASET_NAME", "KuaiRand-27K")
 print(f"Using device: {DEVICE}", flush=True)
 
 execution_dir = Path.cwd()
