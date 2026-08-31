@@ -120,6 +120,16 @@ class ResearchLoopStateTests(unittest.TestCase):
         self.assertEqual(merged.candidate_tuning_top_k, 2)
         self.assertEqual(merged.initial_candidate_roles[-1], "incumbent_extension")
 
+    def test_strict_config_schema_accepts_multi_root_stage2(self):
+        schema = OmegaConf.structured(ResearchLoopSettings)
+        merged = OmegaConf.merge(
+            schema,
+            {"stage2_root_top_k": 4, "max_component_regression": 0.001},
+        )
+
+        self.assertEqual(merged.stage2_root_top_k, 4)
+        self.assertAlmostEqual(merged.max_component_regression, 0.001)
+
     def test_default_patience_matches_official_convergence_rule(self):
         self.assertEqual(ResearchLoopConfig().patience, 2)
 
@@ -188,6 +198,37 @@ class ResearchLoopStateTests(unittest.TestCase):
         self.assertTrue(first.promoted)
         self.assertFalse(second.promoted)
         self.assertIn("duplicate", second.reason)
+
+    def test_pre_round_standardized_candidate_uses_component_metric_gate(self):
+        state = ResearchLoopState(
+            policy=PromotionPolicy(
+                min_improvement=0.002,
+                required_seeds=2,
+                required_seed_wins=1,
+                max_component_regression=0.001,
+            )
+        )
+        state.set_incumbent(
+            "fm",
+            0.600,
+            [0.600, 0.600],
+            metrics={"GAUC": 0.670, "nDCG@5": 0.530, "primary": 0.600},
+        )
+
+        decision = state.evaluate_candidate(
+            node_id="wide-deep",
+            fingerprint=candidate_fingerprint("wide-deep-standardized"),
+            score=0.603,
+            seed_scores=[0.603, 0.603],
+            metrics={"GAUC": 0.668, "nDCG@5": 0.538, "primary": 0.603},
+            source_stage="2_multi_root_tuning_2_wide_deep",
+            source_phase="stage1b_standardized_stage2",
+            round_number=0,
+        )
+
+        self.assertFalse(decision.promoted)
+        self.assertIn("GAUC", decision.reason)
+        self.assertEqual(state.memory.records[-1].source_phase, "stage1b_standardized_stage2")
 
     def test_round_keeps_only_the_best_promoted_candidate(self):
         state = ResearchLoopState()

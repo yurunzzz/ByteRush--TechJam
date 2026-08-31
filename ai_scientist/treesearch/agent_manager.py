@@ -157,13 +157,13 @@ class AgentManager:
                 - Preserve data.py, evaluate.py, the chronological split, row order, and submission schema
                 - If you are given \"Code To Use\", use it as the required starting point.""",
             2: """
-                - Tune only the fixed FM baseline on the fixed KuaiRand-Pure train/validation split
+                - Tune the assigned fixed Stage 1 root on the fixed KuaiRand-Pure train/validation split; the controller applies the same budget to FM and each selected Stage 1B model family
                 - Change controlled hyperparameters such as learning rate, L2, epochs, batch size, patience, initialization, optimizer, and seed
                 - Test exactly one complete hyperparameter configuration in each experimental node; do not run a grid, sweep, or multiple configurations inside one node
                 - Train each new configuration for at most 12 epochs, including any early-stopping epochs
                 - After one configuration finishes successfully and emits finite validation metrics, let the next node test the next single configuration
                 - A failed or timed-out configuration may be debugged within the bounded debug depth, but its retry must still contain only that one configuration
-                - DO NOT change the model architecture from the previous stage
+                - DO NOT change the assigned root architecture inside a tuning branch; architecture families compete only after identical tuning and multi-seed validation
                 - Use no external training dataset, Hugging Face dataset, or test-derived signal
                 - Select configurations only by validation primary and record GAUC and nDCG@5 separately.""",
             3: """

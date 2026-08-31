@@ -77,6 +77,8 @@ class ResearchLoopSettings:
     frontier_max_size: int = 8
     baseline_tuning_iterations: int = 24
     stage2_num_seeds: int = 3
+    stage2_root_top_k: int = 4
+    max_component_regression: float = 0.001
     candidate_branches: int = 8
     stage3_incumbent_parent_slots: int = 2
     stage3_frontier_parent_slots: int = 2

@@ -42,12 +42,12 @@ agent:
     num_seeds: 3
   research_loop:
     enabled: true
-    max_research_rounds: 2
-    patience: 2
+    max_research_rounds: 4
+    patience: 4
     stage1_validation_iterations: 2
-    # Stage 1A remains the official FM baseline. Stage 1B creates cheap,
-    # schema-v2-compatible non-FM roots; they enter the frontier even when
-    # they do not beat FM in this short bootstrap run.
+    # Stage 1A remains the official FM control. Stage 1B creates cheap,
+    # schema-v2-compatible non-FM roots. Stage 2 tunes the FM control and the
+    # strongest root from each family under the same validation/seed protocol.
     stage1b_enabled: true
     stage1b_model_families:
       - mlp
@@ -58,6 +58,10 @@ agent:
     frontier_max_size: 8
     baseline_tuning_iterations: 2
     stage2_num_seeds: 2
+    # FM plus at most one validation-best root from each configured family.
+    stage2_root_top_k: 4
+    # A primary winner may not sacrifice either component by more than this.
+    max_component_regression: 0.001
     # Match the proven dbcab71 run while retaining evidence-guided selection.
     candidate_branches: 5
     # Two champion branches, two validation-successful frontier branches, and

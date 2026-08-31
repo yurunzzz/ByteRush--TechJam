@@ -176,6 +176,7 @@ class PromotionPolicy:
     required_seeds: int = 3
     required_seed_wins: int = 2
     maximize: bool = True
+    max_component_regression: float = 0.001
 
     def evaluate(
         self,
@@ -184,7 +185,20 @@ class PromotionPolicy:
         incumbent_score: float,
         candidate_seed_scores: Sequence[float],
         incumbent_seed_scores: Optional[Sequence[float]] = None,
+        candidate_metrics: Optional[Mapping[str, Optional[float]]] = None,
+        incumbent_metrics: Optional[Mapping[str, Optional[float]]] = None,
+        artifacts_valid: bool = True,
     ) -> PromotionDecision:
+        if not artifacts_valid:
+            return PromotionDecision(
+                False,
+                candidate_score,
+                incumbent_score,
+                0.0,
+                0,
+                self.required_seed_wins,
+                "candidate artifacts are incomplete or cannot be loaded",
+            )
         valid_candidate_seeds = [
             score for score in candidate_seed_scores if math.isfinite(score)
         ]
@@ -216,9 +230,22 @@ class PromotionPolicy:
                 for candidate in valid_candidate_seeds
             )
 
+        component_regressions = []
+        clean_candidate_metrics = validation_metrics_only(candidate_metrics)
+        clean_incumbent_metrics = validation_metrics_only(incumbent_metrics)
+        for metric_name in ("GAUC", "nDCG@5"):
+            candidate_value = clean_candidate_metrics.get(metric_name)
+            incumbent_value = clean_incumbent_metrics.get(metric_name)
+            if candidate_value is None or incumbent_value is None:
+                continue
+            delta = direction * (float(candidate_value) - float(incumbent_value))
+            if delta < -abs(float(self.max_component_regression)):
+                component_regressions.append((metric_name, delta))
+
         promoted = (
             improvement >= self.min_improvement
             and seed_wins >= self.required_seed_wins
+            and not component_regressions
         )
         if promoted:
             reason = (
@@ -229,6 +256,14 @@ class PromotionPolicy:
             reason = (
                 f"mean improvement {improvement:.6f} is below "
                 f"{self.min_improvement:.6f}"
+            )
+        elif component_regressions:
+            details = ", ".join(
+                f"{name}={delta:+.6f}" for name, delta in component_regressions
+            )
+            reason = (
+                "component metric regression exceeds tolerance "
+                f"{self.max_component_regression:.6f}: {details}"
             )
         else:
             reason = (
@@ -278,6 +313,17 @@ class ExperimentRecord:
     loss_family: str = ""
     parent_node_id: str = ""
     parent_model_family: str = ""
+    source_stage: str = ""
+    source_phase: str = "stage3"
+    status: str = "evaluated"
+    code_path: str = ""
+    checkpoint_path: str = ""
+    validation_split: str = "fixed_train_validation"
+    random_seeds: list[int] = field(default_factory=list)
+    training_epochs: Optional[int] = None
+    artifacts_valid: bool = True
+    eligible_for_promotion: bool = False
+    provisional: bool = False
 
 
 @dataclass
@@ -331,8 +377,20 @@ class ExperimentMemory:
 
     def record(self, record: ExperimentRecord) -> None:
         self.records.append(record)
-        if not record.promoted:
+        if not record.promoted and record.status not in {
+            "bootstrap_pending_standardization",
+            "reference_control",
+        }:
             self.failed_hypotheses.append(record.reason)
+
+    def mark_verified_incumbent(self, node_id: str) -> None:
+        for record in reversed(self.records):
+            if record.node_id != node_id:
+                continue
+            record.provisional = False
+            record.status = "verified_incumbent"
+            record.eligible_for_promotion = True
+            return
 
     def add_frontier(self, record: FrontierRecord, *, limit: int = 8) -> None:
         """Keep strong validation-successful nodes without collapsing diversity."""
@@ -663,6 +721,8 @@ class ResearchLoopConfig:
     frontier_max_size: int = 8
     baseline_tuning_iterations: int = 24
     stage2_num_seeds: int = 3
+    stage2_root_top_k: int = 4
+    max_component_regression: float = 0.001
     candidate_branches: int = 8
     stage3_incumbent_parent_slots: int = 2
     stage3_frontier_parent_slots: int = 2
@@ -707,7 +767,16 @@ def estimate_max_experiment_runs(
     stage4_max_components: int,
 ) -> dict[str, int]:
     """Return the explicit worst-case execution budget for one full run."""
-    stage2_seed_runs = config.finalist_top_k * config.stage2_num_seeds
+    stage2_root_count = 1
+    if config.stage1b_enabled:
+        stage2_root_count += min(
+            max(0, config.stage2_root_top_k - 1),
+            len(config.stage1b_model_families),
+        )
+    stage2_seed_runs = (
+        stage2_root_count * config.finalist_top_k * config.stage2_num_seeds
+    )
+    stage2_tuning_runs = stage2_root_count * config.baseline_tuning_iterations
     candidate_seed_runs = config.candidate_finalist_top_k * config.finalist_num_seeds
     candidate_refinement_runs = (
         config.candidate_refinement_top_k * config.candidate_refinement_iterations
@@ -741,13 +810,13 @@ def estimate_max_experiment_runs(
     maximum_search_iterations = (
         config.stage1_validation_iterations
         + (config.stage1b_generation_attempts if config.stage1b_enabled else 0)
-        + config.baseline_tuning_iterations
+        + stage2_tuning_runs
         + config.max_research_rounds * per_round_search
     )
     total = (
         config.stage1_validation_iterations
         + (config.stage1b_generation_attempts if config.stage1b_enabled else 0)
-        + config.baseline_tuning_iterations
+        + stage2_tuning_runs
         + stage2_seed_runs
         + config.max_research_rounds * per_research_round
     )
@@ -756,7 +825,8 @@ def estimate_max_experiment_runs(
         "stage1b_diverse_roots": (
             config.stage1b_generation_attempts if config.stage1b_enabled else 0
         ),
-        "stage2_tuning": config.baseline_tuning_iterations,
+        "stage2_roots": stage2_root_count,
+        "stage2_tuning": stage2_tuning_runs,
         "stage2_seed_evaluation": stage2_seed_runs,
         "per_research_round": per_research_round,
         "final_confirmation_per_round": final_confirmation_runs,
@@ -776,6 +846,10 @@ class ResearchLoopState:
     incumbent_score: Optional[float] = None
     incumbent_seed_scores: list[float] = field(default_factory=list)
     incumbent_metrics: dict[str, Optional[float]] = field(default_factory=dict)
+    incumbent_source_stage: str = ""
+    verified_incumbent_id: Optional[str] = None
+    provisional_candidate_id: Optional[str] = None
+    provisional_candidate_score: Optional[float] = None
     pending_candidate_id: Optional[str] = None
     pending_candidate_score: Optional[float] = None
     eligible_candidate_ids: set[str] = field(default_factory=set)
@@ -788,6 +862,7 @@ class ResearchLoopState:
         score: float,
         seed_scores: Sequence[float] = (),
         metrics: Optional[Mapping[str, Optional[float]]] = None,
+        source_stage: str = "",
     ) -> None:
         self.incumbent_node_id = node_id
         self.incumbent_score = score
@@ -795,6 +870,11 @@ class ResearchLoopState:
         self.incumbent_metrics = validation_metrics_only(
             metrics, primary_fallback=score
         )
+        self.incumbent_source_stage = source_stage
+        self.verified_incumbent_id = node_id
+        if self.provisional_candidate_id == node_id:
+            self.provisional_candidate_id = None
+            self.provisional_candidate_score = None
         self.pending_candidate_id = None
         self.pending_candidate_score = None
         self.eligible_candidate_ids.clear()
@@ -835,11 +915,25 @@ class ResearchLoopState:
         loss_family: str = "",
         parent_node_id: str = "",
         parent_model_family: str = "",
+        source_stage: str = "",
+        source_phase: str = "stage3",
+        code_path: str = "",
+        checkpoint_path: str = "",
+        validation_split: str = "fixed_train_validation",
+        random_seeds: Sequence[int] = (),
+        training_epochs: Optional[int] = None,
+        artifacts_valid: bool = True,
+        round_number: Optional[int] = None,
+        policy_override: Optional[PromotionPolicy] = None,
     ) -> PromotionDecision:
-        if not self.round_open:
+        if not self.round_open and round_number is None:
             raise RuntimeError("start_round must be called before evaluating candidates")
         if self.incumbent_score is None:
             raise RuntimeError("incumbent must be established before research rounds")
+        candidate_metrics = validation_metrics_only(
+            metrics, primary_fallback=score
+        )
+        policy = policy_override or self.policy
         if not self.memory.register_candidate(fingerprint):
             decision = PromotionDecision(
                 False,
@@ -847,20 +941,19 @@ class ResearchLoopState:
                 self.incumbent_score,
                 0.0,
                 0,
-                self.policy.required_seed_wins,
+                policy.required_seed_wins,
                 "duplicate code/config/feature fingerprint",
             )
         else:
-            decision = self.policy.evaluate(
+            decision = policy.evaluate(
                 candidate_score=score,
                 incumbent_score=self.incumbent_score,
                 candidate_seed_scores=seed_scores,
                 incumbent_seed_scores=self.incumbent_seed_scores,
+                candidate_metrics=candidate_metrics,
+                incumbent_metrics=self.incumbent_metrics,
+                artifacts_valid=artifacts_valid,
             )
-
-        candidate_metrics = validation_metrics_only(
-            metrics, primary_fallback=score
-        )
         metric_deltas = {}
         for metric_name in ("GAUC", "nDCG@5", "primary"):
             candidate_value = candidate_metrics.get(metric_name)
@@ -884,7 +977,9 @@ class ResearchLoopState:
         )
         self.memory.record(
             ExperimentRecord(
-                round_number=self.current_round,
+                round_number=(
+                    self.current_round if round_number is None else int(round_number)
+                ),
                 node_id=node_id,
                 fingerprint=fingerprint,
                 score=score,
@@ -914,9 +1009,40 @@ class ResearchLoopState:
                 loss_family=loss_family,
                 parent_node_id=parent_node_id,
                 parent_model_family=parent_model_family,
+                source_stage=source_stage,
+                source_phase=source_phase,
+                status=(
+                    "provisional"
+                    if decision.promoted and source_phase != "stage3"
+                    else "promoted"
+                    if decision.promoted
+                    else "invalid_artifacts"
+                    if not artifacts_valid
+                    else "valid_not_promoted"
+                ),
+                code_path=code_path,
+                checkpoint_path=checkpoint_path,
+                validation_split=validation_split,
+                random_seeds=[int(item) for item in random_seeds],
+                training_epochs=training_epochs,
+                artifacts_valid=artifacts_valid,
+                eligible_for_promotion=decision.promoted,
+                provisional=decision.promoted and source_phase != "stage3",
             )
         )
-        if decision.promoted and (
+        if decision.promoted and not self.round_open:
+            better = (
+                self.provisional_candidate_score is None
+                or (
+                    decision.candidate_mean > self.provisional_candidate_score
+                    if policy.maximize
+                    else decision.candidate_mean < self.provisional_candidate_score
+                )
+            )
+            if better:
+                self.provisional_candidate_id = node_id
+                self.provisional_candidate_score = decision.candidate_mean
+        if decision.promoted and self.round_open and (
             self.pending_candidate_score is None
             or (
                 decision.candidate_mean > self.pending_candidate_score
@@ -926,7 +1052,7 @@ class ResearchLoopState:
         ):
             self.pending_candidate_id = node_id
             self.pending_candidate_score = decision.candidate_mean
-        if decision.promoted:
+        if decision.promoted and self.round_open:
             self.eligible_candidate_ids.add(node_id)
         return decision
 
@@ -942,7 +1068,7 @@ class ResearchLoopState:
         if not self.round_open:
             raise RuntimeError("there is no open research round")
         if node_id not in self.eligible_candidate_ids:
-            raise ValueError("only a promoted Stage 3 candidate can replace the incumbent")
+            raise ValueError("only a candidate admitted by the promotion gate can replace the incumbent")
         if self.incumbent_score is None:
             raise RuntimeError("incumbent must exist before final confirmation")
         confirmation_policy = PromotionPolicy(
@@ -952,12 +1078,15 @@ class ResearchLoopState:
                 self.config.final_confirmation_num_seeds / 2
             ),
             maximize=self.policy.maximize,
+            max_component_regression=self.policy.max_component_regression,
         )
         decision = confirmation_policy.evaluate(
             candidate_score=score,
             incumbent_score=self.incumbent_score,
             candidate_seed_scores=seed_scores,
             incumbent_seed_scores=self.incumbent_seed_scores,
+            candidate_metrics=metrics,
+            incumbent_metrics=self.incumbent_metrics,
         )
         if not decision.promoted:
             self.memory.mark_stage4_confirmation(
@@ -975,6 +1104,7 @@ class ResearchLoopState:
             score,
             seed_scores,
             metrics=metrics,
+            source_stage="stage4_final_confirmation",
         )
         self.round_improved = True
         return decision
@@ -1002,6 +1132,12 @@ class ResearchLoopState:
                 "score": self.incumbent_score,
                 "metrics": dict(self.incumbent_metrics),
                 "seed_scores": list(self.incumbent_seed_scores),
+                "source_stage": self.incumbent_source_stage,
+                "verified": self.verified_incumbent_id == self.incumbent_node_id,
+            },
+            "provisional_candidate": {
+                "node_id": self.provisional_candidate_id,
+                "score": self.provisional_candidate_score,
             },
             "candidates": [asdict(record) for record in records],
             "near_winners": [asdict(record) for record in near_winners],

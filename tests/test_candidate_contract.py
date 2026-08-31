@@ -6,6 +6,7 @@ from ai_scientist.treesearch.candidate_contract import (
     candidate_semantic_signature,
     config_assignment,
     format_factor_change,
+    normalize_candidate_metadata,
     restore_dynamic_config_fields,
     select_candidate_roles,
     validate_candidate_contract,
@@ -149,6 +150,44 @@ def create_model(feature_dimension, config=None):
 
 
 class CandidateContractTests(unittest.TestCase):
+    def test_metadata_normalizer_repairs_shapes_without_inventing_model_code(self):
+        role = bootstrap_candidate_roles(["wide_deep"])[0]
+        candidate = """
+CONFIG = {'learning_rate': 0.001, 'epochs': 5}
+RESEARCH_MANIFEST = {'model_family': 'wide_deep', 'ablation_components': {'wide_deep_block': True}}
+FACTOR_SELECTION = {'considered_factor_ids': ['legacy_fm_fields'], 'selected_factor_ids': [], 'rejected_reasons': []}
+ABLATION_COMPONENTS = {'wide_deep_block': True}
+def component_enabled(name):
+    return ABLATION_COMPONENTS.get(name, False)
+def build_features(splits, feature_state=None):
+    return splits, feature_state
+def create_model(feature_dimension, config=None):
+    if component_enabled('wide_deep_block'):
+        return ('wide_deep', feature_dimension)
+    return ('fm', feature_dimension)
+"""
+
+        normalized = normalize_candidate_metadata(
+            candidate,
+            role,
+            expected_parent_id="fm-root",
+            expected_parent_model_family="fm",
+        )
+        result = validate_candidate_contract(
+            BASE,
+            normalized,
+            role,
+            expected_parent_id="fm-root",
+            expected_parent_model_family="fm",
+        )
+
+        self.assertTrue(result.valid, result.reasons)
+        self.assertEqual(result.manifest["ablation_components"], ["wide_deep_block"])
+        self.assertEqual(
+            result.factor_selection["considered_factor_ids"], ["static_user_profile"]
+        )
+        self.assertEqual(result.factor_selection["selected_factor_ids"], [])
+
     def test_stage1b_model_family_and_parent_are_hard_constraints(self):
         role = bootstrap_candidate_roles(["wide_deep"])[0]
         candidate = """

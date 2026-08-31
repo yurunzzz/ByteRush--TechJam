@@ -74,6 +74,11 @@ class CandidateRole:
             if factor_library_context.strip()
             else ""
         )
+        scaffold_text = candidate_contract_scaffold(
+            self,
+            parent_node_id=parent_node_id,
+            parent_model_family=parent_model_family,
+        )
         return (
             f"Candidate role {index}/{total}: {self.name}\n"
             f"Major research group: {self.group}\n"
@@ -140,6 +145,10 @@ class CandidateRole:
             "feature state, component guards, checkpoint round-trip, and CUDA tensor "
             "placement. Return only the concise plan and complete code required by the "
             "global response format."
+            "\nThe following role-specific scaffold is syntactically valid. Copy its "
+            "literal container shapes and exact identity fields, then make the named "
+            "component control the real implementation (do not leave it as metadata only):\n"
+            + scaffold_text
             + role_contract
             + factor_text
             + memory_text
@@ -385,6 +394,293 @@ def research_family_for_role(role: CandidateRole) -> str:
     if role.group == "context_interaction":
         return "context_interaction"
     return "evidence_synthesis"
+
+
+def _snake_case(value: str) -> str:
+    normalized = "".join(
+        character if character.isalnum() else "_" for character in value.lower()
+    )
+    normalized = "_".join(part for part in normalized.split("_") if part)
+    return normalized or "candidate_component"
+
+
+def _default_factor_id(role: CandidateRole) -> str:
+    base_name = role.name.split("_alternative_", 1)[0]
+    return {
+        "causal_history_interest": "causal_recent_history",
+        "affinity_interest": "user_author_affinity",
+        "context_interaction": "user_item_context_cross",
+        "temporal_interaction": "temporal_recency_context",
+        "auxiliary_objective": "auxiliary_behavior_signal",
+    }.get(base_name, "static_user_profile")
+
+
+def candidate_contract_scaffold(
+    role: CandidateRole,
+    *,
+    parent_node_id: str,
+    parent_model_family: str,
+) -> str:
+    """Render a compact literal scaffold that matches the static validator."""
+    family = (
+        role.allowed_model_families[0]
+        if role.allowed_model_families
+        else parent_model_family
+    )
+    loss_family = (
+        role.allowed_loss_families[0]
+        if role.allowed_loss_families
+        else "pointwise_bce"
+    )
+    component = _snake_case(role.name + "_component")
+    factor_id = _default_factor_id(role)
+    factor_role = role.category in {"factor_data", "factor_model"}
+    selection = {
+        "considered_factor_ids": [factor_id],
+        "selected_factor_ids": [factor_id] if factor_role else [],
+        "selection_reason": (
+            "selected factor is required by the assigned factor/model mechanism"
+            if factor_role
+            else "the assigned mechanism is architecture/objective-only"
+        ),
+        "rejected_reasons": (
+            {}
+            if factor_role
+            else {factor_id: "not required by this architecture/objective-only candidate"}
+        ),
+        "created_factor_cards": [],
+    }
+    manifest = {
+        "candidate_id": role.name,
+        "role": role.name,
+        "group": role.group,
+        "category": role.category,
+        "model_family": family,
+        "research_family": research_family_for_role(role),
+        "loss_family": loss_family,
+        "parent_node_id": parent_node_id,
+        "parent_model_family": parent_model_family,
+        "input_schema_version": 2,
+        "hypothesis": "the assigned controlled mechanism improves validation ranking",
+        "mechanism": role.objective,
+        "mechanism_ids": [_snake_case(role.name)],
+        "modified_symbols": ["build_features", "create_model", "train_model"],
+        "expected_metric": ["GAUC", "nDCG@5", "primary"],
+        "tunable_parameters": [],
+        "ablation_components": [component],
+        "combination_compatibility": "single independently guarded component",
+        "change_scope": "one principal research mechanism",
+        "component_dependencies": {},
+        "evidence": [
+            {
+                "source_type": "dependency",
+                "reference": "dependency:assigned_mechanism_requires_this_code_path",
+                "supports": [component],
+            }
+        ],
+    }
+    factor_note = (
+        "\n# Because this is a factor/model role, also define FEATURE_FACTORS with "
+        f"library_id={factor_id!r}; its literal output_fields must be created in "
+        "build_features and consumed by the guarded model path."
+        if factor_role
+        else "\nFEATURE_FACTORS = []"
+    )
+    return (
+        f"RESEARCH_MANIFEST = {manifest!r}\n"
+        f"FACTOR_SELECTION = {selection!r}"
+        f"{factor_note}\n"
+        f"ABLATION_COMPONENTS = {{{component!r}: True}}\n"
+        "def component_enabled(name):\n"
+        "    return bool(ABLATION_COMPONENTS.get(name, False))\n"
+        f"# In the real changed code path: if component_enabled({component!r}): ...\n"
+    )
+
+
+def _replace_or_append_literal_assignment(code: str, name: str, value: Any) -> str:
+    """Replace metadata without touching executable model/training statements."""
+    tree = _tree(code)
+    if tree is None:
+        return code
+    lines = code.splitlines()
+    for statement in tree.body:
+        matches = (
+            isinstance(statement, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == name
+                for target in statement.targets
+            )
+        ) or (
+            isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+            and statement.target.id == name
+        )
+        if not matches:
+            continue
+        start = max(0, statement.lineno - 1)
+        end = max(start + 1, getattr(statement, "end_lineno", statement.lineno))
+        lines[start:end] = [f"{name} = {value!r}"]
+        return "\n".join(lines) + "\n"
+    suffix = "" if code.endswith("\n") else "\n"
+    return code + suffix + f"\n{name} = {value!r}\n"
+
+
+def normalize_candidate_metadata(
+    candidate_code: str,
+    role: CandidateRole,
+    *,
+    expected_parent_id: str,
+    expected_parent_model_family: str,
+) -> str:
+    """Repair only declarative metadata after a successful execution.
+
+    This deliberately does not invent feature/model/loss code or component
+    guards. Scientific and leakage checks still reject candidates whose actual
+    implementation does not match the assigned role.
+    """
+    if _tree(candidate_code) is None:
+        return candidate_code
+    components = literal_assignment(candidate_code, "ABLATION_COMPONENTS")
+    enabled = sorted(
+        str(name)
+        for name, enabled_value in (components.items() if isinstance(components, Mapping) else ())
+        if isinstance(name, str) and enabled_value is True
+    )
+    if not enabled:
+        return candidate_code
+
+    manifest = literal_assignment(candidate_code, "RESEARCH_MANIFEST")
+    manifest = dict(manifest) if isinstance(manifest, Mapping) else {}
+    declared_model_family = str(manifest.get("model_family", ""))
+    model_family = (
+        declared_model_family
+        if declared_model_family in ALLOWED_MODEL_FAMILIES
+        else role.allowed_model_families[0]
+        if role.allowed_model_families
+        else expected_parent_model_family
+    )
+    loss_family = str(manifest.get("loss_family", ""))
+    if loss_family not in ALLOWED_LOSS_FAMILIES:
+        loss_family = (
+            role.allowed_loss_families[0]
+            if role.allowed_loss_families
+            else "pointwise_bce"
+        )
+    mechanism_ids = manifest.get("mechanism_ids")
+    if not isinstance(mechanism_ids, (list, tuple)) or not mechanism_ids:
+        mechanism_ids = [_snake_case(role.name)]
+    manifest.update(
+        {
+            "candidate_id": str(manifest.get("candidate_id") or role.name),
+            "role": role.name,
+            "group": role.group,
+            "category": role.category,
+            "model_family": model_family,
+            "research_family": research_family_for_role(role),
+            "loss_family": loss_family,
+            "parent_node_id": expected_parent_id,
+            "parent_model_family": expected_parent_model_family,
+            "input_schema_version": 2,
+            "hypothesis": str(
+                manifest.get("hypothesis")
+                or "the assigned mechanism improves validation ranking"
+            ),
+            "mechanism": str(manifest.get("mechanism") or role.objective),
+            "mechanism_ids": [_snake_case(str(item)) for item in mechanism_ids],
+            "modified_symbols": list(
+                manifest.get("modified_symbols")
+                if isinstance(manifest.get("modified_symbols"), (list, tuple))
+                else ["build_features", "create_model", "train_model"]
+            ),
+            "expected_metric": list(
+                manifest.get("expected_metric")
+                if isinstance(manifest.get("expected_metric"), (list, tuple))
+                else ["GAUC", "nDCG@5", "primary"]
+            ),
+            "tunable_parameters": list(
+                manifest.get("tunable_parameters")
+                if isinstance(manifest.get("tunable_parameters"), (list, tuple))
+                else []
+            ),
+            "ablation_components": enabled,
+            "combination_compatibility": str(
+                manifest.get("combination_compatibility")
+                or "components are independently guarded"
+            ),
+            "change_scope": str(
+                manifest.get("change_scope") or "one principal research mechanism"
+            ),
+            "component_dependencies": (
+                dict(manifest.get("component_dependencies"))
+                if isinstance(manifest.get("component_dependencies"), Mapping)
+                else {}
+            ),
+            "evidence": [
+                {
+                    "source_type": "dependency",
+                    "reference": "dependency:executed_guarded_component",
+                    "supports": enabled,
+                }
+            ],
+        }
+    )
+    normalized = _replace_or_append_literal_assignment(
+        candidate_code, "RESEARCH_MANIFEST", manifest
+    )
+
+    raw_factors = literal_assignment(normalized, "FEATURE_FACTORS")
+    declared_factor_ids = [
+        str(item.get("library_id", ""))
+        for item in raw_factors
+        if isinstance(raw_factors, (list, tuple)) and isinstance(item, Mapping)
+        and str(item.get("library_id", "")) in FACTOR_IDS
+    ] if isinstance(raw_factors, (list, tuple)) else []
+    selection = literal_assignment(normalized, "FACTOR_SELECTION")
+    selection = dict(selection) if isinstance(selection, Mapping) else {}
+    selected = [
+        str(item)
+        for item in selection.get("selected_factor_ids", [])
+        if str(item) in FACTOR_IDS and str(item) in declared_factor_ids
+    ]
+    factor_role = role.category in {"factor_data", "factor_model"}
+    if factor_role and not selected and declared_factor_ids:
+        selected = declared_factor_ids[:2]
+    considered = [
+        str(item)
+        for item in selection.get("considered_factor_ids", [])
+        if str(item) in FACTOR_IDS
+    ]
+    for factor_id in selected:
+        if factor_id not in considered:
+            considered.append(factor_id)
+    if not considered:
+        considered = [_default_factor_id(role)]
+    rejected = selection.get("rejected_reasons")
+    rejected = dict(rejected) if isinstance(rejected, Mapping) else {}
+    for factor_id in considered:
+        if factor_id not in selected:
+            rejected.setdefault(
+                factor_id, "not required by the implemented principal mechanism"
+            )
+    selection.update(
+        {
+            "considered_factor_ids": considered,
+            "selected_factor_ids": selected,
+            "selection_reason": str(
+                selection.get("selection_reason")
+                or "selected factors match the executed implementation"
+            ),
+            "rejected_reasons": rejected,
+            "created_factor_cards": (
+                list(selection.get("created_factor_cards"))
+                if isinstance(selection.get("created_factor_cards"), (list, tuple))
+                else []
+            ),
+        }
+    )
+    return _replace_or_append_literal_assignment(
+        normalized, "FACTOR_SELECTION", selection
+    )
 
 
 @dataclass(frozen=True)

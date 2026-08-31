@@ -27,6 +27,7 @@ from .candidate_contract import (
     format_factor_change,
     literal_assignment,
     model_family_from_code,
+    normalize_candidate_metadata,
     research_family_for_role,
     validate_candidate_contract,
     select_candidate_roles,
@@ -43,6 +44,7 @@ from .parallel_agent import (
 )
 from .research_loop import (
     AblationEvidence,
+    ExperimentRecord,
     FrontierRecord,
     PromotionPolicy,
     ResearchLoopConfig,
@@ -279,6 +281,41 @@ def _mean_metrics(nodes: Sequence[Node]) -> dict[str, float]:
     return {name: mean(items) for name, items in values.items() if items}
 
 
+def _candidate_artifacts(node: Node) -> dict[str, Any]:
+    """Describe reloadable validation artifacts without reading any test outcome."""
+    metadata: dict[str, Any] = {
+        "valid": bool(node.code.strip()) and _node_score(node) is not None,
+        "code_path": "",
+        "checkpoint_path": "",
+        "validation_split": "fixed_train_validation",
+        "training_epochs": None,
+    }
+    config = config_assignment(node.code) or {}
+    epochs = config.get("max_epochs", config.get("epochs"))
+    if isinstance(epochs, int):
+        metadata["training_epochs"] = epochs
+
+    if not node.exp_results_dir:
+        # Unit-test/in-memory nodes have no on-disk artifacts. Production nodes
+        # always carry exp_results_dir and are checked below.
+        return metadata
+    result_dir = Path(node.exp_results_dir)
+    if not result_dir.is_dir():
+        metadata["valid"] = False
+        return metadata
+    code_files = sorted(result_dir.rglob("experiment_code.py"))
+    if not code_files:
+        code_files = sorted(result_dir.rglob("runfile.py"))
+    checkpoints = sorted(result_dir.rglob("*checkpoint*.npz"))
+    metric_files = sorted(result_dir.rglob("experiment_data.npy"))
+    metadata["code_path"] = str(code_files[0]) if code_files else ""
+    metadata["checkpoint_path"] = str(checkpoints[0]) if checkpoints else ""
+    metadata["valid"] = bool(
+        metadata["valid"] and code_files and checkpoints and metric_files
+    )
+    return metadata
+
+
 def _ranked_nodes(journal: Journal, limit: Optional[int] = None) -> list[Node]:
     candidates = []
     for node in journal.nodes:
@@ -395,6 +432,9 @@ class ClosedLoopRunner:
             required_seeds=self.config.finalist_num_seeds,
             required_seed_wins=int(_cfg_get(raw, "required_seed_wins", 2)),
             maximize=True,
+            max_component_regression=float(
+                _cfg_get(raw, "max_component_regression", 0.001)
+            ),
         )
         self.state = ResearchLoopState(config=self.config, policy=policy)
         self.ablation_cfg = _cfg_get(manager.cfg.agent, "ablation", {})
@@ -604,14 +644,45 @@ class ClosedLoopRunner:
             raise RuntimeError("Stage 1 did not produce a valid FM baseline")
         return _clone_root(valid[0])
 
-    def _run_stage2(self, baseline: Node) -> EvaluatedConfiguration:
+    def _stage2_roots(
+        self, baseline: Node, stage1b_roots: Sequence[Node]
+    ) -> list[Node]:
+        """Keep the FM control plus the strongest bootstrap root per family."""
+        limit = max(1, int(self.config.stage2_root_top_k))
+        selected = [baseline]
+        seen_families = {"fm"}
+        for node in sorted(
+            stage1b_roots,
+            key=lambda item: _node_score(item) or float("-inf"),
+            reverse=True,
+        ):
+            family = model_family_from_code(node.code)
+            if family in seen_families:
+                continue
+            selected.append(node)
+            seen_families.add(family)
+            if len(selected) >= limit:
+                break
+        return selected
+
+    def _run_stage2_root(
+        self, root: Node, root_number: int
+    ) -> Optional[EvaluatedConfiguration]:
+        family = model_family_from_code(root.code)
         stage, journal = self._new_stage(
-            name="2_baseline_tuning_1_closed_loop",
-            goals=self.manager.main_stage_goals[2],
+            name=f"2_multi_root_tuning_{root_number}_{family}",
+            goals=(
+                self.manager.main_stage_goals[2]
+                + "\n- The assigned root family is "
+                + family
+                + ". Keep this architecture fixed and tune it under exactly the "
+                "same budget used for every competing Stage 1 root."
+            ),
             max_iterations=self.config.baseline_tuning_iterations,
         )
-        tuning_base = _clone_root(baseline)
+        tuning_base = _clone_root(root)
         journal.append(tuning_base)
+        role = self.candidate_role_by_node_id.get(root.id)
         with self._agent(
             stage,
             journal,
@@ -625,15 +696,141 @@ class ClosedLoopRunner:
                 self.config.baseline_tuning_iterations,
                 inherited_nodes=1,
             )
-            winner = self._evaluate_top_k(
+            finalists = _ranked_nodes(journal, self.config.finalist_top_k)
+            evaluated = self._evaluate_nodes(
                 agent,
                 stage,
                 journal,
+                finalists,
                 num_seeds=self.config.stage2_num_seeds,
+                role=role,
+                candidate_id=root.id,
             )
-        if winner is None:
-            raise RuntimeError("Stage 2 produced no configuration with three valid seeds")
+        if not evaluated:
+            return None
+        winner = max(evaluated, key=lambda result: result.score)
+        metadata = self._manifest_metadata(winner.node)
+        winner.model_family = metadata["model_family"] or family
+        winner.research_family = metadata["research_family"]
+        winner.loss_family = metadata["loss_family"] or "pointwise_bce"
+        winner.parent_node_id = metadata["parent_node_id"]
+        winner.parent_model_family = metadata["parent_model_family"] or family
         return winner
+
+    def _run_stage2(
+        self, baseline: Node, stage1b_roots: Sequence[Node]
+    ) -> EvaluatedConfiguration:
+        """Fairly tune/replicate FM and diverse roots, then select one incumbent."""
+        roots = self._stage2_roots(baseline, stage1b_roots)
+        evaluated = [
+            result
+            for root_number, root in enumerate(roots, 1)
+            if (result := self._run_stage2_root(root, root_number)) is not None
+        ]
+        if not evaluated:
+            raise RuntimeError("Stage 2 produced no root with valid standardized seeds")
+        fm_results = [item for item in evaluated if item.model_family == "fm"]
+        if not fm_results:
+            raise RuntimeError("Stage 2 lost the required FM control root")
+        fm_control = max(fm_results, key=lambda result: result.score)
+        self.state.set_incumbent(
+            fm_control.node.id,
+            fm_control.score,
+            fm_control.seed_scores,
+            metrics=fm_control.metrics,
+            source_stage=fm_control.stage_name,
+        )
+
+        stage2_policy = PromotionPolicy(
+            min_improvement=self.state.policy.min_improvement,
+            required_seeds=self.config.stage2_num_seeds,
+            required_seed_wins=max(1, math.ceil(self.config.stage2_num_seeds / 2)),
+            maximize=self.state.policy.maximize,
+            max_component_regression=self.state.policy.max_component_regression,
+        )
+        provisional: list[EvaluatedConfiguration] = []
+        for result in evaluated:
+            if result is fm_control:
+                continue
+            artifact = _candidate_artifacts(result.node)
+            role = result.role
+            (
+                considered_factor_ids,
+                factor_ids,
+                factor_selection_reason,
+                factor_rejected_reasons,
+                factor_cards,
+            ) = _factor_selection(result.node)
+            metadata = self._manifest_metadata(result.node)
+            decision = self.state.evaluate_candidate(
+                node_id=result.node.id,
+                fingerprint=candidate_fingerprint(result.node.code),
+                score=result.score,
+                seed_scores=result.seed_scores,
+                metrics=result.metrics,
+                seed_metrics=result.seed_metrics,
+                principal_change=_principal_change(result.node),
+                components=_extract_enabled_ablation_components(result.node.code),
+                role=role.name if role else metadata["role"],
+                category=role.group if role else "architecture_exploration",
+                factor_ids=factor_ids,
+                considered_factor_ids=considered_factor_ids,
+                factor_selection_reason=factor_selection_reason,
+                factor_rejected_reasons=factor_rejected_reasons,
+                factor_cards=factor_cards,
+                model_family=metadata["model_family"],
+                research_family=metadata["research_family"],
+                loss_family=metadata["loss_family"],
+                parent_node_id=metadata["parent_node_id"],
+                parent_model_family=metadata["parent_model_family"],
+                source_stage=result.stage_name,
+                source_phase="stage1b_standardized_stage2",
+                code_path=artifact["code_path"],
+                checkpoint_path=artifact["checkpoint_path"],
+                validation_split=artifact["validation_split"],
+                random_seeds=range(len(result.seed_scores)),
+                training_epochs=artifact["training_epochs"],
+                artifacts_valid=bool(artifact["valid"]),
+                round_number=0,
+                policy_override=stage2_policy,
+            )
+            signature = self._semantic_signature_for_node(result.node)
+            self._register_frontier(
+                result.node,
+                source_stage=result.stage_name,
+                round_number=0,
+                semantic_signature=signature,
+            )
+            print(
+                f"[cyan]Standardized Stage 1B root {result.model_family}: "
+                f"{decision.reason}[/cyan]"
+            )
+            if decision.promoted:
+                provisional.append(result)
+
+        if provisional:
+            winner = max(provisional, key=lambda result: result.score)
+            self.incumbent = winner
+            self.state.set_incumbent(
+                winner.node.id,
+                winner.score,
+                winner.seed_scores,
+                metrics=winner.metrics,
+                source_stage=winner.stage_name,
+            )
+            self.state.memory.mark_verified_incumbent(winner.node.id)
+            print(
+                f"[green]Stage 2 verified incumbent is {winner.model_family} "
+                f"with primary={winner.score:.6f}[/green]"
+            )
+            return winner
+
+        self.incumbent = fm_control
+        print(
+            f"[green]Stage 2 retained FM control with primary="
+            f"{fm_control.score:.6f}[/green]"
+        )
+        return fm_control
 
     def _generate_candidates_single_parent_legacy(
         self, incumbent: Node, round_number: int
@@ -745,6 +942,14 @@ class ClosedLoopRunner:
                             f"{expected_role.name}: {reason}"
                         )
                         continue
+                    node.code = normalize_candidate_metadata(
+                        node.code,
+                        expected_role,
+                        expected_parent_id=research_base.id,
+                        expected_parent_model_family=model_family_from_code(
+                            research_base.code
+                        ),
+                    )
                     manifest = literal_assignment(node.code, "RESEARCH_MANIFEST")
                     role_name = (
                         manifest.get("role") if isinstance(manifest, dict) else None
@@ -987,6 +1192,12 @@ class ClosedLoopRunner:
                     if _node_score(node) is None:
                         retry_feedback[expected.role.name].append("execution failed")
                         continue
+                    node.code = normalize_candidate_metadata(
+                        node.code,
+                        expected.role,
+                        expected_parent_id=expected.parent.id,
+                        expected_parent_model_family=expected.parent_model_family,
+                    )
                     contract = validate_candidate_contract(
                         expected.parent.code,
                         node.code,
@@ -1056,13 +1267,89 @@ class ClosedLoopRunner:
             CandidateAssignment(role, baseline, "fm", "stage1a_fm")
             for role in roles
         ]
-        return self._generate_assigned_candidates(
+        roots = self._generate_assigned_candidates(
             assignments,
             stage_name="1_diverse_roots_2_schema_v2_bootstrap",
             round_number=0,
             max_attempts=self.config.stage1b_generation_attempts,
             stage1b=True,
         )
+        baseline_score = _node_score(baseline)
+        baseline_metrics = _node_validation_metrics(baseline)
+        for node in roots:
+            score = _node_score(node)
+            if score is None:
+                continue
+            role = self.candidate_role_by_node_id.get(node.id)
+            metadata = self._manifest_metadata(node)
+            metrics = _node_validation_metrics(node)
+            artifact = _candidate_artifacts(node)
+            (
+                considered_factor_ids,
+                factor_ids,
+                factor_selection_reason,
+                factor_rejected_reasons,
+                factor_cards,
+            ) = _factor_selection(node)
+            fingerprint = candidate_fingerprint(
+                node.code,
+                config={"evaluation_protocol": "stage1b_bootstrap"},
+            )
+            self.state.memory.register_candidate(fingerprint)
+            self.state.memory.record(
+                ExperimentRecord(
+                    round_number=0,
+                    node_id=node.id,
+                    fingerprint=fingerprint,
+                    score=score,
+                    seed_scores=[score],
+                    promoted=False,
+                    reason=(
+                        "bootstrap-only validation result; queued for equal-budget "
+                        "Stage 2 tuning and multi-seed standardization"
+                    ),
+                    metrics=metrics,
+                    metric_deltas={
+                        name: (
+                            float(metrics[name]) - float(baseline_metrics[name])
+                            if metrics.get(name) is not None
+                            and baseline_metrics.get(name) is not None
+                            else None
+                        )
+                        for name in ("GAUC", "nDCG@5", "primary")
+                    },
+                    seed_metrics=[metrics],
+                    seed_mean=score,
+                    seed_std=0.0,
+                    principal_change=_principal_change(node),
+                    components=_extract_enabled_ablation_components(node.code),
+                    role=role.name if role else metadata["role"],
+                    category=role.group if role else "architecture_exploration",
+                    improvement=(
+                        score - baseline_score if baseline_score is not None else 0.0
+                    ),
+                    factor_ids=factor_ids,
+                    considered_factor_ids=considered_factor_ids,
+                    factor_selection_reason=factor_selection_reason,
+                    factor_rejected_reasons=factor_rejected_reasons,
+                    factor_cards=factor_cards,
+                    model_family=metadata["model_family"],
+                    research_family=metadata["research_family"],
+                    loss_family=metadata["loss_family"],
+                    parent_node_id=metadata["parent_node_id"],
+                    parent_model_family=metadata["parent_model_family"],
+                    source_stage="1_diverse_roots_2_schema_v2_bootstrap",
+                    source_phase="stage1b_bootstrap",
+                    status="bootstrap_pending_standardization",
+                    code_path=artifact["code_path"],
+                    checkpoint_path=artifact["checkpoint_path"],
+                    validation_split=artifact["validation_split"],
+                    training_epochs=artifact["training_epochs"],
+                    artifacts_valid=bool(artifact["valid"]),
+                )
+            )
+        self._save_memory()
+        return roots
 
     def _stage3_parent_pool(self) -> list[tuple[Node, str]]:
         if self.incumbent is None:
@@ -1633,6 +1920,7 @@ class ClosedLoopRunner:
             confirmed.score,
             confirmed.seed_scores,
             metrics=confirmed.metrics,
+            source_stage=confirmed.stage_name,
         )
         self._save_memory()
 
@@ -1647,6 +1935,10 @@ class ClosedLoopRunner:
             "incumbent_score": self.state.incumbent_score,
             "incumbent_seed_scores": self.state.incumbent_seed_scores,
             "incumbent_metrics": self.state.incumbent_metrics,
+            "incumbent_source_stage": self.state.incumbent_source_stage,
+            "verified_incumbent_id": self.state.verified_incumbent_id,
+            "provisional_candidate_id": self.state.provisional_candidate_id,
+            "provisional_candidate_score": self.state.provisional_candidate_score,
             "memory": self.state.memory.to_dict(),
         }
         (self.memory_dir / "state.json").write_text(
@@ -1707,14 +1999,8 @@ class ClosedLoopRunner:
         print(f"[cyan]Closed-loop maximum execution budget: {budget}[/cyan]")
 
         baseline = self._run_stage1()
-        self._run_stage1b(baseline)
-        self.incumbent = self._run_stage2(baseline)
-        self.state.set_incumbent(
-            self.incumbent.node.id,
-            self.incumbent.score,
-            self.incumbent.seed_scores,
-            metrics=self.incumbent.metrics,
-        )
+        stage1b_roots = self._run_stage1b(baseline)
+        self.incumbent = self._run_stage2(baseline, stage1b_roots)
         self._save_memory()
 
         while not self.state.should_stop:
@@ -1735,6 +2021,7 @@ class ClosedLoopRunner:
                     factor_rejected_reasons,
                     factor_cards,
                 ) = _factor_selection(result.node)
+                artifact = _candidate_artifacts(result.node)
                 decision = self.state.evaluate_candidate(
                     node_id=candidate_id,
                     fingerprint=candidate_fingerprint(result.node.code),
@@ -1758,6 +2045,14 @@ class ClosedLoopRunner:
                     loss_family=self._manifest_metadata(result.node)["loss_family"],
                     parent_node_id=self._manifest_metadata(result.node)["parent_node_id"],
                     parent_model_family=self._manifest_metadata(result.node)["parent_model_family"],
+                    source_stage=result.stage_name,
+                    source_phase="stage3",
+                    code_path=artifact["code_path"],
+                    checkpoint_path=artifact["checkpoint_path"],
+                    validation_split=artifact["validation_split"],
+                    random_seeds=range(len(result.seed_scores)),
+                    training_epochs=artifact["training_epochs"],
+                    artifacts_valid=bool(artifact["valid"]),
                 )
                 print(
                     f"[cyan]Candidate {candidate_id}: "

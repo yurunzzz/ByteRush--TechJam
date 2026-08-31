@@ -317,6 +317,22 @@ class NoImprovementFakeAgent(FakeAgent):
             )
 
 
+class MultiRootTuningFakeAgent(FakeAgent):
+    def step(self, exec_callback, max_nodes=None):
+        if not self.stage_name.startswith("2_multi_root_tuning"):
+            return super().step(exec_callback, max_nodes=max_nodes)
+        count = int(max_nodes or 1)
+        base_score = self.tuning_base.metric.get_mean_value()
+        for index in range(count):
+            self.journal.append(
+                _node(
+                    self.tuning_base.code + f"# root tuning {index}\n",
+                    base_score + 0.001 * (index + 1),
+                    parent=self.tuning_base,
+                )
+            )
+
+
 class ClosedLoopTests(unittest.TestCase):
     def setUp(self):
         FakeAgent.created_stage_names = []
@@ -456,6 +472,50 @@ class ClosedLoopTests(unittest.TestCase):
             "'factor_causal_history_interest': False",
             root_node.code,
         )
+
+    def test_stage2_fairly_tunes_stage1b_root_and_can_replace_fm(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manager = FakeManager(
+                self._data_dir(root / "starter"),
+                root / "artifacts" / "final_model",
+            )
+            manager.cfg.agent.research_loop.stage2_root_top_k = 2
+            manager.cfg.agent.research_loop.stage2_num_seeds = 2
+            manager.cfg.agent.research_loop.min_primary_gain = 0.002
+            baseline = _node("ABLATION_COMPONENTS = {}\nBASELINE = 'FM'\n", 0.600)
+            wide_deep = _node(
+                "RESEARCH_MANIFEST = {'model_family': 'wide_deep', "
+                "'research_family': 'architecture', 'loss_family': 'pointwise_bce', "
+                "'parent_node_id': 'fm', 'parent_model_family': 'fm', "
+                "'role': 'architecture_wide_deep'}\n"
+                "FACTOR_SELECTION = {'considered_factor_ids': ['static_user_profile'], "
+                "'selected_factor_ids': [], 'selection_reason': 'architecture only', "
+                "'rejected_reasons': {'static_user_profile': 'not required'}, "
+                "'created_factor_cards': []}\n"
+                "ABLATION_COMPONENTS = {'wide_deep_block': True}\n"
+                "def component_enabled(name): return ABLATION_COMPONENTS.get(name, False)\n",
+                0.604,
+            )
+            runner = ClosedLoopRunner(
+                manager,
+                exec_callback=lambda *args: None,
+                agent_factory=MultiRootTuningFakeAgent,
+                finalizer=lambda *args, **kwargs: {},
+                submission_exporter=lambda **kwargs: {},
+            )
+
+            winner = runner._run_stage2(baseline, [wide_deep])
+
+        self.assertEqual(winner.model_family, "wide_deep")
+        self.assertEqual(runner.state.verified_incumbent_id, winner.node.id)
+        standardized = [
+            record
+            for record in runner.state.memory.records
+            if record.source_phase == "stage1b_standardized_stage2"
+        ]
+        self.assertEqual(len(standardized), 1)
+        self.assertEqual(standardized[0].status, "verified_incumbent")
 
     def test_agent_manager_uses_closed_loop_only_when_enabled(self):
         manager = object.__new__(AgentManager)
