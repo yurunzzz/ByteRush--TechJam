@@ -186,7 +186,7 @@ python -c "import os; print(bool(os.getenv('DEEPSEEK_API_KEY') or os.getenv('OPE
 然后从仓库根目录运行：
 
 ```bash
-python launch_scientist_bfts.py \
+python launch_with_intro.py \
   --config bfts_config_kuairand.yaml \
   --load_ideas ai_scientist/ideas/kuairand_ranking.json \
   --load_code \
@@ -194,8 +194,12 @@ python launch_scientist_bfts.py \
   --skip_plots \
   --skip_writeup \
   --skip_review \
-  2>&1 | tee /tmp/kuairand_agent_baseline.log
+  --intro-log-file /tmp/kuairand_agent_baseline.log
 ```
+
+`launch_with_intro.py` 会在普通输出下方保持 ByteRush 动画，并根据真实启动日志推进进度。
+`--intro-log-file` 保存的是不含动画控制字符的纯日志。服务器后台任务或不需要动画时，仍可直接
+使用原入口 `launch_scientist_bfts.py`。
 
 不要传入 `--add_dataset_ref`。当前配置是最小自主闭环：单 worker、单初始节点、一个 seed 复验，不生成论文或 review。它验证 Agent pipeline 的可靠性，不负责直接提升比赛指标；后续应保留它作为回归测试。
 
