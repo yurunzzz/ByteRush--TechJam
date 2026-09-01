@@ -39,24 +39,40 @@ The problem statement (2.2) asks for an agent that can autonomously **reproduce 
 - **tmux** for durable, detachable long‑running agent sessions on the remote server.
 - **Streamlit dashboard** (`dashboard/app.py`) for live monitoring of the search tree, stage statistics and the current best node.
 - **Git** for version control, with a strict pre‑upload checklist that keeps API keys, `.env`, raw KuaiRand data, experiment directories, checkpoints and logs out of the repository.
-- **Model routing via environment variables** — the selected 2026-08-30 22:11 run used role-specialized DeepSeek routing through the six `AI_SCIENTIST_*_MODEL` variables: `deepseek-v4-pro` for planning/code, `deepseek-v4-flash` for feedback/selection/summary, and `deepseek-v4-flash-vision-exp` for visual feedback, with no Python/YAML edits.
+- **Model routing via environment variables** — the current agent configuration routes six specialized AI‑Scientist roles across three models: `gpt-5.6-sol` for code generation, `gpt-5.6-terra` for feedback, summarization and node selection, and `gpt-5.6-luna` for visual analysis and report generation. The routing is controlled entirely through the six `AI_SCIENTIST_*_MODEL` variables, with no Python/YAML edits.
 - **`black`, `py_compile`, `pip check`** as lightweight code‑hygiene and dependency‑consistency gates.
 
 ---
 
 ## APIs
 
-The selected **2026-08-30 22:11** run used the **DeepSeek API** through its OpenAI-compatible endpoint and the `openai` Python client. Agent roles were split across three DeepSeek models using the six `AI_SCIENTIST_*_MODEL` environment variables, with no code change.
+The current API configuration uses role-specialized model routing through the AI‑Scientist model-client interface. All six roles are bound through environment variables, so the complete model stack can be changed without modifying the research pipeline.
 
-| Model | Agent roles | Tokens | Calls |
-|---|---|---:|---:|
-| `deepseek-v4-pro` | plan + code generation | 1,019,049 | 72 |
-| `deepseek-v4-flash` | feedback + node selection + summary | 252,736 | 161 |
-| `deepseek-v4-flash-vision-exp` | plot / figure reading | 199,028 | 24 |
+| Environment variable | Model | Agent role |
+|---|---|---|
+| `AI_SCIENTIST_CODE_MODEL` | `gpt-5.6-sol` | Code generation and implementation |
+| `AI_SCIENTIST_FEEDBACK_MODEL` | `gpt-5.6-terra` | Experiment feedback and analysis |
+| `AI_SCIENTIST_SUMMARY_MODEL` | `gpt-5.6-terra` | Research-state summarization |
+| `AI_SCIENTIST_SELECT_MODEL` | `gpt-5.6-terra` | Best-node selection |
+| `AI_SCIENTIST_VLM_MODEL` | `gpt-5.6-luna` | Plot and figure interpretation |
+| `AI_SCIENTIST_REPORT_MODEL` | `gpt-5.6-luna` | Final report generation |
+
+The configuration used to launch the agent is:
+
+```bash
+cd /root/autodl-tmp/ByteRush
+
+export AI_SCIENTIST_CODE_MODEL=gpt-5.6-sol
+export AI_SCIENTIST_FEEDBACK_MODEL=gpt-5.6-terra
+export AI_SCIENTIST_SUMMARY_MODEL=gpt-5.6-terra
+export AI_SCIENTIST_SELECT_MODEL=gpt-5.6-terra
+export AI_SCIENTIST_VLM_MODEL=gpt-5.6-luna
+export AI_SCIENTIST_REPORT_MODEL=gpt-5.6-luna
+```
 
 This end-to-end run lasted **4,915.8 seconds (81.9 min)**, used the GPU actively for **1,017.7 seconds (17.0 min)**, executed **46 iterations**, and performed **4 seed evaluations**. The final reported **Wide & Deep** winner was subsequently verified across 5 seeds and reached **GAUC 0.671028 / nDCG@5 0.537670 / primary 0.604349**, a **+0.002694 (+0.448%)** improvement over the reproduced 0.601655 FM validation baseline.
 
-Additional provider routes inherited from upstream AI‑Scientist‑v2 (OpenAI, Anthropic / Bedrock / Vertex, and Ollama) exist in the code but were **not used by this selected run**.
+Structured tool/function calls return machine-readable `AI_SCIENTIST_RESULT` records containing validation GAUC, nDCG@5 and primary metrics. Additional provider routes inherited from upstream AI‑Scientist‑v2 remain available in the code but are not used by the current configuration.
 
 *No credentials are stored in the repo; keys are loaded only into the shell/tmux session that launches the agent.*
 
@@ -71,7 +87,7 @@ Additional provider routes inherited from upstream AI‑Scientist‑v2 (OpenAI, 
 - `tiktoken` (token accounting / budget tracking), `backoff` (retry with exponential back‑off), `python-igraph` (search‑tree graph handling), `rich` + `tqdm` (console/log UX), `black` (auto‑formatting of generated code)
 
 **LLM client**
-- `openai` (1.75.0) — the OpenAI-compatible client used by the selected 2026-08-30 22:11 run against `https://api.deepseek.com` with `deepseek-v4-pro`, `deepseek-v4-flash`, and `deepseek-v4-flash-vision-exp`. (`anthropic`, `boto3` / `botocore`, and alternate provider routes are inherited upstream dependencies but were not used by this selected run.)
+- The AI‑Scientist model-client abstraction routes requests according to the six `AI_SCIENTIST_*_MODEL` environment variables: `gpt-5.6-sol` handles code generation; `gpt-5.6-terra` handles feedback, summaries and selection; and `gpt-5.6-luna` handles visual analysis and reporting. Alternate provider clients remain as inherited upstream dependencies but are not used by the current configuration.
 
 **Visualization & reporting**
 - `matplotlib`, `seaborn` for plots; `streamlit`, `plotly`, `streamlit-autorefresh` for the live dashboard; `pypdf` / `pymupdf4llm` for document handling (inherited from upstream)
