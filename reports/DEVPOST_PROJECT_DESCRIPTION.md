@@ -70,7 +70,7 @@ export AI_SCIENTIST_VLM_MODEL=gpt-5.6-luna
 export AI_SCIENTIST_REPORT_MODEL=gpt-5.6-luna
 ```
 
-This end-to-end run lasted **4,915.8 seconds (81.9 min)**, used the GPU actively for **1,017.7 seconds (17.0 min)**, executed **46 iterations**, and performed **4 seed evaluations**. The final reported **Wide & Deep** winner was subsequently verified across 5 seeds and reached **GAUC 0.671028 / nDCG@5 0.537670 / primary 0.604349**, a **+0.002694 (+0.448%)** improvement over the reproduced 0.601655 FM validation baseline.
+The final **Wide & Deep** winner was selected exclusively on validation and verified across **5 seeds**. It reached **GAUC 0.671028 / nDCG@5 0.537670 / primary 0.604349**, improving over the reproduced FM baseline (**GAUC 0.667366 / nDCG@5 0.535944 / primary 0.601655**) by **+0.003662 GAUC / +0.001726 nDCG@5 / +0.002694 primary (+0.448%)**. The frozen model is submission-ready and produces predictions for all **170,588** hidden-test rows.
 
 Structured tool/function calls return machine-readable `AI_SCIENTIST_RESULT` records containing validation GAUC, nDCG@5 and primary metrics. Additional provider routes inherited from upstream AI‑Scientist‑v2 remain available in the code but are not used by the current configuration.
 
