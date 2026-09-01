@@ -485,6 +485,8 @@ class ClosedLoopRunner:
             if resume_from_stage2 is not None
             else None
         )
+        self.resume_bundle: Optional[Path] = None
+        self.resumed_incumbent_node_id: Optional[str] = None
 
     def _new_stage(
         self,
@@ -2143,6 +2145,8 @@ class ClosedLoopRunner:
         source_node_id = str(manifest.get("source_node_id", "")).strip()
         if not source_node_id:
             source_node_id = (snapshot_dir / "source_node_id.txt").read_text().strip()
+        self.resume_bundle = resume_bundle
+        self.resumed_incumbent_node_id = source_node_id
         node = Node(
             id=source_node_id,
             code=(resume_bundle / "model.py").read_text(),
@@ -2307,6 +2311,31 @@ class ClosedLoopRunner:
     def _finalize(self) -> dict[str, Any]:
         if self.incumbent is None:
             raise RuntimeError("cannot finalize without an incumbent")
+        if (
+            self.resume_bundle is not None
+            and self.resumed_incumbent_node_id is not None
+            and self.incumbent.node.id == self.resumed_incumbent_node_id
+        ):
+            required_files = (
+                "manifest.json",
+                "model.py",
+                "checkpoint.npz",
+                "training_history.json",
+                "source_node_id.txt",
+            )
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            for name in required_files:
+                shutil.copy2(self.resume_bundle / name, self.output_dir / name)
+            manifest_path = self.output_dir / "manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest["finalization_mode"] = "retained_verified_stage2_incumbent"
+            manifest["continuation_finalized_at_utc"] = datetime.now(
+                timezone.utc
+            ).isoformat()
+            manifest_path.write_text(
+                json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+            )
+            return manifest
         return self.finalizer(
             self.incumbent.journal,
             output_dir=self.output_dir,
