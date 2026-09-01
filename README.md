@@ -34,6 +34,22 @@ Load the predefined research task and starting code
 → freeze the final model and automatically generate and validate submission.csv
 ```
 
+![ByteRush validation-guided autonomous ML research loop](docs/byterush-agent-workflow.png)
+
+*Figure 1. Overview of the validation-guided ByteRush research loop, from baseline reproduction and diverse model roots to autonomous candidate research, ablation, multi-seed confirmation, and final submission generation.*
+
+### Final validation results
+
+The final model was selected exclusively from validation results. Relative to the official FM baseline, the selected Wide & Deep model improved both ranking components and the combined primary score:
+
+| Model | GAUC | nDCG@5 | Primary |
+|---|---:|---:|---:|
+| Official FM baseline | 0.667366 | 0.535944 | 0.601655 |
+| Selected Wide & Deep model | **0.671028** | **0.537670** | **0.604349** |
+| Absolute improvement | **+0.003662** | **+0.001726** | **+0.002694** |
+
+These values are validation metrics; the hidden test set was not used for model selection or metric feedback.
+
 The project uses only the official KuaiRand-Pure data for training and validation. The test split is used only to produce predictions from the final frozen model. Test labels and test metrics are never exposed to the research agent.
 
 The main directories and files are:
@@ -73,7 +89,7 @@ ByteRush/
 
 ### 2.1 Verified environment
 
-The complete workflow has been verified with:
+The complete workflow was validated in the following reference environment:
 
 - Ubuntu 22.04.4 LTS;
 - Python 3.12.3;
@@ -81,13 +97,13 @@ The complete workflow has been verified with:
 - NVIDIA GeForce RTX 3080 Ti;
 - `tmux` for persistent long-running experiment sessions.
 
-Other Linux, Python, and CUDA combinations may also work, but they were not the environment used to validate the final workflow.
+The NVIDIA GeForce RTX 3080 Ti is not a strict requirement. The workflow can run on another CUDA-capable GPU with sufficient memory and a compatible PyTorch build. CPU execution is also supported by the model code, although a full autonomous search is expected to be substantially slower. Other Linux, Python, and CUDA combinations may work but were not used for the reported experiments.
 
 ### 2.2 Clone the repository and install dependencies
 
 ```bash
-git clone https://github.com/caiji666/ByteRush-.git
-cd ByteRush-
+git clone https://github.com/yurunzzz/ByteRush--TechJam.git
+cd ByteRush--TechJam
 
 conda create -n byterush python=3.12 -y
 conda activate byterush
@@ -187,11 +203,21 @@ Inside the session, move to the project directory and set the API key and model 
 cd /path/to/ByteRush
 ```
 
-## 3. Steps to reproduce your results
+## 3. Steps to reproduce our results
 
 Run all commands below from the repository root.
 
-### 3.1 Run the V2 → FM smoke test
+### 3.1 Run the automated test suite
+
+Run the repository test suite before launching an experiment:
+
+```bash
+python -m unittest discover -s tests -p "test_*.py"
+```
+
+A successful run ends with `OK`.
+
+### 3.2 Run the V2 → FM smoke test
 
 Start with the standalone smoke test. It uses the AI Scientist-v2 `Interpreter` to execute the PyTorch FM starting code in `ai_scientist/ideas/kuairand_ranking.py` and verifies that:
 
@@ -211,7 +237,7 @@ A successful run ends with output similar to:
 V2_FM_SMOKE_RESULT {"status": "success", ...}
 ```
 
-### 3.2 Configure the run log
+### 3.3 Configure the run log
 
 Create a timestamped log path for the Stage 1–4 run:
 
@@ -226,7 +252,7 @@ Make the shell preserve the agent's actual exit status when output is piped thro
 set -o pipefail
 ```
 
-### 3.3 Run the complete Stage 1–4 workflow
+### 3.4 Run the complete Stage 1–4 workflow
 
 `bfts_config_kuairand.yaml` enables `research_loop`. The command below therefore enters `ClosedLoopRunner` and executes Stage 1, Stage 1B, Stage 2, and the adaptive multi-round Stage 3/4 loop rather than a single linear four-stage pass.
 
@@ -264,7 +290,7 @@ Follow the log while the run is active:
 tail -f "$AGENT_RUN_LOG"
 ```
 
-### 3.4 Generate a submission from the frozen model
+### 3.5 Generate a submission from the frozen model
 
 At the end of the closed loop, the system automatically confirms the final incumbent, freezes it, and generates a submission. The current configured artifact directory is:
 
@@ -302,7 +328,7 @@ artifacts/comparison_current/final_model/submission.csv
 
 The export does not retrain the model and does not compute or display test metrics. If `final_model_dir` is changed in the YAML configuration, replace the paths above accordingly.
 
-### 3.5 Validate the submission independently
+### 3.6 Validate the submission independently
 
 ```bash
 python kuairand-starter-kit/submit.py \
@@ -325,7 +351,7 @@ The required submission schema is:
 row_id,user_id,video_id,score
 ```
 
-### 3.6 Launch the dashboard visualization
+### 3.7 Launch the dashboard visualization
 
 From the repository root, install the dashboard dependencies and start the Streamlit app:
 
@@ -341,7 +367,7 @@ Open <http://127.0.0.1:8501> in a browser. Press `Ctrl+C` in the terminal to sto
 
 The dashboard presents our best model, metric improvements, Agent workflow, search process, and final verification results.
 
-## 4. A brief reflection on your solution's limitations and what you would improve given more time
+## 4. A brief reflection on our solution's limitations and what you would improve given more time
 
 The current system has completed the full workflow from the smoke test and Stage 1/1B/2 through the adaptive Stage 3/4 loop, final-model freezing, and submission validation. However, it still has several limitations.
 
