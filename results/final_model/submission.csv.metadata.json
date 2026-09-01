@@ -1,0 +1,17 @@
+{
+  "artifact_dir": "results/final_model",
+  "checkpoint_sha256": "8b18ad1fa1598e1bfae1a904b34283a7c6e9f37bc87f61081fd03d2d10e75b62",
+  "model_sha256": "8400acd6b7201542a9194446dbeefd7885ad4f9ba5c4d8cac260c907a663ac74",
+  "rows": 170588,
+  "seed": 3,
+  "source_node_id": "f032d282bdcc421a92a7576440dda561",
+  "split": "test",
+  "submission": "results/final_model/submission.csv",
+  "submission_sha256": "98207e00188211b051c82042e7df3151291046c402e1d42aa9c6f616beb95f36",
+  "test_metrics_computed": false,
+  "validation_result_from_checkpoint": {
+    "GAUC": 0.6712708473205566,
+    "nDCG@5": 0.5377140045166016,
+    "primary": 0.6044924259185791
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "schema_version": 2,
+  "artifact_status": "reconstructed_from_preserved_successful_experiment_outputs",
+  "model_family": "wide_deep",
+  "source_run_id": "2026-08-31_18-02-46_kuairand_fm_validation_baseline_attempt_0",
+  "source_stage": "4_final_incumbent_confirmation_1_configured_seeds",
+  "source_node_id": "f032d282bdcc421a92a7576440dda561",
+  "checkpoint_source_node_id": "892bf60695f048e79350305d1334c3cd",
+  "selection_split": "validation",
+  "selection_metric": "primary",
+  "ablation_target": "full",
+  "test_metrics_used_for_selection": false,
+  "seed_count": 5,
+  "validation_metrics": {
+    "gauc_mean": 0.6710276126861572,
+    "ndcg_at_5_mean": 0.5376702547073364,
+    "primary_mean": 0.6043489336967468,
+    "primary_best_seed": 0.6044924259185791
+  },
+  "baseline_metrics": {
+    "gauc": 0.667366,
+    "ndcg_at_5": 0.535944,
+    "primary": 0.601655
+  },
+  "model_sha256": "8400acd6b7201542a9194446dbeefd7885ad4f9ba5c4d8cac260c907a663ac74",
+  "checkpoint_sha256": "8b18ad1fa1598e1bfae1a904b34283a7c6e9f37bc87f61081fd03d2d10e75b62"
+}

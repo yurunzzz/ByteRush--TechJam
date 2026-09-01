@@ -1,0 +1,31 @@
+{
+  "accounting_version": "1.0",
+  "run_started_at_utc": "2026-08-31T10:02:46.254920+00:00",
+  "run_finished_at_utc": "2026-08-31T11:31:25.217612+00:00",
+  "wall_clock_seconds": 5318.962730432861,
+  "llm_prompt_tokens": 1019270,
+  "llm_completion_tokens": 290892,
+  "llm_total_tokens": 1310162,
+  "llm_calls": 338,
+  "llm_by_model": {
+    "gpt-4.1-mini-2025-04-14": {
+      "prompt_tokens": 1019270,
+      "completion_tokens": 290892,
+      "total_tokens": 1310162,
+      "calls": 338
+    }
+  },
+  "executed_iterations": 25,
+  "seed_evaluations": 17,
+  "iteration_limit": 746,
+  "gpu_used": true,
+  "gpu_active_seconds": 545.60853411071,
+  "gpu_models": [
+    "NVIDIA GeForce RTX 3080 Ti"
+  ],
+  "gpu_peak_used_memory_mib": 1686.0,
+  "gpu_sample_interval_seconds": 1.0,
+  "gpu_samples": 5057,
+  "gpu_active_samples": 520,
+  "resource_event_file": "resource_events.jsonl"
+}

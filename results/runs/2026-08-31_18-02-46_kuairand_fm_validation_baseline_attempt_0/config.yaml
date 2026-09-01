@@ -1,0 +1,130 @@
+agent:
+  ablation:
+    max_components: 15
+    min_primary_gain: 0.002
+    min_successful_seeds: 1
+    mode: registered_component_leave_one_out
+    num_seeds: 1
+  code:
+    max_tokens: 12000
+    model: ${oc.env:AI_SCIENTIST_CODE_MODEL,deepseek-v4-pro}
+    temp: 0.2
+  data_preview: false
+  expose_prediction: false
+  feedback:
+    max_tokens: 8192
+    model: ${oc.env:AI_SCIENTIST_FEEDBACK_MODEL,deepseek-v4-flash}
+    temp: 0.1
+  final_model_dir: artifacts/comparison_current/final_model
+  k_fold_validation: 1
+  max_stage: 4
+  max_workers_per_gpu: 2
+  multi_seed_eval:
+    num_seeds: 3
+  num_workers: 2
+  research_loop:
+    ablation_candidate_top_k: 2
+    ablation_synergy_pairs: 1
+    baseline_tuning_iterations: 2
+    branch_growth_per_positive_round: 2
+    candidate_branches: 5
+    candidate_finalist_top_k: 2
+    candidate_parallel_workers: 2
+    candidate_refinement_iterations: 4
+    candidate_refinement_top_k: 2
+    candidate_tuning_iterations: 1
+    candidate_tuning_top_k: 3
+    checkpoint_submission_each_incumbent: true
+    donor_max_primary_gap: 0.002
+    enabled: true
+    experience_top_k: 3
+    final_confirmation_num_seeds: 5
+    final_promotion_min_primary_gain: 0.001
+    finalist_num_seeds: 2
+    finalist_top_k: 1
+    finalize_reserve_seconds: 600
+    frontier_max_size: 8
+    initial_candidate_roles:
+    - causal_history_interest
+    - ranking_objective
+    - auxiliary_objective
+    - context_interaction
+    - incumbent_extension
+    low_gain_round_patience: 3
+    max_candidate_branches: 8
+    max_component_regression: 0.001
+    max_repair_attempts_per_assignment: 2
+    max_research_rounds: 10
+    max_wall_clock_seconds: 19800
+    min_primary_gain: 0.002
+    min_round_primary_gain: 0.0002
+    min_valid_candidates_per_round: 3
+    no_valid_round_patience: 2
+    patience: 4
+    provisional_min_primary_gain: 0.0005
+    required_seed_wins: 1
+    reserved_candidate_role: incumbent_extension
+    smoke_test_enabled: true
+    smoke_test_timeout_seconds: 240
+    stage1_validation_iterations: 2
+    stage1b_enabled: true
+    stage1b_generation_attempts: 6
+    stage1b_max_epochs: 5
+    stage1b_model_families:
+    - mlp
+    - wide_deep
+    - dcn
+    stage2_num_seeds: 2
+    stage2_root_top_k: 4
+    stage3_bootstrap_parent_slots: 1
+    stage3_frontier_parent_slots: 2
+    stage3_generation_attempts: 30
+    stage3_incumbent_parent_slots: 2
+    stage3_startup_stagger_seconds: 8
+    target_valid_candidates_per_round: 5
+    transfer_base_ratio: 0.3
+    transfer_max_ratio: 0.5
+    transfer_min_ratio: 0.15
+  search:
+    debug_prob: 1.0
+    max_debug_depth: 2
+    num_drafts: 2
+  select_node:
+    model: ${oc.env:AI_SCIENTIST_SELECT_MODEL,deepseek-v4-flash}
+    temp: 0.1
+  stages:
+    stage1_max_iters: 2
+    stage2_max_iters: 2
+    stage3_max_iters: 30
+    stage4_max_iters: 15
+  steps: 1
+  summary:
+    model: ${oc.env:AI_SCIENTIST_SUMMARY_MODEL,deepseek-v4-flash}
+    temp: 0.2
+  type: parallel
+  vlm_feedback:
+    max_tokens: 8192
+    model: ${oc.env:AI_SCIENTIST_VLM_MODEL,deepseek-v4-flash-vision-exp}
+    temp: 0.1
+copy_data: false
+data_dir: ./kuairand-starter-kit
+debug:
+  stage4: false
+desc_file: experiments/2026-08-31_18-02-46_kuairand_fm_validation_baseline_attempt_0/idea.json
+eval: null
+exec:
+  agent_file_name: runfile.py
+  format_tb_ipython: false
+  repl_startup_timeout: 60
+  timeout: 1000
+exp_name: kuairand_stage4
+experiment:
+  num_syn_datasets: 1
+generate_report: false
+goal: null
+log_dir: experiments/2026-08-31_18-02-46_kuairand_fm_validation_baseline_attempt_0/logs
+preprocess_data: false
+report:
+  model: ${oc.env:AI_SCIENTIST_REPORT_MODEL,deepseek-v4-flash}
+  temp: 0.2
+workspace_dir: experiments/2026-08-31_18-02-46_kuairand_fm_validation_baseline_attempt_0

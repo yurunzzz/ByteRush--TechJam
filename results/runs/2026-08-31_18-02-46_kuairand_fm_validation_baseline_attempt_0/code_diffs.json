@@ -1,0 +1,5 @@
+{
+  "status": "not_exported_separately_by_this_run_version",
+  "source_of_truth": "search_trace.json",
+  "note": "Candidate code and node-level changes remain embedded in the preserved search trace."
+}
