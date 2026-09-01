@@ -50,6 +50,8 @@ The final model was selected exclusively from validation results. Relative to th
 
 These values are validation metrics; the hidden test set was not used for model selection or metric feedback.
 
+The repository includes the compact evidence for the completed Stage 1–4 run `2026-08-31_18-02-46_kuairand_fm_validation_baseline_attempt_0` under `results/runs/`. Interrupted runs, failed candidate workspaces, caches, and redundant checkpoints are excluded. The submission-ready Wide & Deep package is stored in `results/final_model/`; it was reconstructed from the preserved successful Stage 4 source, best-seed checkpoint, and five-seed validation records after the shared working artifact directory was reused by later experiments.
+
 The project uses only the official KuaiRand-Pure data for training and validation. The test split is used only to produce predictions from the final frozen model. Test labels and test metrics are never exposed to the research agent.
 
 The main directories and files are:
@@ -73,6 +75,9 @@ ByteRush/
 │   ├── submit.py                    # Submission generation and validation
 │   └── export_best_submission.py    # Export from a frozen checkpoint
 ├── dashboard/                       # Experiment-result dashboard
+├── results/                         # Curated successful run and final Wide & Deep package
+│   ├── runs/                        # Compact Stage 1–4 search evidence
+│   └── final_model/                 # Source, checkpoint, manifest, and submission
 ├── reports/                         # Run records and result summaries
 ├── tests/                           # Closed-loop, candidate, and freeze tests
 ├── artifacts/                       # Frozen models and research state
@@ -292,10 +297,10 @@ tail -f "$AGENT_RUN_LOG"
 
 ### 3.5 Generate a submission from the frozen model
 
-At the end of the closed loop, the system automatically confirms the final incumbent, freezes it, and generates a submission. The current configured artifact directory is:
+At the end of the closed loop, the system automatically confirms the final incumbent, freezes it, and generates a submission. The version-controlled final Wide & Deep package is:
 
 ```text
-artifacts/comparison_current/final_model
+results/final_model
 ```
 
 “Freezing” means that `finalize.py` selects the final candidate by mean validation primary across the required successful seeds and saves the following reproducible artifacts:
@@ -314,25 +319,25 @@ To manually regenerate the submission from an existing frozen model, run:
 
 ```bash
 python kuairand-starter-kit/submit.py \
-  artifacts/comparison_current/final_model/submission.csv \
+  results/final_model/submission.csv \
   --make-best \
-  --artifact_dir artifacts/comparison_current/final_model \
+  --artifact_dir results/final_model \
   --split test
 ```
 
 `--make-best` verifies the SHA-256 hashes of `model.py` and `checkpoint.npz`, loads the frozen checkpoint in inference-only mode, and writes:
 
 ```text
-artifacts/comparison_current/final_model/submission.csv
+results/final_model/submission.csv
 ```
 
-The export does not retrain the model and does not compute or display test metrics. If `final_model_dir` is changed in the YAML configuration, replace the paths above accordingly.
+The committed submission is available directly at `results/final_model/submission.csv`. The export does not retrain the model and does not compute or display test metrics. A newly executed research run may still write its working artifact to the `final_model_dir` configured in YAML; use `results/final_model/` to reproduce the version-controlled Wide & Deep result reported above.
 
 ### 3.6 Validate the submission independently
 
 ```bash
 python kuairand-starter-kit/submit.py \
-  artifacts/comparison_current/final_model/submission.csv \
+  results/final_model/submission.csv \
   --check \
   --split test \
   --data_dir kuairand-starter-kit/KuaiRand-Pure/data
