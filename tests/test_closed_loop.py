@@ -452,6 +452,42 @@ class ClosedLoopTests(unittest.TestCase):
                 (root / "continuation" / "artifacts" / "resume_parent_stage2").exists()
             )
 
+    def test_stage2_resume_finalizes_original_incumbent_without_stage4_seeds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            snapshot = self._stage2_snapshot(root)
+            final_dir = root / "continuation" / "artifacts" / "final_model"
+            manager = FakeManager(self._data_dir(root / "starter"), final_dir)
+
+            def unexpected_finalizer(*args, **kwargs):
+                raise AssertionError("Stage 4 finalizer must not run for unchanged resume")
+
+            runner = ClosedLoopRunner(
+                manager,
+                exec_callback=lambda *args: None,
+                resume_from_stage2=snapshot,
+                finalizer=unexpected_finalizer,
+            )
+            runner.incumbent = runner._load_stage2_resume(snapshot)
+            manifest = runner._finalize()
+
+            self.assertEqual(
+                manifest["finalization_mode"],
+                "retained_verified_stage2_incumbent",
+            )
+            self.assertEqual(
+                hashlib.sha256((final_dir / "model.py").read_bytes()).hexdigest(),
+                manifest["model_sha256"],
+            )
+            self.assertEqual(
+                hashlib.sha256((final_dir / "checkpoint.npz").read_bytes()).hexdigest(),
+                manifest["checkpoint_sha256"],
+            )
+            self.assertEqual(
+                (final_dir / "source_node_id.txt").read_text().strip(),
+                "stage2-node",
+            )
+
     def setUp(self):
         FakeAgent.created_stage_names = []
         FakeAgent.created_task_descs = {}
