@@ -1,0 +1,15 @@
+{
+  "dataset": "KuaiRand-1K",
+  "accounting_scope": "attempt_2_through_stage2_snapshot_plus_complete_attempt_4_resume",
+  "prompt_tokens": 771431,
+  "completion_tokens": 302363,
+  "total_tokens": 1073794,
+  "wall_clock_seconds": 3797.8864915876666,
+  "counted_iterations": 21,
+  "iteration_limit": 50,
+  "seed_evaluations": 10,
+  "gpu_model": "NVIDIA RTX A4000",
+  "gpu_count": 1,
+  "gpu_hours": 1.054968469885463,
+  "attempt_4_sampled_gpu_active_hours": 0.05709673221326537
+}

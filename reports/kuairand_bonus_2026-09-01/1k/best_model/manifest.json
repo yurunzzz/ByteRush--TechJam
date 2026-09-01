@@ -1,0 +1,42 @@
+{
+  "ablation_name": null,
+  "ablation_target": "full",
+  "checkpoint_sha256": "36e3fa01dc23eb8f58065964f669602adabf316eeda96ae6eea57572581857c7",
+  "checkpoint_source_node_id": "e92b1d6a07eb42daa31ebe4608f9237e",
+  "checkpoint_validation_primary": 0.5054673254489899,
+  "created_at_utc": "2026-08-31T19:00:55.299213+00:00",
+  "model_sha256": "69ebff5c8c45d4522feca0e297f77479f23a7e89f6225ec1036ec0a41f051c74",
+  "required_successful_seeds": 2,
+  "schema_version": 2,
+  "selection_metric": "validation primary mean across seeds",
+  "source_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+  "source_stage": "2_multi_root_tuning_3_mlp",
+  "successful_seed_count": 2,
+  "test_metrics_used_for_selection": false,
+  "validation": {
+    "GAUC": {
+      "mean": 0.517147958278656,
+      "std": 3.075599670410156e-05,
+      "values": [
+        0.5171787142753601,
+        0.5171172022819519
+      ]
+    },
+    "nDCG@5": {
+      "mean": 0.4906415641307831,
+      "std": 0.003114372491836548,
+      "values": [
+        0.49375593662261963,
+        0.48752719163894653
+      ]
+    },
+    "primary": {
+      "mean": 0.5038947612047195,
+      "std": 0.0015725642442703247,
+      "values": [
+        0.5054673254489899,
+        0.5023221969604492
+      ]
+    }
+  }
+}

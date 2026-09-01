@@ -1,0 +1,43 @@
+{
+  "accounting_version": "1.0",
+  "run_started_at_utc": "2026-08-31T19:42:08.192521+00:00",
+  "run_finished_at_utc": "2026-08-31T20:04:41.208990+00:00",
+  "wall_clock_seconds": 1353.0165125876665,
+  "llm_prompt_tokens": 344852,
+  "llm_completion_tokens": 128366,
+  "llm_total_tokens": 473218,
+  "llm_calls": 79,
+  "llm_by_model": {
+    "gpt-5.6-terra": {
+      "prompt_tokens": 33817,
+      "completion_tokens": 35566,
+      "total_tokens": 69383,
+      "calls": 46
+    },
+    "gpt-5.6-sol": {
+      "prompt_tokens": 216936,
+      "completion_tokens": 88210,
+      "total_tokens": 305146,
+      "calls": 22
+    },
+    "gpt-5.6-luna": {
+      "prompt_tokens": 94099,
+      "completion_tokens": 4590,
+      "total_tokens": 98689,
+      "calls": 11
+    }
+  },
+  "executed_iterations": 9,
+  "seed_evaluations": 2,
+  "iteration_limit": 29,
+  "gpu_used": true,
+  "gpu_active_seconds": 205.54823596775532,
+  "gpu_models": [
+    "NVIDIA RTX A4000"
+  ],
+  "gpu_peak_used_memory_mib": 458.0,
+  "gpu_sample_interval_seconds": 1.0,
+  "gpu_samples": 1290,
+  "gpu_active_samples": 197,
+  "resource_event_file": "resource_events.jsonl"
+}

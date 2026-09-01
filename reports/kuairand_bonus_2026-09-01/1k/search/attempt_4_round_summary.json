@@ -1,0 +1,838 @@
+{
+  "adaptive_stop_state": {
+    "forced_stop_reason": "",
+    "low_gain_rounds": 0,
+    "no_improvement_rounds": 1,
+    "no_valid_rounds": 0
+  },
+  "candidate_attempts": [
+    {
+      "assignment_id": "round1:autonomous:1",
+      "assignment_kind": "autonomous",
+      "category": "autonomous_research",
+      "donor_candidate_id": "",
+      "elapsed_seconds": null,
+      "failure_category": "leakage_error",
+      "node_id": "98fcd943627f4c2191c6a3067e74372f",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "reason": "passed preflight, smoke test, execution, and contract",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "status": "accepted"
+    },
+    {
+      "assignment_id": "round1:autonomous:2",
+      "assignment_kind": "autonomous",
+      "category": "autonomous_research",
+      "donor_candidate_id": "",
+      "elapsed_seconds": null,
+      "failure_category": "leakage_error",
+      "node_id": "99c5749b398e40508bc56f2c977d0a63",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "reason": "passed preflight, smoke test, execution, and contract",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "status": "accepted"
+    },
+    {
+      "assignment_id": "round1:autonomous:3",
+      "assignment_kind": "autonomous",
+      "category": "autonomous_research",
+      "donor_candidate_id": "",
+      "elapsed_seconds": null,
+      "failure_category": "leakage_error",
+      "node_id": "4b03561fcac64e10b6f7b8bcaf3bbaf6",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "reason": "passed preflight, smoke test, execution, and contract",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "status": "accepted"
+    },
+    {
+      "assignment_id": "round1:autonomous:4",
+      "assignment_kind": "autonomous",
+      "category": "autonomous_research",
+      "donor_candidate_id": "",
+      "elapsed_seconds": null,
+      "failure_category": "ranking_group_error",
+      "node_id": "e7d35151c2fd48bd9a6e4188e0ea8946",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "reason": "PREFLIGHT_REJECTED: ranking objective extracts users but does not construct same-user groups or equality masks",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "status": "preflight_rejected"
+    },
+    {
+      "assignment_id": "round1:autonomous:5",
+      "assignment_kind": "autonomous",
+      "category": "autonomous_research",
+      "donor_candidate_id": "",
+      "elapsed_seconds": null,
+      "failure_category": "leakage_error",
+      "node_id": "4bec899663df424e84e3bdf2d93939db",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "reason": "passed preflight, smoke test, execution, and contract",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "status": "accepted"
+    },
+    {
+      "assignment_id": "round1:autonomous:4",
+      "assignment_kind": "autonomous",
+      "category": "autonomous_research",
+      "donor_candidate_id": "",
+      "elapsed_seconds": null,
+      "failure_category": "contract_error",
+      "node_id": "af9d1d25f3574322a887cbceded9c5f7",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "reason": "research_family 'context_interaction' already has 2 accepted candidates in this round. Choose a substantively different hypothesis; no replacement direction is prescribed",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "status": "family_concentration"
+    },
+    {
+      "assignment_id": "round1:autonomous:4",
+      "assignment_kind": "autonomous",
+      "category": "autonomous_research",
+      "donor_candidate_id": "",
+      "elapsed_seconds": null,
+      "failure_category": "leakage_error",
+      "node_id": "06927b5a9e424e18af66b3f16502e02a",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "reason": "passed preflight, smoke test, execution, and contract",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "status": "accepted"
+    }
+  ],
+  "candidates": [
+    {
+      "artifacts_valid": true,
+      "assignment_id": "round1:autonomous:5",
+      "assignment_kind": "autonomous",
+      "base_parent_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "category": "training_strategy",
+      "checkpoint_path": "/root/autodl-tmp/byterush-runs/1k/2026-09-01_03-42-08_kuairand_1k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_4bec899663df424e84e3bdf2d93939db_proc_18785/candidate_checkpoint.npz",
+      "code_path": "/root/autodl-tmp/byterush-runs/1k/2026-09-01_03-42-08_kuairand_1k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_4bec899663df424e84e3bdf2d93939db_proc_18785/experiment_code.py",
+      "components": [
+        "adversarial_embedding_component",
+        "architecture_mlp_component"
+      ],
+      "considered_factor_ids": [
+        "causal_recent_history",
+        "auxiliary_behavior_signal",
+        "static_video_metadata"
+      ],
+      "donor_candidate_id": "",
+      "eligible_for_promotion": false,
+      "factor_cards": [],
+      "factor_ids": [],
+      "factor_rejected_reasons": {
+        "auxiliary_behavior_signal": "The trusted cache exposes no legal auxiliary behavior target beyond long_view, so auxiliary supervision is unavailable.",
+        "causal_recent_history": "The candidate tests local embedding robustness independently of a history path, and no equivalent history tensor is needed.",
+        "static_video_metadata": "Author, tag, duration, and other raw video metadata are unavailable under the current trusted cache protocol."
+      },
+      "factor_selection_reason": "This hypothesis changes training behavior rather than features and requires only the trusted schema-v2 user/video categorical pair.",
+      "fingerprint": "67c810aefd699d4488a1cec72a13dfcaa0771269b10dd64c27488bd6a5937e00",
+      "improvement": 0.0006272047758102417,
+      "loss_family": "pointwise_bce",
+      "metric_deltas": {
+        "GAUC": -0.0002824068069458008,
+        "nDCG@5": 0.0015368163585662842,
+        "primary": 0.0006272047758102417
+      },
+      "metrics": {
+        "GAUC": 0.5168655514717102,
+        "nDCG@5": 0.49217838048934937,
+        "primary": 0.5045219659805298
+      },
+      "model_family": "mlp",
+      "node_id": "4bec899663df424e84e3bdf2d93939db",
+      "parent_model_family": "mlp",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "principal_change": "adversarial_embedding_component, architecture_mlp_component: I hypothesize that small worst-direction perturbations of the incumbent user/video embeddings will regularize its decision boundary and improve validation ranking without adding unavailable factors or changing inference. Trusted schema v2 i",
+      "promoted": false,
+      "provisional": false,
+      "random_seeds": [
+        0,
+        1
+      ],
+      "reason": "mean improvement 0.000627 is below 0.002000",
+      "research_family": "training_strategy",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "score": 0.5045219659805298,
+      "seed_mean": 0.5045219659805298,
+      "seed_metrics": [
+        {
+          "GAUC": 0.5168476700782776,
+          "nDCG@5": 0.48910319805145264,
+          "primary": 0.5029754340648651
+        },
+        {
+          "GAUC": 0.5168834328651428,
+          "nDCG@5": 0.4952535629272461,
+          "primary": 0.5060684978961945
+        }
+      ],
+      "seed_scores": [
+        0.5029754340648651,
+        0.5060684978961945
+      ],
+      "seed_std": 0.0015465319156646729,
+      "seed_wins": 1,
+      "source_phase": "stage3",
+      "source_stage": "3_candidate_tuning_3_top1_round_one_branch_one",
+      "stage4_confirmed": null,
+      "status": "valid_not_promoted",
+      "training_epochs": 8,
+      "transfer_status": "not_applicable",
+      "transferred_mechanism_ids": [],
+      "validation_split": "fixed_train_validation"
+    },
+    {
+      "artifacts_valid": true,
+      "assignment_id": "round1:autonomous:3",
+      "assignment_kind": "autonomous",
+      "base_parent_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "category": "ranking_objective",
+      "checkpoint_path": "/root/autodl-tmp/byterush-runs/1k/2026-09-01_03-42-08_kuairand_1k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_4b03561fcac64e10b6f7b8bcaf3bbaf6_proc_18758/candidate_checkpoint.npz",
+      "code_path": "/root/autodl-tmp/byterush-runs/1k/2026-09-01_03-42-08_kuairand_1k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_4b03561fcac64e10b6f7b8bcaf3bbaf6_proc_18758/experiment_code.py",
+      "components": [
+        "architecture_mlp_component",
+        "same_user_bpr_component"
+      ],
+      "considered_factor_ids": [
+        "causal_recent_history",
+        "static_video_metadata"
+      ],
+      "donor_candidate_id": "",
+      "eligible_for_promotion": false,
+      "factor_cards": [],
+      "factor_ids": [],
+      "factor_rejected_reasons": {
+        "causal_recent_history": "The branch does not require a history encoder, and adding one would confound the attribution of the same-user pairwise objective.",
+        "static_video_metadata": "The trusted cache exposes no author, tag, duration, or other static video metadata fields beyond video_id."
+      },
+      "factor_selection_reason": "This experiment isolates ranking-objective alignment while preserving the incumbent's trusted two-ID information content.",
+      "fingerprint": "d6c541b61ea431404dd0c81e11c202ebc6046e8fd3e8e67e18cf398298bbe47d",
+      "improvement": 0.0,
+      "loss_family": "hybrid_bce_bpr",
+      "metric_deltas": {
+        "GAUC": 9.959936141967773e-05,
+        "nDCG@5": -0.002882450819015503,
+        "primary": -0.0013914257287979126
+      },
+      "metrics": {
+        "GAUC": 0.5172475576400757,
+        "nDCG@5": 0.4877591133117676,
+        "primary": 0.5025033354759216
+      },
+      "model_family": "mlp",
+      "node_id": "4b03561fcac64e10b6f7b8bcaf3bbaf6",
+      "parent_model_family": "mlp",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "principal_change": "architecture_mlp_component, same_user_bpr_component: I hypothesize that the incumbent pointwise MLP can improve user-level ordering by adding a bounded same-user BPR term while retaining BCE calibration. Trusted schema-v2 is converted unchanged into dense `(N, 2)` train-fitted user/video cate",
+      "promoted": false,
+      "provisional": false,
+      "random_seeds": [],
+      "reason": "only 0 valid seeds; 2 required",
+      "research_family": "ranking_objective",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "score": 0.5025033354759216,
+      "seed_mean": null,
+      "seed_metrics": [],
+      "seed_scores": [],
+      "seed_std": null,
+      "seed_wins": 0,
+      "source_phase": "stage3",
+      "source_stage": "3_candidate_tuning_2_targeted_round_one_branch_two",
+      "stage4_confirmed": null,
+      "status": "valid_not_promoted",
+      "training_epochs": 8,
+      "transfer_status": "not_applicable",
+      "transferred_mechanism_ids": [],
+      "validation_split": "fixed_train_validation"
+    },
+    {
+      "artifacts_valid": true,
+      "assignment_id": "round1:autonomous:2",
+      "assignment_kind": "autonomous",
+      "base_parent_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "category": "context_interaction",
+      "checkpoint_path": "/root/autodl-tmp/byterush-runs/1k/2026-09-01_03-42-08_kuairand_1k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_99c5749b398e40508bc56f2c977d0a63_proc_18785/candidate_checkpoint.npz",
+      "code_path": "/root/autodl-tmp/byterush-runs/1k/2026-09-01_03-42-08_kuairand_1k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_99c5749b398e40508bc56f2c977d0a63_proc_18785/experiment_code.py",
+      "components": [
+        "architecture_mlp_component",
+        "deepfm_low_order_component"
+      ],
+      "considered_factor_ids": [
+        "causal_recent_history",
+        "static_video_metadata"
+      ],
+      "donor_candidate_id": "",
+      "eligible_for_promotion": false,
+      "factor_cards": [],
+      "factor_ids": [],
+      "factor_rejected_reasons": {
+        "causal_recent_history": "Although history_end is present, adding a history encoder would introduce a separate temporal-interest hypothesis and additional state beyond the controlled DeepFM comparison.",
+        "static_video_metadata": "Author, tag, duration, and other raw video metadata are unavailable under the trusted cache protocol."
+      },
+      "factor_selection_reason": "This experiment isolates an architecture-level interaction hypothesis using the incumbent's trusted user/video ID pair, avoiding simultaneous feature changes that would confound attribution.",
+      "fingerprint": "d490a81be60d28fe3efdc49a25206bb59a35692f3fca93c9b75cae7421735794",
+      "improvement": 0.0,
+      "loss_family": "pointwise_bce",
+      "metric_deltas": {
+        "GAUC": 1.4841556549072266e-05,
+        "nDCG@5": -0.005018085241317749,
+        "primary": -0.0025016218423843384
+      },
+      "metrics": {
+        "GAUC": 0.5171627998352051,
+        "nDCG@5": 0.48562347888946533,
+        "primary": 0.5013931393623352
+      },
+      "model_family": "deepfm",
+      "node_id": "99c5749b398e40508bc56f2c977d0a63",
+      "parent_model_family": "mlp",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "principal_change": "architecture_mlp_component, deepfm_low_order_component: The hypothesis is that an explicit low-order FM branch will complement the incumbent MLP by modeling sparse user\u2013video interactions that a shallow nonlinear tower may learn inefficiently. Trusted schema-v2 features flow unchanged through `L",
+      "promoted": false,
+      "provisional": false,
+      "random_seeds": [],
+      "reason": "only 0 valid seeds; 2 required",
+      "research_family": "context_interaction",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "score": 0.5013931393623352,
+      "seed_mean": null,
+      "seed_metrics": [],
+      "seed_scores": [],
+      "seed_std": null,
+      "seed_wins": 0,
+      "source_phase": "stage3",
+      "source_stage": "3_creative_research_1_round_one_autonomous",
+      "stage4_confirmed": null,
+      "status": "valid_not_promoted",
+      "training_epochs": 8,
+      "transfer_status": "not_applicable",
+      "transferred_mechanism_ids": [],
+      "validation_split": "fixed_train_validation"
+    },
+    {
+      "artifacts_valid": true,
+      "assignment_id": "round1:autonomous:4",
+      "assignment_kind": "autonomous",
+      "base_parent_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "category": "training_strategy",
+      "checkpoint_path": "/root/autodl-tmp/byterush-runs/1k/2026-09-01_03-42-08_kuairand_1k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_06927b5a9e424e18af66b3f16502e02a_proc_18785/candidate_checkpoint.npz",
+      "code_path": "/root/autodl-tmp/byterush-runs/1k/2026-09-01_03-42-08_kuairand_1k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_06927b5a9e424e18af66b3f16502e02a_proc_18785/experiment_code.py",
+      "components": [
+        "architecture_mlp_component",
+        "user_frequency_balanced_bce_component"
+      ],
+      "considered_factor_ids": [
+        "auxiliary_behavior_signal",
+        "causal_recent_history",
+        "static_user_profile"
+      ],
+      "donor_candidate_id": "",
+      "eligible_for_promotion": false,
+      "factor_cards": [],
+      "factor_ids": [],
+      "factor_rejected_reasons": {
+        "auxiliary_behavior_signal": "The trusted cache exposes no auxiliary behavior target.",
+        "causal_recent_history": "No history factor is required to test user-frequency-balanced optimization, and adding one would confound attribution.",
+        "static_user_profile": "The trusted cache exposes no additional static profile fields."
+      },
+      "factor_selection_reason": "This hypothesis changes loss aggregation using the already encoded train user IDs and requires no additional prediction-time factor.",
+      "fingerprint": "161104729606610341c32a2b86b3142e48c33281cdc6de1d96d2d2e897470f6e",
+      "improvement": 0.0,
+      "loss_family": "pointwise_bce",
+      "metric_deltas": {
+        "GAUC": 4.363059997558594e-05,
+        "nDCG@5": -0.008225679397583008,
+        "primary": -0.004091024398803711
+      },
+      "metrics": {
+        "GAUC": 0.5171915888786316,
+        "nDCG@5": 0.4824158847332001,
+        "primary": 0.49980373680591583
+      },
+      "model_family": "mlp",
+      "node_id": "06927b5a9e424e18af66b3f16502e02a",
+      "parent_model_family": "mlp",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "principal_change": "architecture_mlp_component, user_frequency_balanced_bce_component: I hypothesize that train-row imbalance over users causes the incumbent MLP to over-optimize frequent users, while validation GAUC and nDCG@5 emphasize within-user ranking; a capped inverse-frequency weighted BCE should better align training",
+      "promoted": false,
+      "provisional": false,
+      "random_seeds": [],
+      "reason": "only 0 valid seeds; 2 required",
+      "research_family": "training_strategy",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "score": 0.49980373680591583,
+      "seed_mean": null,
+      "seed_metrics": [],
+      "seed_scores": [],
+      "seed_std": null,
+      "seed_wins": 0,
+      "source_phase": "stage3",
+      "source_stage": "3_creative_research_1_round_one_autonomous",
+      "stage4_confirmed": null,
+      "status": "valid_not_promoted",
+      "training_epochs": 5,
+      "transfer_status": "not_applicable",
+      "transferred_mechanism_ids": [],
+      "validation_split": "fixed_train_validation"
+    },
+    {
+      "artifacts_valid": true,
+      "assignment_id": "round1:autonomous:1",
+      "assignment_kind": "autonomous",
+      "base_parent_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "category": "context_interaction",
+      "checkpoint_path": "/root/autodl-tmp/byterush-runs/1k/2026-09-01_03-42-08_kuairand_1k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_98fcd943627f4c2191c6a3067e74372f_proc_18758/candidate_checkpoint.npz",
+      "code_path": "/root/autodl-tmp/byterush-runs/1k/2026-09-01_03-42-08_kuairand_1k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_98fcd943627f4c2191c6a3067e74372f_proc_18758/experiment_code.py",
+      "components": [
+        "architecture_mlp_component",
+        "deepfm_interaction_component"
+      ],
+      "considered_factor_ids": [
+        "user_item_context_cross",
+        "causal_recent_history"
+      ],
+      "donor_candidate_id": "",
+      "eligible_for_promotion": false,
+      "factor_cards": [],
+      "factor_ids": [],
+      "factor_rejected_reasons": {
+        "causal_recent_history": "A complete bounded history sequence is not guaranteed by the dense two-column encoded input contract, so this branch avoids assuming an unavailable history tensor.",
+        "user_item_context_cross": "The card describes crosses involving user state, item metadata, tab, or temporal context, but the cache exposes only user_id and video_id; the proposed ID dot product is a model computation rather than a newly encoded factor."
+      },
+      "factor_selection_reason": "This hypothesis tests an architectural interaction over the already available user_id and video_id fields, so no new factor vocabulary, historical aggregate, or cache field is required.",
+      "fingerprint": "023281dca9c84d325c6167304270a264c518ca39ac9b5c81587dddf4d35da042",
+      "improvement": 0.0,
+      "loss_family": "pointwise_bce",
+      "metric_deltas": {
+        "GAUC": 0.00018990039825439453,
+        "nDCG@5": -0.010008007287979126,
+        "primary": -0.004909053444862366
+      },
+      "metrics": {
+        "GAUC": 0.5173378586769104,
+        "nDCG@5": 0.48063355684280396,
+        "primary": 0.4989857077598572
+      },
+      "model_family": "deepfm",
+      "node_id": "98fcd943627f4c2191c6a3067e74372f",
+      "parent_model_family": "mlp",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "principal_change": "architecture_mlp_component, deepfm_interaction_component: I hypothesize that the incumbent MLP misses a useful low-rank user\u2013video compatibility signal that an explicit FM interaction can recover. The trusted schema-v2 adapter supplies only the train-fitted dense user/video categorical ID pair, wi",
+      "promoted": false,
+      "provisional": false,
+      "random_seeds": [],
+      "reason": "only 0 valid seeds; 2 required",
+      "research_family": "context_interaction",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "score": 0.4989857077598572,
+      "seed_mean": null,
+      "seed_metrics": [],
+      "seed_scores": [],
+      "seed_std": null,
+      "seed_wins": 0,
+      "source_phase": "stage3",
+      "source_stage": "3_creative_research_1_round_one_autonomous",
+      "stage4_confirmed": null,
+      "status": "valid_not_promoted",
+      "training_epochs": 8,
+      "transfer_status": "not_applicable",
+      "transferred_mechanism_ids": [],
+      "validation_split": "fixed_train_validation"
+    }
+  ],
+  "diverse_frontier": [
+    {
+      "fingerprint": "d8a89ba97f2ce121a3ee51373237c889e3c5cb9ce2a0cff2ade0f9521a9d027d",
+      "loss_family": "pointwise_bce",
+      "metrics": {
+        "GAUC": null,
+        "nDCG@5": null,
+        "primary": 0.5038947612047195
+      },
+      "model_family": "mlp",
+      "node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "parent_model_family": "fm",
+      "parent_node_id": "60828fa8b73a4ab9aadbea3e82dece1a",
+      "principal_change": "architecture_mlp_component: Continue from the verified Stage 2 incumbent without rerunning Stage 1/2.",
+      "research_family": "architecture",
+      "role": "architecture_mlp",
+      "round_number": 0,
+      "score": 0.5038947612047195,
+      "semantic_signature": "{\"factor_ids\": [], \"loss_family\": \"pointwise_bce\", \"mechanism_ids\": [\"architecture_mlp\"], \"model_family\": \"mlp\", \"research_family\": \"architecture\"}",
+      "source_stage": "2_multi_root_tuning_3_mlp"
+    },
+    {
+      "fingerprint": "d490a81be60d28fe3efdc49a25206bb59a35692f3fca93c9b75cae7421735794",
+      "loss_family": "pointwise_bce",
+      "metrics": {
+        "GAUC": 0.5171627998352051,
+        "nDCG@5": 0.48562347888946533,
+        "primary": 0.5013931393623352
+      },
+      "model_family": "deepfm",
+      "node_id": "99c5749b398e40508bc56f2c977d0a63",
+      "parent_model_family": "mlp",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "principal_change": "architecture_mlp_component, deepfm_low_order_component: The hypothesis is that an explicit low-order FM branch will complement the incumbent MLP by modeling sparse user\u2013video interactions that a shallow nonlinear tower may learn inefficiently. Trusted schema-v2 features flow unchanged through `L",
+      "research_family": "context_interaction",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "score": 0.5013931393623352,
+      "semantic_signature": "{\"factor_ids\": [], \"loss_family\": \"pointwise_bce\", \"mechanism_ids\": [\"fm_low_order_logit\", \"shared_embedding_deep_tower\"], \"model_family\": \"deepfm\", \"research_family\": \"context_interaction\"}",
+      "source_stage": "3_creative_research_1_round_one_autonomous"
+    },
+    {
+      "fingerprint": "67c810aefd699d4488a1cec72a13dfcaa0771269b10dd64c27488bd6a5937e00",
+      "loss_family": "pointwise_bce",
+      "metrics": {
+        "GAUC": 0.5168476700782776,
+        "nDCG@5": 0.48910319805145264,
+        "primary": 0.5029754340648651
+      },
+      "model_family": "mlp",
+      "node_id": "4bec899663df424e84e3bdf2d93939db",
+      "parent_model_family": "mlp",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "principal_change": "adversarial_embedding_component, architecture_mlp_component: I hypothesize that small worst-direction perturbations of the incumbent user/video embeddings will regularize its decision boundary and improve validation ranking without adding unavailable factors or changing inference. Trusted schema v2 i",
+      "research_family": "training_strategy",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "score": 0.5029754340648651,
+      "semantic_signature": "{\"factor_ids\": [], \"loss_family\": \"pointwise_bce\", \"mechanism_ids\": [\"bounded_adversarial_embedding_training\", \"incumbent_id_pair_mlp\"], \"model_family\": \"mlp\", \"research_family\": \"training_strategy\"}",
+      "source_stage": "3_candidate_tuning_3_top1_round_one_branch_one"
+    },
+    {
+      "fingerprint": "d6c541b61ea431404dd0c81e11c202ebc6046e8fd3e8e67e18cf398298bbe47d",
+      "loss_family": "hybrid_bce_bpr",
+      "metrics": {
+        "GAUC": 0.5172475576400757,
+        "nDCG@5": 0.4877591133117676,
+        "primary": 0.5025033354759216
+      },
+      "model_family": "mlp",
+      "node_id": "4b03561fcac64e10b6f7b8bcaf3bbaf6",
+      "parent_model_family": "mlp",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "principal_change": "architecture_mlp_component, same_user_bpr_component: I hypothesize that the incumbent pointwise MLP can improve user-level ordering by adding a bounded same-user BPR term while retaining BCE calibration. Trusted schema-v2 is converted unchanged into dense `(N, 2)` train-fitted user/video cate",
+      "research_family": "ranking_objective",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "score": 0.5025033354759216,
+      "semantic_signature": "{\"factor_ids\": [], \"loss_family\": \"hybrid_bce_bpr\", \"mechanism_ids\": [\"adjacent_same_user_pairing\", \"hybrid_bce_bpr_loss\", \"incumbent_embedding_mlp\"], \"model_family\": \"mlp\", \"research_family\": \"ranking_objective\"}",
+      "source_stage": "3_candidate_tuning_2_targeted_round_one_branch_two"
+    },
+    {
+      "fingerprint": "023281dca9c84d325c6167304270a264c518ca39ac9b5c81587dddf4d35da042",
+      "loss_family": "pointwise_bce",
+      "metrics": {
+        "GAUC": 0.5173378586769104,
+        "nDCG@5": 0.48063355684280396,
+        "primary": 0.4989857077598572
+      },
+      "model_family": "deepfm",
+      "node_id": "98fcd943627f4c2191c6a3067e74372f",
+      "parent_model_family": "mlp",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "principal_change": "architecture_mlp_component, deepfm_interaction_component: I hypothesize that the incumbent MLP misses a useful low-rank user\u2013video compatibility signal that an explicit FM interaction can recover. The trusted schema-v2 adapter supplies only the train-fitted dense user/video categorical ID pair, wi",
+      "research_family": "context_interaction",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "score": 0.4989857077598572,
+      "semantic_signature": "{\"factor_ids\": [], \"loss_family\": \"pointwise_bce\", \"mechanism_ids\": [\"deepfm_linear_interaction_residual\", \"parent_embedding_mlp\"], \"model_family\": \"deepfm\", \"research_family\": \"context_interaction\"}",
+      "source_stage": "3_creative_research_1_round_one_autonomous"
+    },
+    {
+      "fingerprint": "161104729606610341c32a2b86b3142e48c33281cdc6de1d96d2d2e897470f6e",
+      "loss_family": "pointwise_bce",
+      "metrics": {
+        "GAUC": 0.5171915888786316,
+        "nDCG@5": 0.4824158847332001,
+        "primary": 0.49980373680591583
+      },
+      "model_family": "mlp",
+      "node_id": "06927b5a9e424e18af66b3f16502e02a",
+      "parent_model_family": "mlp",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "principal_change": "architecture_mlp_component, user_frequency_balanced_bce_component: I hypothesize that train-row imbalance over users causes the incumbent MLP to over-optimize frequent users, while validation GAUC and nDCG@5 emphasize within-user ranking; a capped inverse-frequency weighted BCE should better align training",
+      "research_family": "training_strategy",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "score": 0.49980373680591583,
+      "semantic_signature": "{\"factor_ids\": [], \"loss_family\": \"pointwise_bce\", \"mechanism_ids\": [\"incumbent_embedding_mlp\", \"train_user_frequency_weighting\", \"weighted_pointwise_bce\"], \"model_family\": \"mlp\", \"research_family\": \"training_strategy\"}",
+      "source_stage": "3_creative_research_1_round_one_autonomous"
+    }
+  ],
+  "feedback_scope": "validation_only",
+  "fingerprint_count": 5,
+  "incumbent": {
+    "metrics": {
+      "GAUC": 0.517147958278656,
+      "nDCG@5": 0.4906415641307831,
+      "primary": 0.5038947612047195
+    },
+    "node_id": "16a74b87a04a4126be7150ca6fd52a29",
+    "score": 0.5038947612047195,
+    "seed_scores": [
+      0.5054673254489899,
+      0.5023221969604492
+    ],
+    "source_stage": "2_multi_root_tuning_3_mlp",
+    "verified": true
+  },
+  "near_winners": [
+    {
+      "artifacts_valid": true,
+      "assignment_id": "round1:autonomous:5",
+      "assignment_kind": "autonomous",
+      "base_parent_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "category": "training_strategy",
+      "checkpoint_path": "/root/autodl-tmp/byterush-runs/1k/2026-09-01_03-42-08_kuairand_1k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_4bec899663df424e84e3bdf2d93939db_proc_18785/candidate_checkpoint.npz",
+      "code_path": "/root/autodl-tmp/byterush-runs/1k/2026-09-01_03-42-08_kuairand_1k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_4bec899663df424e84e3bdf2d93939db_proc_18785/experiment_code.py",
+      "components": [
+        "adversarial_embedding_component",
+        "architecture_mlp_component"
+      ],
+      "considered_factor_ids": [
+        "causal_recent_history",
+        "auxiliary_behavior_signal",
+        "static_video_metadata"
+      ],
+      "donor_candidate_id": "",
+      "eligible_for_promotion": false,
+      "factor_cards": [],
+      "factor_ids": [],
+      "factor_rejected_reasons": {
+        "auxiliary_behavior_signal": "The trusted cache exposes no legal auxiliary behavior target beyond long_view, so auxiliary supervision is unavailable.",
+        "causal_recent_history": "The candidate tests local embedding robustness independently of a history path, and no equivalent history tensor is needed.",
+        "static_video_metadata": "Author, tag, duration, and other raw video metadata are unavailable under the current trusted cache protocol."
+      },
+      "factor_selection_reason": "This hypothesis changes training behavior rather than features and requires only the trusted schema-v2 user/video categorical pair.",
+      "fingerprint": "67c810aefd699d4488a1cec72a13dfcaa0771269b10dd64c27488bd6a5937e00",
+      "improvement": 0.0006272047758102417,
+      "loss_family": "pointwise_bce",
+      "metric_deltas": {
+        "GAUC": -0.0002824068069458008,
+        "nDCG@5": 0.0015368163585662842,
+        "primary": 0.0006272047758102417
+      },
+      "metrics": {
+        "GAUC": 0.5168655514717102,
+        "nDCG@5": 0.49217838048934937,
+        "primary": 0.5045219659805298
+      },
+      "model_family": "mlp",
+      "node_id": "4bec899663df424e84e3bdf2d93939db",
+      "parent_model_family": "mlp",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "principal_change": "adversarial_embedding_component, architecture_mlp_component: I hypothesize that small worst-direction perturbations of the incumbent user/video embeddings will regularize its decision boundary and improve validation ranking without adding unavailable factors or changing inference. Trusted schema v2 i",
+      "promoted": false,
+      "provisional": false,
+      "random_seeds": [
+        0,
+        1
+      ],
+      "reason": "mean improvement 0.000627 is below 0.002000",
+      "research_family": "training_strategy",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "score": 0.5045219659805298,
+      "seed_mean": 0.5045219659805298,
+      "seed_metrics": [
+        {
+          "GAUC": 0.5168476700782776,
+          "nDCG@5": 0.48910319805145264,
+          "primary": 0.5029754340648651
+        },
+        {
+          "GAUC": 0.5168834328651428,
+          "nDCG@5": 0.4952535629272461,
+          "primary": 0.5060684978961945
+        }
+      ],
+      "seed_scores": [
+        0.5029754340648651,
+        0.5060684978961945
+      ],
+      "seed_std": 0.0015465319156646729,
+      "seed_wins": 1,
+      "source_phase": "stage3",
+      "source_stage": "3_candidate_tuning_3_top1_round_one_branch_one",
+      "stage4_confirmed": null,
+      "status": "valid_not_promoted",
+      "training_epochs": 8,
+      "transfer_status": "not_applicable",
+      "transferred_mechanism_ids": [],
+      "validation_split": "fixed_train_validation"
+    },
+    {
+      "artifacts_valid": true,
+      "assignment_id": "round1:autonomous:3",
+      "assignment_kind": "autonomous",
+      "base_parent_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "category": "ranking_objective",
+      "checkpoint_path": "/root/autodl-tmp/byterush-runs/1k/2026-09-01_03-42-08_kuairand_1k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_4b03561fcac64e10b6f7b8bcaf3bbaf6_proc_18758/candidate_checkpoint.npz",
+      "code_path": "/root/autodl-tmp/byterush-runs/1k/2026-09-01_03-42-08_kuairand_1k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_4b03561fcac64e10b6f7b8bcaf3bbaf6_proc_18758/experiment_code.py",
+      "components": [
+        "architecture_mlp_component",
+        "same_user_bpr_component"
+      ],
+      "considered_factor_ids": [
+        "causal_recent_history",
+        "static_video_metadata"
+      ],
+      "donor_candidate_id": "",
+      "eligible_for_promotion": false,
+      "factor_cards": [],
+      "factor_ids": [],
+      "factor_rejected_reasons": {
+        "causal_recent_history": "The branch does not require a history encoder, and adding one would confound the attribution of the same-user pairwise objective.",
+        "static_video_metadata": "The trusted cache exposes no author, tag, duration, or other static video metadata fields beyond video_id."
+      },
+      "factor_selection_reason": "This experiment isolates ranking-objective alignment while preserving the incumbent's trusted two-ID information content.",
+      "fingerprint": "d6c541b61ea431404dd0c81e11c202ebc6046e8fd3e8e67e18cf398298bbe47d",
+      "improvement": 0.0,
+      "loss_family": "hybrid_bce_bpr",
+      "metric_deltas": {
+        "GAUC": 9.959936141967773e-05,
+        "nDCG@5": -0.002882450819015503,
+        "primary": -0.0013914257287979126
+      },
+      "metrics": {
+        "GAUC": 0.5172475576400757,
+        "nDCG@5": 0.4877591133117676,
+        "primary": 0.5025033354759216
+      },
+      "model_family": "mlp",
+      "node_id": "4b03561fcac64e10b6f7b8bcaf3bbaf6",
+      "parent_model_family": "mlp",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "principal_change": "architecture_mlp_component, same_user_bpr_component: I hypothesize that the incumbent pointwise MLP can improve user-level ordering by adding a bounded same-user BPR term while retaining BCE calibration. Trusted schema-v2 is converted unchanged into dense `(N, 2)` train-fitted user/video cate",
+      "promoted": false,
+      "provisional": false,
+      "random_seeds": [],
+      "reason": "only 0 valid seeds; 2 required",
+      "research_family": "ranking_objective",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "score": 0.5025033354759216,
+      "seed_mean": null,
+      "seed_metrics": [],
+      "seed_scores": [],
+      "seed_std": null,
+      "seed_wins": 0,
+      "source_phase": "stage3",
+      "source_stage": "3_candidate_tuning_2_targeted_round_one_branch_two",
+      "stage4_confirmed": null,
+      "status": "valid_not_promoted",
+      "training_epochs": 8,
+      "transfer_status": "not_applicable",
+      "transferred_mechanism_ids": [],
+      "validation_split": "fixed_train_validation"
+    },
+    {
+      "artifacts_valid": true,
+      "assignment_id": "round1:autonomous:2",
+      "assignment_kind": "autonomous",
+      "base_parent_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "category": "context_interaction",
+      "checkpoint_path": "/root/autodl-tmp/byterush-runs/1k/2026-09-01_03-42-08_kuairand_1k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_99c5749b398e40508bc56f2c977d0a63_proc_18785/candidate_checkpoint.npz",
+      "code_path": "/root/autodl-tmp/byterush-runs/1k/2026-09-01_03-42-08_kuairand_1k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_99c5749b398e40508bc56f2c977d0a63_proc_18785/experiment_code.py",
+      "components": [
+        "architecture_mlp_component",
+        "deepfm_low_order_component"
+      ],
+      "considered_factor_ids": [
+        "causal_recent_history",
+        "static_video_metadata"
+      ],
+      "donor_candidate_id": "",
+      "eligible_for_promotion": false,
+      "factor_cards": [],
+      "factor_ids": [],
+      "factor_rejected_reasons": {
+        "causal_recent_history": "Although history_end is present, adding a history encoder would introduce a separate temporal-interest hypothesis and additional state beyond the controlled DeepFM comparison.",
+        "static_video_metadata": "Author, tag, duration, and other raw video metadata are unavailable under the trusted cache protocol."
+      },
+      "factor_selection_reason": "This experiment isolates an architecture-level interaction hypothesis using the incumbent's trusted user/video ID pair, avoiding simultaneous feature changes that would confound attribution.",
+      "fingerprint": "d490a81be60d28fe3efdc49a25206bb59a35692f3fca93c9b75cae7421735794",
+      "improvement": 0.0,
+      "loss_family": "pointwise_bce",
+      "metric_deltas": {
+        "GAUC": 1.4841556549072266e-05,
+        "nDCG@5": -0.005018085241317749,
+        "primary": -0.0025016218423843384
+      },
+      "metrics": {
+        "GAUC": 0.5171627998352051,
+        "nDCG@5": 0.48562347888946533,
+        "primary": 0.5013931393623352
+      },
+      "model_family": "deepfm",
+      "node_id": "99c5749b398e40508bc56f2c977d0a63",
+      "parent_model_family": "mlp",
+      "parent_node_id": "16a74b87a04a4126be7150ca6fd52a29",
+      "principal_change": "architecture_mlp_component, deepfm_low_order_component: The hypothesis is that an explicit low-order FM branch will complement the incumbent MLP by modeling sparse user\u2013video interactions that a shallow nonlinear tower may learn inefficiently. Trusted schema-v2 features flow unchanged through `L",
+      "promoted": false,
+      "provisional": false,
+      "random_seeds": [],
+      "reason": "only 0 valid seeds; 2 required",
+      "research_family": "context_interaction",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "score": 0.5013931393623352,
+      "seed_mean": null,
+      "seed_metrics": [],
+      "seed_scores": [],
+      "seed_std": null,
+      "seed_wins": 0,
+      "source_phase": "stage3",
+      "source_stage": "3_creative_research_1_round_one_autonomous",
+      "stage4_confirmed": null,
+      "status": "valid_not_promoted",
+      "training_epochs": 8,
+      "transfer_status": "not_applicable",
+      "transferred_mechanism_ids": [],
+      "validation_split": "fixed_train_validation"
+    }
+  ],
+  "provisional_candidate": {
+    "node_id": null,
+    "score": null
+  },
+  "recent_failed_hypotheses": [
+    "round1:autonomous:4: research_family 'context_interaction' already has 2 accepted candidates in this round. Choose a substantively different hypothesis; no replacement direction is prescribed",
+    "mean improvement 0.000627 is below 0.002000",
+    "only 0 valid seeds; 2 required",
+    "only 0 valid seeds; 2 required",
+    "only 0 valid seeds; 2 required",
+    "only 0 valid seeds; 2 required"
+  ],
+  "round_health": {
+    "attempts": 7,
+    "best_primary_gain": 0.0006272047758102417,
+    "evaluated_candidates": 5,
+    "failure_categories": {
+      "contract_error": 1,
+      "ranking_group_error": 1
+    },
+    "successful_transfers": 0,
+    "transfer_attempts": 0,
+    "valid_candidates": 5
+  },
+  "round_number": 1,
+  "schema_version": 2,
+  "test_metrics_used": false
+}
