@@ -15,20 +15,20 @@ Machine-learning engineers spend most of their time on one repetitive loop: read
 
 The problem statement (2.2) asks for an agent that can autonomously **reproduce the official baseline**, **iterate on the pipeline** using only train + public‑validation feedback, and **improve over the baseline**, while running end‑to‑end and remaining robust across long runs. ByteRush addresses each requirement directly:
 
-**1. Reproduces the official baseline.** The agent stands up a working FM pipeline through the controlled `run_fm_experiment.py` interface and confirms it reaches the published reference. Our verified reproduction matched the official FM validation scores — **GAUC 0.6671 / nDCG@5 0.5358 / primary 0.6015** (`primary = (GAUC + nDCG@5) / 2`) against the official baseline's 0.6016 — establishing that the loop is correct and reproducible before any search begins.
+**1. Reproduces the official baseline.** The agent stands up a working FM pipeline through the controlled `run_fm_experiment.py` interface and confirms it reaches the published reference. In the selected **2026-08-30 22:11** run, our verified reproduction reached **GAUC 0.667366 / nDCG@5 0.535944 / primary 0.601655** (`primary = (GAUC + nDCG@5) / 2`), matching the official FM validation primary of approximately 0.6016 and establishing that the loop is correct and reproducible before search begins.
 
 **2. Iterates autonomously across the stack.** ByteRush runs the full Figure‑1 loop on its own. Each iteration the LLM: (a) proposes a hypothesis and generates code, (b) executes it in a sandboxed interpreter, (c) parses back GAUC, nDCG@5 and the primary metric, (d) writes a node into a **best‑first tree search (BFTS)** journal, (e) reproduces promising nodes under an independent seed, and (f) auto‑selects the best node and checkpoints it. Over an end‑to‑end campaign the agent explored FM hyper‑parameter tuning, an embedding model, Wide&Deep, Embedding+MLP, DeepFM, BPR and DIN‑style attention — improvements spanning features, model architecture and loss functions, not just the model box.
 
 **3. Improves over the baseline, and freezes a final submission for hidden‑test scoring.** Two numbers matter here, and the challenge separates them deliberately:
 
-- **What we can measure (validation).** During development the only feedback available is the validation primary. Against the *real* FM baseline (validation primary **0.6016**), the agent's best node reached **0.6053 (+0.0037)** — we report this against the FM bar, not against a `random` sanity check, and we flag in our run log that an earlier "+0.12" figure was misleading because it compared to random.
-- **What determines the ranking (hidden test).** Per the problem statement, **the final ranking is computed once by the organizers on the hidden test set**, using the single submission the agent designates as final. The agent therefore selects and freezes its model *exclusively on validation*, produces a 3‑seed‑mean `submission.csv` in the official `row_id,user_id,video_id,score` schema, and validates it with `submit.py --check`. We never see a test score ourselves, so we do **not** self‑report one; the published reference bar on hidden test is the official FM's **primary 0.5946** (GAUC 0.6610 / nDCG@5 0.5282). A validation→test drop is expected (the FM reference itself drops ~0.007 from 0.6016 to 0.5946), so our +0.0037 validation lead is the honest, measurable signal — the final hidden‑test delta is resolved at judging time.
+- **What we can measure (validation).** During development the only feedback available is the validation primary. Against the reproduced FM baseline (**GAUC 0.667366 / nDCG@5 0.535944 / primary 0.601655**), the frozen **Wide & Deep** winner reached **GAUC 0.671028 / nDCG@5 0.537670 / primary 0.604349**, an improvement of **+0.003662 GAUC / +0.001726 nDCG@5 / +0.002694 primary (+0.448%)**. The winner was selected using validation only and verified across 5 seeds. We report this against the FM bar, not against a `random` sanity check, and we flag in our run log that an earlier "+0.12" figure was misleading because it compared to random.
+- **What determines the ranking (hidden test).** Per the problem statement, **the final ranking is computed once by the organizers on the hidden test set**, using the single submission the agent designates as final. The agent therefore selects and freezes its model *exclusively on validation*, produces predictions for all **170,588** hidden-test rows in a `submission.csv` with the official `row_id,user_id,video_id,score` schema, and validates it with `submit.py --check`. We never see a test score ourselves, so we do **not** self‑report one; the published reference bar on hidden test is the official FM's **primary 0.5946** (GAUC 0.6610 / nDCG@5 0.5282). The reproduced FM validation primary is **0.007055** above that hidden-test reference (0.601655 → 0.5946), so our **+0.002694** validation lead is the honest, measurable signal — the final hidden‑test delta is resolved at judging time.
 
 **4. Never touches the hidden test set.** A hard boundary in the code prevents the agent from ever seeing test labels or test metrics, so the validation lead above is not contaminated. `evaluate.py` is the single scoring authority; the research loop selects nodes purely on **validation** primary. The test split is read only once — after the model is frozen — to emit the submission file, and its labels/metrics are never returned to the agent.
 
 **5. Robust operation.** Long runs neither crash nor diverge: failed code nodes are caught, parsed and routed around; the FM interface rejects unknown or unsafe parameters; and `data.py` / `evaluate.py` are guarded by **SHA‑256 integrity checks** before and after every run so the agent cannot silently alter the data split, the labels, the row order, or the evaluator. A no‑LLM **smoke test** validates the interpreter, metric structure, primary computation and protected‑file hashes as a fast regression gate.
 
-**Instrumentation & transparency.** Every run records its hypothesis, code diff, resulting metrics and any error/recovery event into an auto‑generated **run log** (`reports/RUN_LOG.md`), and a live **Streamlit dashboard** visualizes the search tree, per‑stage stats and the best node. Reported resource usage — DeepSeek exploration campaign (Aug 28–30): **7.53M LLM tokens across ~1,876 calls, 6.4 h wall‑clock, 109 min GPU‑active**; OpenAI `gpt-4.1-mini` re‑runs (Aug 31): **7.45M tokens across 1,283 calls, 7.2 h wall‑clock, ~70 min GPU‑active**.
+**Instrumentation & transparency.** Every run records its hypothesis, code diff, resulting metrics and any error/recovery event into an auto‑generated **run log** (`reports/RUN_LOG.md`), and a live **Streamlit dashboard** visualizes the search tree, per‑stage stats and the best node. For the selected **2026-08-30 22:11** run, the recorded usage is **1,470,813 LLM tokens across 257 calls, 4,915.8 seconds (81.9 min) wall‑clock, and 1,017.7 seconds (17.0 min) GPU‑active**. The run executed 46 iterations, performed 4 seed evaluations, and reached 5,696 MiB peak GPU memory.
 
 ---
 
@@ -39,28 +39,24 @@ The problem statement (2.2) asks for an agent that can autonomously **reproduce 
 - **tmux** for durable, detachable long‑running agent sessions on the remote server.
 - **Streamlit dashboard** (`dashboard/app.py`) for live monitoring of the search tree, stage statistics and the current best node.
 - **Git** for version control, with a strict pre‑upload checklist that keeps API keys, `.env`, raw KuaiRand data, experiment directories, checkpoints and logs out of the repository.
-- **Model routing via environment variables** — the same code was driven by DeepSeek (Aug 28–30) and then OpenAI `gpt-4.1-mini` (Aug 31) with no Python/YAML edits, via the six `AI_SCIENTIST_*_MODEL` variables.
+- **Model routing via environment variables** — the selected 2026-08-30 22:11 run used role-specialized DeepSeek routing through the six `AI_SCIENTIST_*_MODEL` variables: `deepseek-v4-pro` for planning/code, `deepseek-v4-flash` for feedback/selection/summary, and `deepseek-v4-flash-vision-exp` for visual feedback, with no Python/YAML edits.
 - **`black`, `py_compile`, `pip check`** as lightweight code‑hygiene and dependency‑consistency gates.
 
 ---
 
 ## APIs
 
-We drove the agent with **two commercial LLM APIs** over the project, switching provider with **no code change** (all six agent roles are bound to `AI_SCIENTIST_*_MODEL` environment variables).
+The selected **2026-08-30 22:11** run used the **DeepSeek API** through its OpenAI-compatible endpoint and the `openai` Python client. Agent roles were split across three DeepSeek models using the six `AI_SCIENTIST_*_MODEL` environment variables, with no code change.
 
-**1. DeepSeek API — main exploration campaign (Aug 28–30).** Called through its OpenAI‑compatible endpoint (`https://api.deepseek.com`), with role‑specialized routing:
-
-| Model | Agent role | Tokens | Calls |
+| Model | Agent roles | Tokens | Calls |
 |---|---|---:|---:|
-| `deepseek-v4-pro` | plan + code generation | 3.73M | 406 |
-| `deepseek-v4-flash` | feedback + node selection + summary | 1.87M | 1,201 |
-| `deepseek-v4-flash-vision-exp` | plot / figure reading (visual feedback) | 1.92M | 269 |
+| `deepseek-v4-pro` | plan + code generation | 1,019,049 | 72 |
+| `deepseek-v4-flash` | feedback + node selection + summary | 252,736 | 161 |
+| `deepseek-v4-flash-vision-exp` | plot / figure reading | 199,028 | 24 |
 
-This campaign produced our overall validation‑best node (primary **0.6053**). DeepSeek thinking mode is kept disabled because the pipeline relies on **forced structured tool‑calling / function‑calling** to extract machine‑readable metrics (`AI_SCIENTIST_RESULT` records), which is incompatible with that forced tool selection.
+This end-to-end run lasted **4,915.8 seconds (81.9 min)**, used the GPU actively for **1,017.7 seconds (17.0 min)**, executed **46 iterations**, and performed **4 seed evaluations**. The final reported **Wide & Deep** winner was subsequently verified across 5 seeds and reached **GAUC 0.671028 / nDCG@5 0.537670 / primary 0.604349**, a **+0.002694 (+0.448%)** improvement over the reproduced 0.601655 FM validation baseline.
 
-**2. OpenAI API — provider swap (Aug 31).** We then re‑ran the full agent on **`gpt-4.1-mini` (`gpt-4.1-mini-2025-04-14`)** through the official OpenAI SDK, driving **all six roles** with the same code. Three end‑to‑end runs: **7.45M total tokens across 1,283 calls, 7.2 h wall‑clock, ~70 min GPU‑active**; best validation primary **≈0.6045** — on par with, but not exceeding, the DeepSeek run. This demonstrates the agent is provider‑agnostic and reproducible across two independent LLM backends.
-
-Additional provider routes inherited from upstream AI‑Scientist‑v2 (Anthropic / Bedrock / Vertex, Ollama) exist in the code but were **not** used in this project.
+Additional provider routes inherited from upstream AI‑Scientist‑v2 (OpenAI, Anthropic / Bedrock / Vertex, and Ollama) exist in the code but were **not used by this selected run**.
 
 *No credentials are stored in the repo; keys are loaded only into the shell/tmux session that launches the agent.*
 
@@ -75,7 +71,7 @@ Additional provider routes inherited from upstream AI‑Scientist‑v2 (Anthropi
 - `tiktoken` (token accounting / budget tracking), `backoff` (retry with exponential back‑off), `python-igraph` (search‑tree graph handling), `rich` + `tqdm` (console/log UX), `black` (auto‑formatting of generated code)
 
 **LLM client**
-- `openai` (1.75.0) — the single client used for both backends: against `https://api.deepseek.com` (DeepSeek) and against the official OpenAI endpoint (`gpt-4.1-mini`). (`anthropic`, `boto3` / `botocore` are present as inherited upstream dependencies but were not used in our runs.)
+- `openai` (1.75.0) — the OpenAI-compatible client used by the selected 2026-08-30 22:11 run against `https://api.deepseek.com` with `deepseek-v4-pro`, `deepseek-v4-flash`, and `deepseek-v4-flash-vision-exp`. (`anthropic`, `boto3` / `botocore`, and alternate provider routes are inherited upstream dependencies but were not used by this selected run.)
 
 **Visualization & reporting**
 - `matplotlib`, `seaborn` for plots; `streamlit`, `plotly`, `streamlit-autorefresh` for the live dashboard; `pypdf` / `pymupdf4llm` for document handling (inherited from upstream)
@@ -101,7 +97,7 @@ Dependencies are pinned in `requirements_kuairand.txt` (a trimmed, verified subs
   - `run_fm_experiment.py` + `fm_experiment_config.json` — the validation‑only controlled FM experiment interface exposed to the agent
   - `submit.py` — submission‑CSV generation and format validation (`row_id,user_id,video_id,score`)
   - `AGENT_FM_INTERFACE.md`, `kuairand_ranking.md` — the agent's interface contract and research‑task prompt
-- **Reference scores.** Development bar (validation, what the agent optimizes against): FM official **0.6016** (the real bar); item‑popularity 0.5807; random 0.4834 (sanity check only); oracle ceiling 0.8484 (theoretical max). Judging bar (hidden test, scored once by organizers): FM official **primary 0.5946** (GAUC 0.6610 / nDCG@5 0.5282, mean over 5 seeds, std 0.0008) — this is the number the final submission is ultimately ranked against.
+- **Reference scores.** Development bar (validation, what the agent optimizes against): the selected run reproduced FM at **GAUC 0.667366 / nDCG@5 0.535944 / primary 0.601655**; item‑popularity 0.5807; random 0.4834 (sanity check only); oracle ceiling 0.8484 (theoretical max). The final 5-seed-verified Wide & Deep winner reached **GAUC 0.671028 / nDCG@5 0.537670 / primary 0.604349**, improving by **+0.003662 / +0.001726 / +0.002694 (+0.448%)**, respectively. Judging bar (hidden test, scored once by organizers): FM official **primary 0.5946** (GAUC 0.6610 / nDCG@5 0.5282, mean over 5 seeds, std 0.0008), **0.007055** below the reproduced validation primary — this is the number the final submission is ultimately ranked against.
 - **No external training data or test‑trained pretrained weights** were used — training relies solely on the KuaiRand splits, per the challenge's one hard resource rule.
 
 ---
