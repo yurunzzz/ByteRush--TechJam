@@ -1,0 +1,43 @@
+{
+  "accounting_version": "1.0",
+  "run_started_at_utc": "2026-08-31T19:42:08.532703+00:00",
+  "run_finished_at_utc": "2026-08-31T20:02:22.075805+00:00",
+  "wall_clock_seconds": 1213.5431181751192,
+  "llm_prompt_tokens": 264706,
+  "llm_completion_tokens": 113674,
+  "llm_total_tokens": 378380,
+  "llm_calls": 72,
+  "llm_by_model": {
+    "gpt-5.6-terra": {
+      "prompt_tokens": 30498,
+      "completion_tokens": 35222,
+      "total_tokens": 65720,
+      "calls": 45
+    },
+    "gpt-5.6-sol": {
+      "prompt_tokens": 170526,
+      "completion_tokens": 75056,
+      "total_tokens": 245582,
+      "calls": 19
+    },
+    "gpt-5.6-luna": {
+      "prompt_tokens": 63682,
+      "completion_tokens": 3396,
+      "total_tokens": 67078,
+      "calls": 8
+    }
+  },
+  "executed_iterations": 6,
+  "seed_evaluations": 2,
+  "iteration_limit": 29,
+  "gpu_used": true,
+  "gpu_active_seconds": 143.5661407932639,
+  "gpu_models": [
+    "NVIDIA GeForce RTX 4080 SUPER"
+  ],
+  "gpu_peak_used_memory_mib": 774.0,
+  "gpu_sample_interval_seconds": 1.0,
+  "gpu_samples": 1143,
+  "gpu_active_samples": 135,
+  "resource_event_file": "resource_events.jsonl"
+}

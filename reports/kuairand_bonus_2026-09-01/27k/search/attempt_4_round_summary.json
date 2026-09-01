@@ -1,0 +1,509 @@
+{
+  "adaptive_stop_state": {
+    "forced_stop_reason": "",
+    "low_gain_rounds": 1,
+    "no_improvement_rounds": 1,
+    "no_valid_rounds": 0
+  },
+  "candidate_attempts": [
+    {
+      "assignment_id": "round1:autonomous:1",
+      "assignment_kind": "autonomous",
+      "category": "autonomous_research",
+      "donor_candidate_id": "",
+      "elapsed_seconds": null,
+      "failure_category": "leakage_error",
+      "node_id": "ebf22af4548c40ddb1c277cc02a3f949",
+      "parent_node_id": "d7e5277600e749e4a2d5b0d77cea656a",
+      "reason": "passed preflight, smoke test, execution, and contract",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "status": "accepted"
+    },
+    {
+      "assignment_id": "round1:autonomous:2",
+      "assignment_kind": "autonomous",
+      "category": "autonomous_research",
+      "donor_candidate_id": "",
+      "elapsed_seconds": null,
+      "failure_category": "model_implementation_error",
+      "node_id": "4ed97b2b6bc649e481cdde8a64adfbaf",
+      "parent_node_id": "d7e5277600e749e4a2d5b0d77cea656a",
+      "reason": "too similar to accepted slot round1:autonomous:1: semantic similarity 1.000 >= 0.800; shared declarations=model_family,research_family,loss_family. Choose a substantively different hypothesis; no replacement direction is prescribed",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "status": "near_duplicate"
+    },
+    {
+      "assignment_id": "round1:autonomous:3",
+      "assignment_kind": "autonomous",
+      "category": "autonomous_research",
+      "donor_candidate_id": "",
+      "elapsed_seconds": null,
+      "failure_category": "ranking_group_error",
+      "node_id": "6672ccf19bae49d1a53e1945406a8b57",
+      "parent_node_id": "d7e5277600e749e4a2d5b0d77cea656a",
+      "reason": "PREFLIGHT_REJECTED: ranking objective extracts users but does not construct same-user groups or equality masks",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "status": "preflight_rejected"
+    },
+    {
+      "assignment_id": "round1:autonomous:4",
+      "assignment_kind": "autonomous",
+      "category": "autonomous_research",
+      "donor_candidate_id": "",
+      "elapsed_seconds": null,
+      "failure_category": "ranking_group_error",
+      "node_id": "cb54f61b67df47bcb0ab6cc6c4f7c055",
+      "parent_node_id": "d7e5277600e749e4a2d5b0d77cea656a",
+      "reason": "PREFLIGHT_REJECTED: ranking objective extracts users but does not construct same-user groups or equality masks",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "status": "preflight_rejected"
+    },
+    {
+      "assignment_id": "round1:autonomous:5",
+      "assignment_kind": "autonomous",
+      "category": "autonomous_research",
+      "donor_candidate_id": "",
+      "elapsed_seconds": null,
+      "failure_category": "ranking_group_error",
+      "node_id": "b9d788ededb94128bdc76e744f2625b8",
+      "parent_node_id": "d7e5277600e749e4a2d5b0d77cea656a",
+      "reason": "PREFLIGHT_REJECTED: ranking objective extracts users but does not construct same-user groups or equality masks",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "status": "preflight_rejected"
+    },
+    {
+      "assignment_id": "round1:autonomous:2",
+      "assignment_kind": "autonomous",
+      "category": "autonomous_research",
+      "donor_candidate_id": "",
+      "elapsed_seconds": null,
+      "failure_category": "leakage_error",
+      "node_id": "cfb02ec556dc48c88694abd0520d9d0e",
+      "parent_node_id": "d7e5277600e749e4a2d5b0d77cea656a",
+      "reason": "passed preflight, smoke test, execution, and contract",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "status": "accepted"
+    },
+    {
+      "assignment_id": "round1:autonomous:3",
+      "assignment_kind": "autonomous",
+      "category": "autonomous_research",
+      "donor_candidate_id": "",
+      "elapsed_seconds": null,
+      "failure_category": "ranking_group_error",
+      "node_id": "859ffa68f08b4db493ede9dfa5150fa3",
+      "parent_node_id": "d7e5277600e749e4a2d5b0d77cea656a",
+      "reason": "PREFLIGHT_REJECTED: created_factor_cards must be a sequence; ranking objective extracts users but does not construct same-user groups or equality masks",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "status": "preflight_rejected"
+    }
+  ],
+  "candidates": [
+    {
+      "artifacts_valid": true,
+      "assignment_id": "round1:autonomous:1",
+      "assignment_kind": "autonomous",
+      "base_parent_id": "d7e5277600e749e4a2d5b0d77cea656a",
+      "category": "architecture",
+      "checkpoint_path": "/root/autodl-tmp/byterush-runs/27k/2026-09-01_03-42-08_kuairand_27k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_ebf22af4548c40ddb1c277cc02a3f949_proc_19229/candidate_checkpoint.npz",
+      "code_path": "/root/autodl-tmp/byterush-runs/27k/2026-09-01_03-42-08_kuairand_27k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_ebf22af4548c40ddb1c277cc02a3f949_proc_19229/experiment_code.py",
+      "components": [
+        "deep_interaction_tower"
+      ],
+      "considered_factor_ids": [
+        "causal_recent_history",
+        "static_video_metadata"
+      ],
+      "donor_candidate_id": "",
+      "eligible_for_promotion": false,
+      "factor_cards": [],
+      "factor_ids": [],
+      "factor_rejected_reasons": {
+        "causal_recent_history": "The current dense model input exposes only user and video IDs; no bounded history sequence is guaranteed by the encoded interface.",
+        "static_video_metadata": "Author, tag, duration, and other raw metadata are unavailable in the trusted cache protocol for this round."
+      },
+      "factor_selection_reason": "The candidate isolates an architecture hypothesis using the guaranteed two-field encoded contract and therefore requires no added factor.",
+      "fingerprint": "a20791ec8f9f7c78e48bd01099833ba400e9c897b8986dd5dcfdacbfc219fa3a",
+      "improvement": -0.0035801678895950317,
+      "loss_family": "pointwise_bce",
+      "metric_deltas": {
+        "GAUC": -0.002102583646774292,
+        "nDCG@5": -0.0050577521324157715,
+        "primary": -0.0035801678895950317
+      },
+      "metrics": {
+        "GAUC": 0.5192584991455078,
+        "nDCG@5": 0.4254167824983597,
+        "primary": 0.47233764082193375
+      },
+      "model_family": "deepfm",
+      "node_id": "ebf22af4548c40ddb1c277cc02a3f949",
+      "parent_model_family": "fm",
+      "parent_node_id": "d7e5277600e749e4a2d5b0d77cea656a",
+      "principal_change": "deep_interaction_tower: The hypothesis is that a shared-embedding DeepFM residual can capture nonlinear user\u2013video compatibility missed by the verified two-field FM while retaining its strong low-order interaction path. Trusted schema-v2 features are converted thr",
+      "promoted": false,
+      "provisional": false,
+      "random_seeds": [
+        0,
+        1
+      ],
+      "reason": "mean improvement -0.003580 is below 0.002000",
+      "research_family": "architecture",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "score": 0.47233764082193375,
+      "seed_mean": 0.47233764082193375,
+      "seed_metrics": [
+        {
+          "GAUC": 0.5192896723747253,
+          "nDCG@5": 0.4252878725528717,
+          "primary": 0.4722887724637985
+        },
+        {
+          "GAUC": 0.5192273259162903,
+          "nDCG@5": 0.42554569244384766,
+          "primary": 0.47238650918006897
+        }
+      ],
+      "seed_scores": [
+        0.4722887724637985,
+        0.47238650918006897
+      ],
+      "seed_std": 4.886835813522339e-05,
+      "seed_wins": 0,
+      "source_phase": "stage3",
+      "source_stage": "3_candidate_tuning_3_top1_round_one_branch_one",
+      "stage4_confirmed": null,
+      "status": "valid_not_promoted",
+      "training_epochs": 12,
+      "transfer_status": "not_applicable",
+      "transferred_mechanism_ids": [],
+      "validation_split": "fixed_train_validation"
+    },
+    {
+      "artifacts_valid": true,
+      "assignment_id": "round1:autonomous:2",
+      "assignment_kind": "autonomous",
+      "base_parent_id": "d7e5277600e749e4a2d5b0d77cea656a",
+      "category": "context_interaction",
+      "checkpoint_path": "/root/autodl-tmp/byterush-runs/27k/2026-09-01_03-42-08_kuairand_27k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_cfb02ec556dc48c88694abd0520d9d0e_proc_19229/candidate_checkpoint.npz",
+      "code_path": "/root/autodl-tmp/byterush-runs/27k/2026-09-01_03-42-08_kuairand_27k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_cfb02ec556dc48c88694abd0520d9d0e_proc_19229/experiment_code.py",
+      "components": [
+        "magnitude_hadamard_interaction"
+      ],
+      "considered_factor_ids": [
+        "causal_recent_history",
+        "temporal_recency_context",
+        "user_item_context_cross"
+      ],
+      "donor_candidate_id": "",
+      "eligible_for_promotion": false,
+      "factor_cards": [],
+      "factor_ids": [],
+      "factor_rejected_reasons": {
+        "causal_recent_history": "The current dense legacy view exposes only the current encoded user and video fields; adding history would confound the isolated interaction hypothesis.",
+        "temporal_recency_context": "No prediction-time timestamp field is present in the encoded two-column model input.",
+        "user_item_context_cross": "No additional context fields are available beyond user and video IDs, and the proposed model directly changes their interaction."
+      },
+      "factor_selection_reason": "The hypothesis isolates a model-level user-video interaction change using the trusted two-field encoded input, so no additional factor is required.",
+      "fingerprint": "5eb2b77c604075f02900f8032f9c0898c549aca474f862a33ae50b4253408c0b",
+      "improvement": 0.0,
+      "loss_family": "pointwise_bce",
+      "metric_deltas": {
+        "GAUC": -0.0055123865604400635,
+        "nDCG@5": -0.007818296551704407,
+        "primary": -0.006665341556072235
+      },
+      "metrics": {
+        "GAUC": 0.515848696231842,
+        "nDCG@5": 0.42265623807907104,
+        "primary": 0.46925246715545654
+      },
+      "model_family": "ncf",
+      "node_id": "cfb02ec556dc48c88694abd0520d9d0e",
+      "parent_model_family": "fm",
+      "parent_node_id": "d7e5277600e749e4a2d5b0d77cea656a",
+      "principal_change": "magnitude_hadamard_interaction: The hypothesis is that the strong FM should be preserved while adding a compact NCF-style magnitude interaction that captures user\u2013video embedding co-activation ignored by the signed FM dot product. Trusted schema-v2 data flows unchanged th",
+      "promoted": false,
+      "provisional": false,
+      "random_seeds": [],
+      "reason": "only 0 valid seeds; 2 required",
+      "research_family": "context_interaction",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "score": 0.46925246715545654,
+      "seed_mean": null,
+      "seed_metrics": [],
+      "seed_scores": [],
+      "seed_std": null,
+      "seed_wins": 0,
+      "source_phase": "stage3",
+      "source_stage": "3_candidate_tuning_2_targeted_round_one_branch_two",
+      "stage4_confirmed": null,
+      "status": "valid_not_promoted",
+      "training_epochs": 12,
+      "transfer_status": "not_applicable",
+      "transferred_mechanism_ids": [],
+      "validation_split": "fixed_train_validation"
+    }
+  ],
+  "diverse_frontier": [
+    {
+      "fingerprint": "e9b2b57984de14bf496ad0cc732291bf54fee0fc69a0f9450ea68e3cdfde0031",
+      "loss_family": "pointwise_bce",
+      "metrics": {
+        "GAUC": null,
+        "nDCG@5": null,
+        "primary": 0.4759178087115288
+      },
+      "model_family": "fm",
+      "node_id": "d7e5277600e749e4a2d5b0d77cea656a",
+      "parent_model_family": "",
+      "parent_node_id": "",
+      "principal_change": "unregistered component: Continue from the verified Stage 2 incumbent without rerunning Stage 1/2.",
+      "research_family": "baseline",
+      "role": "",
+      "round_number": 0,
+      "score": 0.4759178087115288,
+      "semantic_signature": "{\"factor_ids\": [], \"loss_family\": null, \"mechanism_ids\": [], \"model_family\": null, \"research_family\": null}",
+      "source_stage": "2_multi_root_tuning_1_fm"
+    },
+    {
+      "fingerprint": "a20791ec8f9f7c78e48bd01099833ba400e9c897b8986dd5dcfdacbfc219fa3a",
+      "loss_family": "pointwise_bce",
+      "metrics": {
+        "GAUC": 0.5192896723747253,
+        "nDCG@5": 0.4252878725528717,
+        "primary": 0.4722887724637985
+      },
+      "model_family": "deepfm",
+      "node_id": "ebf22af4548c40ddb1c277cc02a3f949",
+      "parent_model_family": "fm",
+      "parent_node_id": "d7e5277600e749e4a2d5b0d77cea656a",
+      "principal_change": "deep_interaction_tower: The hypothesis is that a shared-embedding DeepFM residual can capture nonlinear user\u2013video compatibility missed by the verified two-field FM while retaining its strong low-order interaction path. Trusted schema-v2 features are converted thr",
+      "research_family": "architecture",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "score": 0.4722887724637985,
+      "semantic_signature": "{\"factor_ids\": [], \"loss_family\": \"pointwise_bce\", \"mechanism_ids\": [\"nonlinear_user_video_residual\", \"shared_embedding_deepfm\"], \"model_family\": \"deepfm\", \"research_family\": \"architecture\"}",
+      "source_stage": "3_candidate_tuning_3_top1_round_one_branch_one"
+    },
+    {
+      "fingerprint": "5eb2b77c604075f02900f8032f9c0898c549aca474f862a33ae50b4253408c0b",
+      "loss_family": "pointwise_bce",
+      "metrics": {
+        "GAUC": 0.515848696231842,
+        "nDCG@5": 0.42265623807907104,
+        "primary": 0.46925246715545654
+      },
+      "model_family": "ncf",
+      "node_id": "cfb02ec556dc48c88694abd0520d9d0e",
+      "parent_model_family": "fm",
+      "parent_node_id": "d7e5277600e749e4a2d5b0d77cea656a",
+      "principal_change": "magnitude_hadamard_interaction: The hypothesis is that the strong FM should be preserved while adding a compact NCF-style magnitude interaction that captures user\u2013video embedding co-activation ignored by the signed FM dot product. Trusted schema-v2 data flows unchanged th",
+      "research_family": "context_interaction",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "score": 0.46925246715545654,
+      "semantic_signature": "{\"factor_ids\": [], \"loss_family\": \"pointwise_bce\", \"mechanism_ids\": [\"fm_backbone\", \"magnitude_hadamard_interaction\", \"zero_initialized_residual_gate\"], \"model_family\": \"ncf\", \"research_family\": \"context_interaction\"}",
+      "source_stage": "3_candidate_tuning_2_targeted_round_one_branch_two"
+    }
+  ],
+  "feedback_scope": "validation_only",
+  "fingerprint_count": 2,
+  "incumbent": {
+    "metrics": {
+      "GAUC": 0.5213610827922821,
+      "nDCG@5": 0.43047453463077545,
+      "primary": 0.4759178087115288
+    },
+    "node_id": "d7e5277600e749e4a2d5b0d77cea656a",
+    "score": 0.4759178087115288,
+    "seed_scores": [
+      0.47588689625263214,
+      0.4759487211704254
+    ],
+    "source_stage": "2_multi_root_tuning_1_fm",
+    "verified": true
+  },
+  "near_winners": [
+    {
+      "artifacts_valid": true,
+      "assignment_id": "round1:autonomous:1",
+      "assignment_kind": "autonomous",
+      "base_parent_id": "d7e5277600e749e4a2d5b0d77cea656a",
+      "category": "architecture",
+      "checkpoint_path": "/root/autodl-tmp/byterush-runs/27k/2026-09-01_03-42-08_kuairand_27k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_ebf22af4548c40ddb1c277cc02a3f949_proc_19229/candidate_checkpoint.npz",
+      "code_path": "/root/autodl-tmp/byterush-runs/27k/2026-09-01_03-42-08_kuairand_27k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_ebf22af4548c40ddb1c277cc02a3f949_proc_19229/experiment_code.py",
+      "components": [
+        "deep_interaction_tower"
+      ],
+      "considered_factor_ids": [
+        "causal_recent_history",
+        "static_video_metadata"
+      ],
+      "donor_candidate_id": "",
+      "eligible_for_promotion": false,
+      "factor_cards": [],
+      "factor_ids": [],
+      "factor_rejected_reasons": {
+        "causal_recent_history": "The current dense model input exposes only user and video IDs; no bounded history sequence is guaranteed by the encoded interface.",
+        "static_video_metadata": "Author, tag, duration, and other raw metadata are unavailable in the trusted cache protocol for this round."
+      },
+      "factor_selection_reason": "The candidate isolates an architecture hypothesis using the guaranteed two-field encoded contract and therefore requires no added factor.",
+      "fingerprint": "a20791ec8f9f7c78e48bd01099833ba400e9c897b8986dd5dcfdacbfc219fa3a",
+      "improvement": -0.0035801678895950317,
+      "loss_family": "pointwise_bce",
+      "metric_deltas": {
+        "GAUC": -0.002102583646774292,
+        "nDCG@5": -0.0050577521324157715,
+        "primary": -0.0035801678895950317
+      },
+      "metrics": {
+        "GAUC": 0.5192584991455078,
+        "nDCG@5": 0.4254167824983597,
+        "primary": 0.47233764082193375
+      },
+      "model_family": "deepfm",
+      "node_id": "ebf22af4548c40ddb1c277cc02a3f949",
+      "parent_model_family": "fm",
+      "parent_node_id": "d7e5277600e749e4a2d5b0d77cea656a",
+      "principal_change": "deep_interaction_tower: The hypothesis is that a shared-embedding DeepFM residual can capture nonlinear user\u2013video compatibility missed by the verified two-field FM while retaining its strong low-order interaction path. Trusted schema-v2 features are converted thr",
+      "promoted": false,
+      "provisional": false,
+      "random_seeds": [
+        0,
+        1
+      ],
+      "reason": "mean improvement -0.003580 is below 0.002000",
+      "research_family": "architecture",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "score": 0.47233764082193375,
+      "seed_mean": 0.47233764082193375,
+      "seed_metrics": [
+        {
+          "GAUC": 0.5192896723747253,
+          "nDCG@5": 0.4252878725528717,
+          "primary": 0.4722887724637985
+        },
+        {
+          "GAUC": 0.5192273259162903,
+          "nDCG@5": 0.42554569244384766,
+          "primary": 0.47238650918006897
+        }
+      ],
+      "seed_scores": [
+        0.4722887724637985,
+        0.47238650918006897
+      ],
+      "seed_std": 4.886835813522339e-05,
+      "seed_wins": 0,
+      "source_phase": "stage3",
+      "source_stage": "3_candidate_tuning_3_top1_round_one_branch_one",
+      "stage4_confirmed": null,
+      "status": "valid_not_promoted",
+      "training_epochs": 12,
+      "transfer_status": "not_applicable",
+      "transferred_mechanism_ids": [],
+      "validation_split": "fixed_train_validation"
+    },
+    {
+      "artifacts_valid": true,
+      "assignment_id": "round1:autonomous:2",
+      "assignment_kind": "autonomous",
+      "base_parent_id": "d7e5277600e749e4a2d5b0d77cea656a",
+      "category": "context_interaction",
+      "checkpoint_path": "/root/autodl-tmp/byterush-runs/27k/2026-09-01_03-42-08_kuairand_27k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_cfb02ec556dc48c88694abd0520d9d0e_proc_19229/candidate_checkpoint.npz",
+      "code_path": "/root/autodl-tmp/byterush-runs/27k/2026-09-01_03-42-08_kuairand_27k_validation_research_attempt_4_stage3_resume/logs/0-kuairand_stage4/experiment_results/experiment_cfb02ec556dc48c88694abd0520d9d0e_proc_19229/experiment_code.py",
+      "components": [
+        "magnitude_hadamard_interaction"
+      ],
+      "considered_factor_ids": [
+        "causal_recent_history",
+        "temporal_recency_context",
+        "user_item_context_cross"
+      ],
+      "donor_candidate_id": "",
+      "eligible_for_promotion": false,
+      "factor_cards": [],
+      "factor_ids": [],
+      "factor_rejected_reasons": {
+        "causal_recent_history": "The current dense legacy view exposes only the current encoded user and video fields; adding history would confound the isolated interaction hypothesis.",
+        "temporal_recency_context": "No prediction-time timestamp field is present in the encoded two-column model input.",
+        "user_item_context_cross": "No additional context fields are available beyond user and video IDs, and the proposed model directly changes their interaction."
+      },
+      "factor_selection_reason": "The hypothesis isolates a model-level user-video interaction change using the trusted two-field encoded input, so no additional factor is required.",
+      "fingerprint": "5eb2b77c604075f02900f8032f9c0898c549aca474f862a33ae50b4253408c0b",
+      "improvement": 0.0,
+      "loss_family": "pointwise_bce",
+      "metric_deltas": {
+        "GAUC": -0.0055123865604400635,
+        "nDCG@5": -0.007818296551704407,
+        "primary": -0.006665341556072235
+      },
+      "metrics": {
+        "GAUC": 0.515848696231842,
+        "nDCG@5": 0.42265623807907104,
+        "primary": 0.46925246715545654
+      },
+      "model_family": "ncf",
+      "node_id": "cfb02ec556dc48c88694abd0520d9d0e",
+      "parent_model_family": "fm",
+      "parent_node_id": "d7e5277600e749e4a2d5b0d77cea656a",
+      "principal_change": "magnitude_hadamard_interaction: The hypothesis is that the strong FM should be preserved while adding a compact NCF-style magnitude interaction that captures user\u2013video embedding co-activation ignored by the signed FM dot product. Trusted schema-v2 data flows unchanged th",
+      "promoted": false,
+      "provisional": false,
+      "random_seeds": [],
+      "reason": "only 0 valid seeds; 2 required",
+      "research_family": "context_interaction",
+      "role": "autonomous_stage3",
+      "round_number": 1,
+      "score": 0.46925246715545654,
+      "seed_mean": null,
+      "seed_metrics": [],
+      "seed_scores": [],
+      "seed_std": null,
+      "seed_wins": 0,
+      "source_phase": "stage3",
+      "source_stage": "3_candidate_tuning_2_targeted_round_one_branch_two",
+      "stage4_confirmed": null,
+      "status": "valid_not_promoted",
+      "training_epochs": 12,
+      "transfer_status": "not_applicable",
+      "transferred_mechanism_ids": [],
+      "validation_split": "fixed_train_validation"
+    }
+  ],
+  "provisional_candidate": {
+    "node_id": null,
+    "score": null
+  },
+  "recent_failed_hypotheses": [
+    "round1:autonomous:2: too similar to accepted slot round1:autonomous:1: semantic similarity 1.000 >= 0.800; shared declarations=model_family,research_family,loss_family. Choose a substantively different hypothesis; no replacement direction is prescribed",
+    "mean improvement -0.003580 is below 0.002000",
+    "only 0 valid seeds; 2 required"
+  ],
+  "round_health": {
+    "attempts": 7,
+    "best_primary_gain": 0.0,
+    "evaluated_candidates": 2,
+    "failure_categories": {
+      "model_implementation_error": 1,
+      "ranking_group_error": 4
+    },
+    "successful_transfers": 0,
+    "transfer_attempts": 0,
+    "valid_candidates": 2
+  },
+  "round_number": 1,
+  "schema_version": 2,
+  "test_metrics_used": false
+}

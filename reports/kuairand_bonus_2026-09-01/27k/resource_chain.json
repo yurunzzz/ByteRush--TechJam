@@ -1,0 +1,15 @@
+{
+  "dataset": "KuaiRand-27K",
+  "accounting_scope": "attempt_2_through_stage2_snapshot_plus_complete_attempt_4_resume",
+  "prompt_tokens": 519867,
+  "completion_tokens": 230264,
+  "total_tokens": 750131,
+  "wall_clock_seconds": 2707.848598175119,
+  "counted_iterations": 15,
+  "iteration_limit": 50,
+  "seed_evaluations": 6,
+  "gpu_model": "NVIDIA GeForce RTX 4080 SUPER",
+  "gpu_count": 1,
+  "gpu_hours": 0.7521801661597553,
+  "attempt_4_sampled_gpu_active_hours": 0.03987948355368442
+}

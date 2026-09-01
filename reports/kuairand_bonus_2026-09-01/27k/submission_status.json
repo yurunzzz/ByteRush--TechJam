@@ -1,0 +1,10 @@
+{
+  "dataset": "KuaiRand-27K",
+  "official_submission_generated": false,
+  "reason": "The bonus dataset profile sets submission_export=false and reserves test data from the agent.",
+  "test_rows_in_cache": 114832239,
+  "selected_validation_GAUC": 0.5213610827922821,
+  "selected_validation_nDCG@5": 0.43047453463077545,
+  "selected_validation_primary": 0.4759178087115288,
+  "test_metrics_computed": false
+}
