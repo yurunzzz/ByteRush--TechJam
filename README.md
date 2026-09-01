@@ -59,14 +59,15 @@ ByteRush also completed validation-only bonus experiments on KuaiRand-1K and Kua
 | KuaiRand-1K | MLP | **0.517148** | **0.490642** | **0.503895** |
 | KuaiRand-27K | FM | **0.521361** | **0.430475** | **0.475918** |
 
-The resource accounting below combines Attempt 2 from launch through creation of the verified Stage 2 snapshot with the complete Attempt 4 Stage 3 resume. Seed reruns are reported separately and are not counted toward the competition iteration limit.
+The resource accounting below reports the selected Pure run `2026-08-31_18-02-46_kuairand_fm_validation_baseline_attempt_0` and the two bonus experiment chains in the same format. The Pure row covers that complete run. Each bonus row combines Attempt 2 from launch through creation of the verified Stage 2 snapshot with the complete Attempt 4 Stage 3 resume. Seed reruns are reported separately and are not counted toward the competition iteration limit.
 
-| Bonus dataset | LLM tokens (input + output) | Agent wall time | Counted iterations | Seed evaluations | GPU | GPU-hours |
+| Dataset | LLM tokens (input + output) | Agent wall time | Counted iterations | Seed evaluations | GPU | GPU-hours |
 |---|---:|---:|---:|---:|---|---:|
+| KuaiRand-Pure | 1,310,162 (1,019,270 + 290,892) | 5,318.963 s (1h 28m 38.963s) | 25 / 50 | 17 | NVIDIA GeForce RTX 3080 Ti | 1.477490 |
 | KuaiRand-1K | 1,073,794 (771,431 + 302,363) | 3,797.886 s (63m 17.886s) | 21 / 50 | 10 | NVIDIA RTX A4000 | 1.054969 |
 | KuaiRand-27K | 750,131 (519,867 + 230,264) | 2,707.849 s (45m 07.849s) | 15 / 50 | 6 | NVIDIA GeForce RTX 4080 SUPER | 0.752180 |
 
-GPU-hours use the conservative convention `allocated GPU count × agent wall-clock hours`. Both bonus runs satisfy the limits of fewer than six hours and at most 50 counted iterations. These are validation metrics: neither bonus profile exported a test submission or computed a test metric because its checked-in `dataset_profile.json` sets `submission_export: false`.
+GPU-hours use the conservative convention `allocated GPU count × agent wall-clock hours`. The Pure resource sampler additionally observed 545.609 seconds (0.151558 GPU-hours) of active GPU use, with 1,686 MiB peak allocated memory. All three reported runs satisfy the limits of fewer than six hours and at most 50 counted iterations. These are validation metrics: neither bonus profile exported a test submission or computed a test metric because its checked-in `dataset_profile.json` sets `submission_export: false`.
 
 The reproducible bonus bundles contain the selected model code, frozen checkpoint, training history, validation manifest, resource accounting, and Stage 3 search records:
 
