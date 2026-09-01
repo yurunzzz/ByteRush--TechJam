@@ -50,6 +50,29 @@ The final model was selected exclusively from validation results. Relative to th
 
 These values are validation metrics; the hidden test set was not used for model selection or metric feedback.
 
+### KuaiRand-1K and KuaiRand-27K bonus results
+
+ByteRush also completed validation-only bonus experiments on KuaiRand-1K and KuaiRand-27K. Each selected result is the mean of two successful seeds. The Stage 3 search did not produce a candidate that satisfied the configured promotion rule, so the verified Stage 2 incumbent remains the final selected model for each dataset.
+
+| Bonus dataset | Selected model | GAUC | nDCG@5 | Primary |
+|---|---|---:|---:|---:|
+| KuaiRand-1K | MLP | **0.517148** | **0.490642** | **0.503895** |
+| KuaiRand-27K | FM | **0.521361** | **0.430475** | **0.475918** |
+
+The resource accounting below combines Attempt 2 from launch through creation of the verified Stage 2 snapshot with the complete Attempt 4 Stage 3 resume. Seed reruns are reported separately and are not counted toward the competition iteration limit.
+
+| Bonus dataset | LLM tokens (input + output) | Agent wall time | Counted iterations | Seed evaluations | GPU | GPU-hours |
+|---|---:|---:|---:|---:|---|---:|
+| KuaiRand-1K | 1,073,794 (771,431 + 302,363) | 3,797.886 s (63m 17.886s) | 21 / 50 | 10 | NVIDIA RTX A4000 | 1.054969 |
+| KuaiRand-27K | 750,131 (519,867 + 230,264) | 2,707.849 s (45m 07.849s) | 15 / 50 | 6 | NVIDIA GeForce RTX 4080 SUPER | 0.752180 |
+
+GPU-hours use the conservative convention `allocated GPU count × agent wall-clock hours`. Both bonus runs satisfy the limits of fewer than six hours and at most 50 counted iterations. These are validation metrics: neither bonus profile exported a test submission or computed a test metric because its checked-in `dataset_profile.json` sets `submission_export: false`.
+
+The reproducible bonus bundles contain the selected model code, frozen checkpoint, training history, validation manifest, resource accounting, and Stage 3 search records:
+
+- [KuaiRand-1K experiment bundle](https://github.com/yurunzzz/ByteRush--TechJam/tree/experiment/kuairand-1k/reports/kuairand_bonus_2026-09-01)
+- [KuaiRand-27K experiment bundle](https://github.com/yurunzzz/ByteRush--TechJam/tree/experiment/kuairand-27k/reports/kuairand_bonus_2026-09-01)
+
 The repository includes the compact evidence for the completed Stage 1–4 run `2026-08-31_18-02-46_kuairand_fm_validation_baseline_attempt_0` under `results/runs/`. Interrupted runs, failed candidate workspaces, caches, and redundant checkpoints are excluded. The submission-ready Wide & Deep package is stored in `results/final_model/`; it was reconstructed from the preserved successful Stage 4 source, best-seed checkpoint, and five-seed validation records after the shared working artifact directory was reused by later experiments.
 
 The project uses only the official KuaiRand-Pure data for training and validation. The test split is used only to produce predictions from the final frozen model. Test labels and test metrics are never exposed to the research agent.
